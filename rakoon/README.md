@@ -1,0 +1,4 @@
+- Transaction fuzzer
+- EL clients
+- Goal is to find crashes in mempool impls
+- Maybe extend to other RPC methods

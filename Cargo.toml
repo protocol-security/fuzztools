@@ -1,0 +1,43 @@
+[workspace.package]
+version = "0.1.0"
+authors = ["nethoxa"]
+edition = "2021"
+rust-version = "1.90"
+
+[workspace]
+resolver = "3"
+members = [
+    "rakoon", 
+    "nethel", 
+    "raidan", 
+    "nereus", 
+    "fuzztools"
+]
+
+[workspace.dependencies]
+rand = { version = "0.9.0" }
+alloy = { version = "1.0.38", features = ["provider-ipc", "provider-ws", "arbitrary"] }
+clap = { version = "4.5.48", features = ["derive"] }
+paste = { version = "1.0" }
+alloy-rlp = "0.3.12"
+hex = "0.4.3"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync", "macros"] }
+rayon = "1.11.0"
+secp256k1 = { version = "0.31.1", features = ["std", "hashes", "recovery"] }
+thiserror = "2.0.17"
+futures = "0.3.31"
+anyhow = "1.0.100"
+
+fuzztools = { path = "fuzztools" }
+
+[profile.release]
+codegen-units = 1
+debug = false
+lto = "fat"
+opt-level = 3
+panic = "abort"
+
+[profile.release.package."*"]
+codegen-units = 1
+debug = false
+opt-level = 3

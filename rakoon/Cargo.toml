@@ -1,0 +1,16 @@
+[package]
+name = "rakoon"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alloy.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+fuzztools.workspace = true
+rand.workspace = true
+rayon.workspace = true
+tokio.workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "fuzztools"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+alloy.workspace = true
+alloy-rlp.workspace = true
+rand.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+secp256k1.workspace = true
+anyhow.workspace = true
+
+[lib]
+path = "crates/lib.rs"
