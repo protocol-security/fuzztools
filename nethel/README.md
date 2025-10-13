@@ -1,0 +1,3 @@
+- Diff fuzzer for state transition
+- Both EL and CL clients
+- Uses dff framework from Justin
