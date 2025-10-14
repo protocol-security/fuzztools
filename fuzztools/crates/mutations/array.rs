@@ -26,24 +26,25 @@ macro_rules! impl_mutate {
         impl Mutable for $type {
             #[inline(always)]
             fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                match random.random_range(0..=16) {
+                match random.random_range(0..=17) {
                     0 => self.byte_clone(random),
-                    1 => self.byte_swap(random),
-                    2 => self.byte_mutate(random),
-                    3 => self.set_all_zero(),
-                    4 => self.set_all_one(),
-                    5 => self.set_all_max(),
-                    6 => self.set_all_pattern(),
-                    7 => self.set_all_random(random),
-                    8 => self.shuffle_array(random),
-                    9 => self.rotate_left_by_n(random),
-                    10 => self.rotate_right_by_n(random),
-                    11 => self.reverse_array(),
-                    12 => self.slice_clone(random),
-                    13 => self.slice_swap(random),
-                    14 => self.slice_swap_with_invalid_utf8(random),
-                    15 => self.slice_mutate(random),
-                    16 => return true,
+                    1 => self.byte_remove(random),
+                    2 => self.byte_swap(random),
+                    3 => self.byte_mutate(random),
+                    4 => self.set_all_zero(),
+                    5 => self.set_all_one(),
+                    6 => self.set_all_max(),
+                    7 => self.set_all_pattern(),
+                    8 => self.set_all_random(random),
+                    9 => self.shuffle_array(random),
+                    10 => self.rotate_left_by_n(random),
+                    11 => self.rotate_right_by_n(random),
+                    12 => self.reverse_array(),
+                    13 => self.slice_clone(random),
+                    14 => self.slice_swap(random),
+                    15 => self.slice_swap_with_invalid_utf8(random),
+                    16 => self.slice_mutate(random),
+                    17 => return true,
                     _ => unreachable!(),
                 }
 

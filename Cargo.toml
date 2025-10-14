@@ -8,9 +8,6 @@ rust-version = "1.90"
 resolver = "3"
 members = [
     "rakoon", 
-    "nethel", 
-    "raidan", 
-    "nereus", 
     "fuzztools"
 ]
 

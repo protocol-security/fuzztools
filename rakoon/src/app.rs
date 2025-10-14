@@ -4,13 +4,12 @@ use fuzztools::builders::AccessListTarget;
 use anyhow::Result;
 use rand::Rng;
 use tokio::sync::Semaphore;
-use crate::constants::{TransactionType, GREEN, RESET, RED, YELLOW, AUTH_PRIVATE_KEY};
+use crate::constants::{TransactionType, GREEN, RESET, RED, AUTH_PRIVATE_KEY};
 use alloy::{
-    eips::eip7702::SignedAuthorization, hex, primitives::Address, providers::{IpcConnect, Provider, ProviderBuilder, WsConnect}, rpc::types::Header, signers::{local::PrivateKeySigner, SignerSync}
+    eips::eip7702::SignedAuthorization, hex, providers::{IpcConnect, Provider, ProviderBuilder, WsConnect}, rpc::types::Header, signers::{local::PrivateKeySigner, SignerSync}
 };
 use fuzztools::mutations::Mutable;
 use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
-use rand::rngs::SmallRng;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 pub struct App {
@@ -59,7 +58,6 @@ impl App {
     pub async fn new(
         tx_type: TransactionType,
         key: String,
-        seed: u64,
         ipc: Option<String>,
         ws: Option<String>,
         fuzzing: bool,

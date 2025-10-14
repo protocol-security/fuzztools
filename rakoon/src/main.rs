@@ -69,7 +69,6 @@ async fn main() -> Result<()> {
     let mut app = App::new(
         cli.tx_type,
         cli.key,
-        cli.seed,
         cli.ipc,
         cli.ws,
         cli.fuzzing,
