@@ -1,5 +1,5 @@
-use crate::builders::{Node, RpcError};
-use alloy::providers::Provider;
+use crate::builders::RpcError;
+use alloy::providers::{Provider, RootProvider};
 
 #[derive(Clone, Copy)]
 /// Stores `gas_price` and `max_priority_fee` of the current block.
@@ -13,7 +13,7 @@ pub struct RpcCache {
 
 impl RpcCache {
     /// Fetches `gas_price` and `max_priority_fee` from the `node`
-    pub async fn fetch(node: &Node) -> Result<Self, RpcError> {
+    pub async fn fetch(node: &RootProvider) -> Result<Self, RpcError> {
         let (gas_price, max_priority_fee) =
             tokio::try_join!(node.get_gas_price(), node.get_max_priority_fee_per_gas())?;
 

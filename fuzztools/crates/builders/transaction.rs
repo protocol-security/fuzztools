@@ -1,9 +1,9 @@
-use super::{Node, RpcCache, DEFAULT_GAS_LIMIT, DEFAULT_INPUT_SIZE};
+use super::{RpcCache, DEFAULT_GAS_LIMIT, DEFAULT_INPUT_SIZE};
 use crate::{mutations::STORAGE_KEYS, transactions::Transaction};
 use alloy::{
     hex::FromHex,
     primitives::{Address, Bytes, FixedBytes, U256},
-    providers::Provider,
+    providers::{Provider, RootProvider},
     rpc::types::{AccessList, AccessListItem, Authorization},
 };
 use anyhow::Result;
@@ -12,7 +12,7 @@ use rand::Rng;
 /// Handles the logic of creating **VALID** transactions per mempool rules
 pub struct TransactionBuilder {
     chain_id: u64,
-    contract_address: Option<Address>,
+    contract_address: Address,
     signer_nonce: u64,
     auth_nonce: u64,
     cache: RpcCache,
@@ -20,7 +20,7 @@ pub struct TransactionBuilder {
 
 impl TransactionBuilder {
     #[inline]
-    pub async fn new(contract_address: Option<Address>, node: &Node) -> Result<Self> {
+    pub async fn new(contract_address: Address, node: &RootProvider) -> Result<Self> {
         let cache = RpcCache::fetch(node).await?;
         let chain_id = node.get_chain_id().await?;
         Ok(Self { chain_id, contract_address, signer_nonce: 0, auth_nonce: 0, cache })
@@ -28,7 +28,7 @@ impl TransactionBuilder {
 
     /// Refreshes the cache by fetching it from the given node
     #[inline]
-    pub async fn refresh_cache(&mut self, node: &Node) -> Result<()> {
+    pub async fn refresh_cache(&mut self, node: &RootProvider) -> Result<()> {
         self.cache = RpcCache::fetch(node).await?;
         Ok(())
     }
@@ -60,18 +60,12 @@ impl TransactionBuilder {
     /// populates its storage with interesting stuff, and its fallback reads
     /// from input 32-bytes chunks and SLOADs them
     fn generate_access_list_and_input(&self, random: &mut impl Rng) -> (AccessList, Bytes) {
-        // If no contract address is provided, we don't add any access list nor input
-        // and let the fuzzing engine create it randomly
-        if self.contract_address.is_none() {
-            return (AccessList(vec![]), Bytes::from(vec![]));
-        }
-
         // As the randomness of valid txs come from `to`, to speed things up
         // we just add a single entry
         let idx = random.random_range(0..STORAGE_KEYS.len());
         let key = FixedBytes::from_hex(STORAGE_KEYS[idx]).unwrap();
         let item =
-            AccessListItem { address: self.contract_address.unwrap(), storage_keys: vec![key] };
+            AccessListItem { address: self.contract_address, storage_keys: vec![key] };
 
         (AccessList(vec![item]), Bytes::from(key))
     }

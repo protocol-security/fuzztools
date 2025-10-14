@@ -31,15 +31,6 @@ struct Cli {
 
     #[arg(long, help = "If false, it spams VALID transactions")]
     fuzzing: bool,
-
-    #[arg(long, help = "Number of transactions to send per core", default_value = "100")]
-    tx_per_core: u64,
-
-    #[arg(long, help = "Deploy AccessListTarget if true", default_value = "false")]
-    deploy_test_contract: bool,
-
-    #[arg(long, help = "Number of concurrent requests", default_value = "100")]
-    n: usize,
 }
 
 #[tokio::main]
@@ -53,18 +44,13 @@ async fn main() -> Result<()> {
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Seed:                   \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Type:                   \
          {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Tx per core:            \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Deploy target:          \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Concurrent requests:    {RED}{}{RESET}\n\n",
+         {RED}{}{RESET}\n\n",
         cli.ipc.as_deref().unwrap_or("None"),
         cli.ws.as_deref().unwrap_or("None"),
         cli.key,
         cli.seed,
         cli.tx_type,
         cli.fuzzing,
-        cli.tx_per_core,
-        cli.deploy_test_contract,
-        cli.n
     );
 
     // Create the application
@@ -74,9 +60,6 @@ async fn main() -> Result<()> {
         cli.ipc,
         cli.ws,
         cli.fuzzing,
-        cli.tx_per_core,
-        cli.deploy_test_contract,
-        cli.n,
         prelude,
     )
     .await?;

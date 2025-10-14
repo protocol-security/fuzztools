@@ -9,7 +9,7 @@ impl Mutable for Address {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         let mut bytes = self.0.to_vec();
         let should_set_to_none = bytes.mutate(random);
-        bytes.truncate(20);
+        bytes.resize(20, 0);
         *self = Address::from_slice(&bytes);
         should_set_to_none
     }
@@ -28,7 +28,7 @@ impl Mutable for FixedBytes<32> {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         let mut bytes = self.to_vec();
         let should_set_to_none = bytes.mutate(random);
-        bytes.truncate(32);
+        bytes.resize(32, 0);
         *self = FixedBytes::from_slice(&bytes);
         should_set_to_none
     }
@@ -38,7 +38,7 @@ impl Mutable for U256 {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         let mut bytes = self.to_be_bytes_vec();
         let should_set_to_none = bytes.mutate(random);
-        bytes.truncate(32);
+        bytes.resize(32, 0);
         *self = U256::from_be_slice(&bytes);
         should_set_to_none
     }

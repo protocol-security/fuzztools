@@ -1,15 +1,15 @@
-use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, GREEN, RED, RESET};
+use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, DEFAULT_SEMAPHORE_PERMITS, DEFAULT_TXS_PER_CORE, GREEN, RED, RESET};
 use alloy::{
     eips::eip7702::SignedAuthorization,
     hex,
-    providers::{IpcConnect, Provider, ProviderBuilder, WsConnect},
+    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider, WsConnect},
     rpc::types::Header,
     signers::{local::PrivateKeySigner, SignerSync},
 };
 use anyhow::Result;
 use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
 use fuzztools::{
-    builders::{AccessListTarget, Node, TransactionBuilder},
+    builders::{AccessListTarget, TransactionBuilder},
     mutations::Mutable,
     transactions::{SignedTransaction, Transaction},
     utils::FastPrivateKeySigner,
@@ -29,7 +29,7 @@ pub struct App {
     prelude: String,
 
     /// Nodes
-    nodes: Vec<Node>,
+    nodes: Vec<RootProvider>,
 
     /// Transaction type
     tx_type: TransactionType,
@@ -73,23 +73,40 @@ impl App {
         ipc: Option<String>,
         ws: Option<String>,
         fuzzing: bool,
-        tx_per_core: u64,
-        deploy_test_contract: bool,
-        n: usize,
         prelude: String,
     ) -> Result<Self> {
-        // First, create our signer and Bob signer
+        // First, create our signer, auth signer and contract deployer
         let key_bytes = hex::decode(key)?;
-        let deployer = PrivateKeySigner::from_slice(&key_bytes)?;
+        let tmp_signer = PrivateKeySigner::from_slice(&key_bytes)?;
+        let deployer = if let Some(ipc) = ipc.clone() {
+            let conn = IpcConnect::new(ipc.clone());
+            ProviderBuilder::new()
+                .wallet(tmp_signer.clone())
+                .connect_ipc(conn).await?
+        } else if let Some(ws) = ws.clone() {
+            let conn = WsConnect::new(ws.clone());
+            ProviderBuilder::new()
+                .wallet(tmp_signer.clone())
+                .connect_ws(conn).await?
+        } else {
+            return Err(anyhow::anyhow!("Invalid URL"));
+        };
+
+        // Then, deploy the access list target if enabled
+        let address = AccessListTarget::deploy(&deployer).await?;
+
+        // Then, create our signer and auth signer
+        let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
+        let auth_signer = FastPrivateKeySigner::new(&auth_key_bytes)?;
+        let signer = FastPrivateKeySigner::new(&key_bytes)?;
 
         // Then, connect to the node via IPC (or WS if IPC is not available)
         let num_cores = std::thread::available_parallelism().unwrap().get();
-        let nodes: Vec<Node> = if let Some(ipc) = ipc.clone() {
+        let nodes: Vec<RootProvider> = if let Some(ipc) = ipc.clone() {
             let futures = (0..num_cores).map(|_| {
                 let conn = IpcConnect::new(ipc.clone());
                 ProviderBuilder::new()
                     .disable_recommended_fillers()
-                    .wallet(deployer.clone())
                     .connect_ipc(conn)
             });
             join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
@@ -98,7 +115,6 @@ impl App {
                 let conn = WsConnect::new(ws.clone());
                 ProviderBuilder::new()
                     .disable_recommended_fillers()
-                    .wallet(deployer.clone())
                     .connect_ws(conn)
             });
             join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
@@ -106,33 +122,23 @@ impl App {
             return Err(anyhow::anyhow!("Invalid URL"));
         };
 
-        // Then, deploy the access list target if enabled
-        let address = if deploy_test_contract {
-            let contract = AccessListTarget::deploy(&nodes[0]).await?;
-            Some(*contract.address())
-        } else {
-            None
-        };
-
         // Create `Builder` and `FastPrivateSigner`s
-        let builder = TransactionBuilder::new(address, &nodes[0]).await?;
-        let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
-        let auth_signer = FastPrivateKeySigner::new(&auth_key_bytes)?;
-        let signer = FastPrivateKeySigner::new(&key_bytes)?;
+        let builder = TransactionBuilder::new(*address.address(), &nodes[0]).await?;
 
         // Subscribe to block header stream
         let sub = nodes[0].subscribe_blocks().await?;
         let stream = Box::pin(sub.into_stream());
 
         // Set up the semaphore
-        let semaphore = Arc::new(Semaphore::new(n));
+        let semaphore = Arc::new(Semaphore::new(DEFAULT_SEMAPHORE_PERMITS));
+        let batch_size = num_cores as u64 * DEFAULT_TXS_PER_CORE;
 
         Ok(Self {
             prelude,
             nodes,
             tx_type,
             fuzzing,
-            batch_size: tx_per_core * num_cores as u64,
+            batch_size,
             builder,
             signer,
             auth_signer,
@@ -150,19 +156,17 @@ impl App {
     }
 
     pub async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
-        let mut node_idx = 0;
-        let mut max_wait_time = Duration::from_secs(0);
-        let mut num_permits_added = 0;
-
+        let mut idx = 0;
         loop {
             tokio::select! {
                 // If there is a new block, refresh cache
                 Some(_) = self.stream.next() => {
-                    self.builder.refresh_cache(&self.nodes[node_idx]).await?;
+                    self.builder.refresh_cache(&self.nodes[idx]).await?;
+                    idx = (idx + 1) % self.nodes.len();
                 }
 
                 _ = tokio::task::yield_now() => {
-                    if self.nodes[node_idx].get_chain_id().await.is_err() {
+                    if self.nodes[idx].get_chain_id().await.is_err() {
                         eprintln!("\n\n\x1b[1;31m[!] Crash detected, shutting down...\x1b[0m");
                         return Ok(());
                     }
@@ -215,39 +219,29 @@ impl App {
                     self.signing_time = signing_start.elapsed();
 
                     // Send the RPC requests through fire-and-forget tasks
+                    let wait_start = Instant::now();
                     let futures = FuturesUnordered::new();
                     for tx in &signed_txs {
                         let mut encoded = String::new();
                         encoded.push_str("0x");
                         encoded.push_str(&hex::encode(tx.encode()));
 
-                        futures.push(self.nodes[node_idx].client().request::<_, ()>("eth_sendRawTransaction", (encoded,)));
+                        futures.push(self.nodes[idx].client().request::<_, ()>("eth_sendRawTransaction", (encoded,)));
                     }
-                    let wait_start = Instant::now();
                     let permit = self.semaphore.clone().acquire_owned().await.unwrap();
-                    tokio::spawn(async move {
-                        join_all(futures).await;
-                        drop(permit);
-                    });
+                    tokio::spawn(async move { join_all(futures).await; drop(permit); });
                     self.wait_time = wait_start.elapsed();
-
-                    max_wait_time = max_wait_time.max(self.wait_time);
 
                     self.total_txs_sent += self.batch_size as u64;
                     self.txs_since_last_update += self.batch_size as u64;
 
                     // Update terminal logging
-                    if self.last_update.elapsed().as_millis() > 1000 {
+                    if self.last_update.elapsed().as_secs_f64() >= 1.0 {
                         self.screen()?;
-                        if max_wait_time > Duration::from_millis(50) && num_permits_added < 1000 {
-                            self.semaphore.add_permits(10);
-                            num_permits_added += 10;
-                            max_wait_time = Duration::from_secs(0);
-                        }
                         self.txs_since_last_update = 0;
                         self.last_update = Instant::now();
                     }
-                    node_idx = (node_idx + 1) % self.nodes.len();
+                    idx = (idx + 1) % self.nodes.len();
                 }
             }
         }
@@ -274,7 +268,7 @@ impl App {
             self.build_time.as_secs_f64() * 1000.0,
             self.mutate_time.as_secs_f64() * 1000.0,
             self.signing_time.as_secs_f64() * 1000.0,
-            self.wait_time.as_secs_f64() * 1000.0,
+            self.wait_time.as_secs_f64() * 1000.0,  
             self.semaphore.available_permits(),
         );
 

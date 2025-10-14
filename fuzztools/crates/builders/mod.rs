@@ -31,12 +31,3 @@ pub enum RpcError {
     /// RPC request failed, possibly due to a network issue
     TransportError(#[from] TransportError),
 }
-
-/// Alias for an `alloy` provider without fillers
-pub type Node = alloy::providers::fillers::FillProvider<
-    alloy::providers::fillers::JoinFill<
-        alloy::providers::Identity,
-        alloy::providers::fillers::WalletFiller<alloy::network::EthereumWallet>,
-    >,
-    alloy::providers::RootProvider,
->;
