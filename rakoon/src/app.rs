@@ -1,16 +1,28 @@
-use std::{io::{self, Write}, pin::Pin, sync::Arc, time::{Duration, Instant}};
-use fuzztools::{builders::{Node, TransactionBuilder}, transactions::{SignedTransaction, Transaction}, utils::FastPrivateKeySigner};
-use fuzztools::builders::AccessListTarget;
-use anyhow::Result;
-use rand::Rng;
-use tokio::sync::Semaphore;
-use crate::constants::{TransactionType, GREEN, RESET, RED, AUTH_PRIVATE_KEY};
+use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, GREEN, RED, RESET};
 use alloy::{
-    eips::eip7702::SignedAuthorization, hex, providers::{IpcConnect, Provider, ProviderBuilder, WsConnect}, rpc::types::Header, signers::{local::PrivateKeySigner, SignerSync}
+    eips::eip7702::SignedAuthorization,
+    hex,
+    providers::{IpcConnect, Provider, ProviderBuilder, WsConnect},
+    rpc::types::Header,
+    signers::{local::PrivateKeySigner, SignerSync},
 };
-use fuzztools::mutations::Mutable;
+use anyhow::Result;
 use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
+use fuzztools::{
+    builders::{AccessListTarget, Node, TransactionBuilder},
+    mutations::Mutable,
+    transactions::{SignedTransaction, Transaction},
+    utils::FastPrivateKeySigner,
+};
+use rand::Rng;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::{
+    io::{self, Write},
+    pin::Pin,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::sync::Semaphore;
 
 pub struct App {
     /// Rakoon prelude to display
@@ -69,19 +81,25 @@ impl App {
         // First, create our signer and Bob signer
         let key_bytes = hex::decode(key)?;
         let deployer = PrivateKeySigner::from_slice(&key_bytes)?;
-        
+
         // Then, connect to the node via IPC (or WS if IPC is not available)
         let num_cores = std::thread::available_parallelism().unwrap().get();
         let nodes: Vec<Node> = if let Some(ipc) = ipc.clone() {
             let futures = (0..num_cores).map(|_| {
                 let conn = IpcConnect::new(ipc.clone());
-                ProviderBuilder::new().wallet(deployer.clone()).connect_ipc(conn)
+                ProviderBuilder::new()
+                    .disable_recommended_fillers()
+                    .wallet(deployer.clone())
+                    .connect_ipc(conn)
             });
             join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
         } else if let Some(ws) = ws.clone() {
             let futures = (0..num_cores).map(|_| {
                 let conn = WsConnect::new(ws.clone());
-                ProviderBuilder::new().wallet(deployer.clone()).connect_ws(conn)
+                ProviderBuilder::new()
+                    .disable_recommended_fillers()
+                    .wallet(deployer.clone())
+                    .connect_ws(conn)
             });
             join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
         } else {
@@ -140,7 +158,7 @@ impl App {
             tokio::select! {
                 // If there is a new block, refresh cache
                 Some(_) = self.stream.next() => {
-                    self.builder.refresh_cache(&self.nodes[0]).await?;
+                    self.builder.refresh_cache(&self.nodes[node_idx]).await?;
                 }
 
                 _ = tokio::task::yield_now() => {
@@ -178,9 +196,9 @@ impl App {
                                     SignedAuthorization::new_unchecked(auth.clone(), signature.v() as u8, signature.r(), signature.s())
                                 })
                                 .collect::<Vec<_>>();
-                            
+
                             tx.signed_authorization_list = Some(signed_authorizations);
-                            
+
                             let signature = self.signer.sign_hash_sync(&tx.signing_hash()).unwrap();
                             SignedTransaction {
                                 transaction: tx,
@@ -202,7 +220,7 @@ impl App {
                         let mut encoded = String::new();
                         encoded.push_str("0x");
                         encoded.push_str(&hex::encode(tx.encode()));
-                        
+
                         futures.push(self.nodes[node_idx].client().request::<_, ()>("eth_sendRawTransaction", (encoded,)));
                     }
                     let wait_start = Instant::now();
@@ -243,7 +261,11 @@ impl App {
         print!("{}", self.prelude);
 
         // Print stats
-        print!("[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Build: {RED}{:>6.2}ms{RESET} | Mutate: {RED}{:>6.2}ms{RESET} | Sign: {RED}{:>6.2}ms{RESET} | Network wait time: {RED}{:>6.2}ms{RESET} | Free permits: {RED}{}{RESET}",
+        print!(
+            "[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: \
+             {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Build: \
+             {RED}{:>6.2}ms{RESET} | Mutate: {RED}{:>6.2}ms{RESET} | Sign: {RED}{:>6.2}ms{RESET} \
+             | Network wait time: {RED}{:>6.2}ms{RESET} | Free permits: {RED}{}{RESET}",
             self.total_txs_sent,
             self.txs_since_last_update,
             self.elapsed_time.as_secs() / 3600,

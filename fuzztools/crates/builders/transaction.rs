@@ -1,7 +1,10 @@
 use super::{Node, RpcCache, DEFAULT_GAS_LIMIT, DEFAULT_INPUT_SIZE};
 use crate::{mutations::STORAGE_KEYS, transactions::Transaction};
 use alloy::{
-    hex::FromHex, primitives::{Address, Bytes, FixedBytes, U256}, providers::Provider, rpc::types::{AccessList, AccessListItem, Authorization}
+    hex::FromHex,
+    primitives::{Address, Bytes, FixedBytes, U256},
+    providers::Provider,
+    rpc::types::{AccessList, AccessListItem, Authorization},
 };
 use anyhow::Result;
 use rand::Rng;
@@ -91,10 +94,7 @@ impl TransactionBuilder {
     /// Generate an `Eip2930` transaction. The randomness comes from
     /// the `to`, as well as from `input` and `access_list` fields iff
     /// `self.contract_address` is provided, otherwise the only random field is `to`
-    pub fn build_access_list_tx(
-        &mut self,
-        random: &mut impl Rng,
-    ) -> Transaction {
+    pub fn build_access_list_tx(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_request(random);
         let (access_list, input) = self.generate_access_list_and_input(random);
 
@@ -113,7 +113,8 @@ impl TransactionBuilder {
     /// `self.contract_address` is provided, otherwise the only random field is `to`
     pub fn build_eip1559_tx(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_request(random);
-        let max_fee_per_gas = self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
+        let max_fee_per_gas =
+            self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
         let (access_list, input) = self.generate_access_list_and_input(random);
 
         tx.tx_type = 2;
@@ -133,7 +134,8 @@ impl TransactionBuilder {
     /// `authorization_list`
     pub fn build_eip7702_tx(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_request(random);
-        let max_fee_per_gas = self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
+        let max_fee_per_gas =
+            self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
         let (access_list, input) = self.generate_access_list_and_input(random);
 
         let delegatee = Address::from(random.random::<[u8; 20]>());

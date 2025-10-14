@@ -1,3 +1,19 @@
+//! # Mutations
+//!
+//! This module contains the `Mutable` trait and its implementations for common Rust types. The only
+//! thing you need to do is import the `Mutable` trait and you're ready to go by calling the
+//! `mutate` method on the next types:
+//!
+//! - `alloy::primitives::Address`
+//! - `alloy::primitives::Bytes`
+//! - `alloy::primitives::FixedBytes<32>`
+//! - `alloy::primitives::U256`
+//! - `alloy::rpc::types::Authorization`
+//! - `fuzztools::transactions::Transaction`
+//! - `Vec<u8>`
+//!
+//! I will be adding more types as I need them, so stay tuned.
+
 mod alloy;
 mod array;
 mod traits;
@@ -40,7 +56,7 @@ pub(crate) const INTERESTING_U8: [u8; 29] = [
 ];
 
 /// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub const INTERESTING_U16: [u16; 44] = [
+pub(crate) const INTERESTING_U16: [u16; 44] = [
     // INTERESTING_U8
     0,   // 0000000000000000
     1,   // 0000000000000001
@@ -90,7 +106,7 @@ pub const INTERESTING_U16: [u16; 44] = [
 ];
 
 /// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub const INTERESTING_U32: [u32; 86] = [
+pub(crate) const INTERESTING_U32: [u32; 86] = [
     // INTERESTING_U8
     0,   // 00000000000000000000000000000000
     1,   // 00000000000000000000000000000001
@@ -186,7 +202,7 @@ pub const INTERESTING_U32: [u32; 86] = [
     0x80808080, // 10000000100000001000000010000000
 ];
 
-pub const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
+pub(crate) const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
     // Lone continuation bytes
     &[0x80], // 10000000
     &[0xBF], // 10111111
@@ -231,7 +247,7 @@ pub const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
     &[0xE0, 0x9F, 0xBF], // 3-byte overlong for U+07FF (should be 2-byte)
 ];
 
-pub const INTERESTING_ADDRESSES: [&str; 17] = [
+pub(crate) const INTERESTING_ADDRESSES: [&str; 17] = [
     // System address
     "0xfffffffffffffffffffffffffffffffffffffffe",
     // Beacon block root address
@@ -269,7 +285,7 @@ pub const INTERESTING_ADDRESSES: [&str; 17] = [
 ];
 
 /// Storage keys for access list testing. Taken from interesting values
-pub static STORAGE_KEYS: [&str; 244] = [
+pub(crate) static STORAGE_KEYS: [&str; 244] = [
     // Interesting 8-bit values (padded to 32 bytes)
     "0x0000000000000000000000000000000000000000000000000000000000000000",
     "0x0000000000000000000000000000000000000000000000000000000000000001",
@@ -527,7 +543,7 @@ pub static STORAGE_KEYS: [&str; 244] = [
 ];
 
 /// Interesting chain IDs for EIP-7702 authorization testing
-pub const INTERESTING_CHAIN_IDS: [u64; 10] = [
+pub(crate) const INTERESTING_CHAIN_IDS: [u64; 10] = [
     0,        // Invalid chain ID
     1,        // Ethereum Mainnet
     11155111, // Sepolia testnet

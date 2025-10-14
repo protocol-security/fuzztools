@@ -138,8 +138,8 @@ impl TransactionMutations for Transaction {
                     self.blob_versioned_hashes = None;
                 },
                 1 => hashes.clear(), // Reset the blob versioned hashes
-                2 => hashes.push(FixedBytes::from(random.random::<[u8; 32]>())), /* Add a random
-                                                                                   * hash */
+                2 => hashes.push(FixedBytes::from(random.random::<[u8; 32]>())), // Add a random
+                // hash
                 3 => {
                     // Remove a random hash
                     if !hashes.is_empty() {

@@ -1,6 +1,8 @@
 use rand::Rng;
 
+/// This traits implements the `mutate` method for a given type
 pub trait Mutable {
+    /// Applies a random mutation to the type, ensuring it will always output a different value
     fn mutate(&mut self, random: &mut impl Rng) -> bool;
 }
 

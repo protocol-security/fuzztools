@@ -3,7 +3,7 @@ use alloy::signers::Signature;
 use alloy_rlp::{BufMut, Encodable, Header};
 
 #[derive(Clone)]
-/// A wrapper around a `Transaction` with its associated `Signature`
+/// A `Transaction` with a `Signature` attached.
 pub struct SignedTransaction {
     pub transaction: Transaction,
     pub signature: Signature,

@@ -26,7 +26,7 @@ macro_rules! impl_mutate {
         impl Mutable for $type {
             #[inline(always)]
             fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                match random.random_range(0..=17) {
+                match random.random_range(0..=24) {
                     0 => self.byte_clone(random),
                     1 => self.byte_remove(random),
                     2 => self.byte_swap(random),
@@ -44,7 +44,14 @@ macro_rules! impl_mutate {
                     14 => self.slice_swap(random),
                     15 => self.slice_swap_with_invalid_utf8(random),
                     16 => self.slice_mutate(random),
-                    17 => return true,
+                    17 => self.set_interesting_u8(random),
+                    18 => self.set_interesting_u8_be(random),
+                    19 => self.set_interesting_u16_le(random),
+                    20 => self.set_interesting_u16_be(random),
+                    21 => self.set_interesting_u32_le(random),
+                    22 => self.set_interesting_u32_be(random),
+                    23 => self.set_slice_with_invalid_utf8(random),
+                    24 => return true,
                     _ => unreachable!(),
                 }
 

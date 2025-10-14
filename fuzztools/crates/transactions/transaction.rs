@@ -8,7 +8,6 @@ use alloy_rlp::{BufMut, Encodable, Header};
 
 #[derive(Clone, Default)]
 /// A wrapper around all possible fields an Ethereum transaction can have
-/// without the safety checks done in `alloy`
 pub struct Transaction {
     // Transaction type
     pub tx_type: u8,
@@ -74,7 +73,7 @@ impl Transaction {
         out
     }
 
-    pub(crate) fn encode_fields(&self, out: &mut dyn BufMut) {
+    pub fn encode_fields(&self, out: &mut dyn BufMut) {
         // For legacy transactions (type 0), chain_id is NOT encoded in regular fields
         // It's encoded in the EIP-155 signing fields
         if self.tx_type != 0 {
@@ -101,7 +100,7 @@ impl Transaction {
         encode_field!(self.signed_authorization_list, out);
     }
 
-    pub(crate) fn fields_length(&self) -> usize {
+    pub fn fields_length(&self) -> usize {
         // For legacy transactions (type 0), chain_id is NOT included in the regular fields
         // It's included in the EIP-155 signing fields
         let chain_id_len = if self.tx_type == 0 { 0 } else { field_len!(self.chain_id) };
