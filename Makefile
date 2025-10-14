@@ -1,8 +1,3 @@
-all: 
-	git add --all 
-	git commit -m "update"
-	git push
-
 rm-kurtosis:
 	kurtosis enclave rm testnet --force
 
