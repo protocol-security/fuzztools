@@ -45,4 +45,8 @@ fn main() {
 }
 ``` 
 
-You only need to implement the % where you call mutate on each and either check the needed condition or send a payload. For example, check the implementation of [rakoon](./rakoon/), where it makes use of it extensively.
+You only need to implement the % where you call mutate on each and either check the needed condition or send a payload. For example, check the implementation of [rakoon](./rakoon/), where it makes use of it extensively. If you wanna load the Cargo documentation, run
+
+```sh
+cargo doc --no-deps --workspace --open 
+```
