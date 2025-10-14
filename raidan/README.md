@@ -1,3 +1,0 @@
-- Malicious client
-- Both EL and CL clients
-- Targets networking and P2P, including peerdas
