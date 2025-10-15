@@ -1,3 +1,10 @@
+git:
+	git add --all
+	git commit -m "$(MSG)"
+	git push
+
+.PHONY: git
+
 rm-kurtosis:
 	kurtosis enclave rm testnet --force
 
