@@ -1,15 +1,15 @@
-git:
-	git add --all
-	git commit -m "$(MSG)"
-	git push
+init:
+	git submodule update --init --recursive
 
-.PHONY: git
-
-rm-kurtosis:
-	kurtosis enclave rm testnet --force
-
-run-kurtosis:
+# These are commands for rakoon, used for testing/running
+run-testnet:
 	kurtosis run --enclave testnet github.com/ethpandaops/ethereum-package --args-file ./network_params.yaml
 
-geth-dev:
-	geth --dev --dev.period 12 --ipcpath /tmp/geth.ipc --datadir ./geth-db
+stop-testnet:
+	kurtosis enclave stop testnet
+
+rm-testnet:
+	kurtosis enclave rm testnet --force
+
+geth-testnet:
+	geth --dev --dev.period 12 --ipcpath /tmp/geth.ipc --datadir ./tmp/geth-db
