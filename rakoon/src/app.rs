@@ -1,4 +1,7 @@
-use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, DEFAULT_SEMAPHORE_PERMITS, DEFAULT_TXS_PER_CORE, GREEN, RED, RESET};
+use crate::constants::{
+    TransactionType, AUTH_PRIVATE_KEY, DEFAULT_SEMAPHORE_PERMITS, DEFAULT_TXS_PER_CORE, GREEN, RED,
+    RESET,
+};
 use alloy::{
     eips::eip7702::SignedAuthorization,
     hex,
@@ -80,14 +83,10 @@ impl App {
         let tmp_signer = PrivateKeySigner::from_slice(&key_bytes)?;
         let deployer = if let Some(ipc) = ipc.clone() {
             let conn = IpcConnect::new(ipc.clone());
-            ProviderBuilder::new()
-                .wallet(tmp_signer.clone())
-                .connect_ipc(conn).await?
+            ProviderBuilder::new().wallet(tmp_signer.clone()).connect_ipc(conn).await?
         } else if let Some(ws) = ws.clone() {
             let conn = WsConnect::new(ws.clone());
-            ProviderBuilder::new()
-                .wallet(tmp_signer.clone())
-                .connect_ws(conn).await?
+            ProviderBuilder::new().wallet(tmp_signer.clone()).connect_ws(conn).await?
         } else {
             return Err(anyhow::anyhow!("Invalid URL"));
         };
@@ -105,17 +104,13 @@ impl App {
         let nodes: Vec<RootProvider> = if let Some(ipc) = ipc.clone() {
             let futures = (0..num_cores).map(|_| {
                 let conn = IpcConnect::new(ipc.clone());
-                ProviderBuilder::new()
-                    .disable_recommended_fillers()
-                    .connect_ipc(conn)
+                ProviderBuilder::new().disable_recommended_fillers().connect_ipc(conn)
             });
             join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
         } else if let Some(ws) = ws.clone() {
             let futures = (0..num_cores).map(|_| {
                 let conn = WsConnect::new(ws.clone());
-                ProviderBuilder::new()
-                    .disable_recommended_fillers()
-                    .connect_ws(conn)
+                ProviderBuilder::new().disable_recommended_fillers().connect_ws(conn)
             });
             join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
         } else {
@@ -268,7 +263,7 @@ impl App {
             self.build_time.as_secs_f64() * 1000.0,
             self.mutate_time.as_secs_f64() * 1000.0,
             self.signing_time.as_secs_f64() * 1000.0,
-            self.wait_time.as_secs_f64() * 1000.0,  
+            self.wait_time.as_secs_f64() * 1000.0,
             self.semaphore.available_permits(),
         );
 

@@ -3,11 +3,11 @@ use clap::ValueEnum;
 /// The header displayed when running the tool
 pub(crate) const HEADER: &str = "
 ╭─────────────────────────────────────────────────────────────────╮
-│                            RAKOON                               │
-│          Transaction Fuzzer for the Ethereum Protocol           │
+│                            RAIDAN                               │
+│         State Transition Fuzzer for the eth2 Protocol           │
 │                                                                 │
-│                        Author: nethoxa                          │
-│                       Twitter: @nethoxa                         │
+│                Authors: nethoxa and 0xMushow                    │
+│               Twitter: @nethoxa and @0xMushow                   │
 │                                                                 │
 ╰─────────────────────────────────────────────────────────────────╯
 ";
@@ -16,18 +16,8 @@ pub(crate) const RED: &str = "\x1b[31m";
 pub(crate) const GREEN: &str = "\x1b[32m";
 pub(crate) const RESET: &str = "\x1b[0m";
 
-/// Bob's private key constant, used for signing auths in EIP-7702 transactions
-pub(crate) const AUTH_PRIVATE_KEY: &str =
-    "0x8c04e41e317a7cf0cf4c2f7431d0a890a950f352df41ff6d053698df61a73bba";
-
 #[derive(Clone, ValueEnum, Debug, Copy, PartialEq, Eq)]
-/// Used as a CLI flag to select the transaction type to fuzz
-pub(crate) enum TransactionType {
-    Legacy,
-    Al,
-    Eip1559,
-    Eip7702,
+pub(crate) enum Method {
+    ProcessSlot,
+    ProcessEpoch,
 }
-
-pub(crate) const DEFAULT_TXS_PER_CORE: u64 = 50;
-pub(crate) const DEFAULT_SEMAPHORE_PERMITS: usize = 500;

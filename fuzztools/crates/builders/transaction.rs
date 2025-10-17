@@ -64,8 +64,7 @@ impl TransactionBuilder {
         // we just add a single entry
         let idx = random.random_range(0..STORAGE_KEYS.len());
         let key = FixedBytes::from_hex(STORAGE_KEYS[idx]).unwrap();
-        let item =
-            AccessListItem { address: self.contract_address, storage_keys: vec![key] };
+        let item = AccessListItem { address: self.contract_address, storage_keys: vec![key] };
 
         (AccessList(vec![item]), Bytes::from(key))
     }

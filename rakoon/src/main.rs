@@ -43,8 +43,7 @@ async fn main() -> Result<()> {
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Key:                    \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Seed:                   \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Type:                   \
-         {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        \
-         {RED}{}{RESET}\n\n",
+         {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        {RED}{}{RESET}\n\n",
         cli.ipc.as_deref().unwrap_or("None"),
         cli.ws.as_deref().unwrap_or("None"),
         cli.key,
@@ -54,15 +53,7 @@ async fn main() -> Result<()> {
     );
 
     // Create the application
-    let mut app = App::new(
-        cli.tx_type,
-        cli.key,
-        cli.ipc,
-        cli.ws,
-        cli.fuzzing,
-        prelude,
-    )
-    .await?;
+    let mut app = App::new(cli.tx_type, cli.key, cli.ipc, cli.ws, cli.fuzzing, prelude).await?;
 
     // Run the application
     let mut random = SmallRng::seed_from_u64(cli.seed);
