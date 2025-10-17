@@ -1,9 +1,8 @@
 [package]
-name = "nethel"
+name = "raidan"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fuzztools.workspace = true
