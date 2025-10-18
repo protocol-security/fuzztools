@@ -7,7 +7,7 @@ pub(crate) const HEADER: &str = "
 │         State Transition Fuzzer for the eth2 Protocol           │
 │                                                                 │
 │                Authors: nethoxa and 0xMushow                    │
-│               Twitter: @nethoxa and @0xMushow                   │
+│               Twitter: @nethoxa and @MushowUK                   │
 │                                                                 │
 ╰─────────────────────────────────────────────────────────────────╯
 ";
