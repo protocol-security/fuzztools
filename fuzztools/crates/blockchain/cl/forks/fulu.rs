@@ -5,7 +5,7 @@ use super::phase0::*;
 use super::altair::*;
 use super::electra::*;
 
-pub struct BeaconState {
+pub(crate) struct BeaconState {
     genesis_time: u64,
     genesis_validators_root: Root,
     slot: Slot,

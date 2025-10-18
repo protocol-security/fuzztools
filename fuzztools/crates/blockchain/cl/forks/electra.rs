@@ -5,42 +5,42 @@ use super::bellatrix::ExecutionAddress;
 use super::capella::*;
 use super::deneb::{ExecutionPayload, ExecutionPayloadHeader, KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK};
 
-pub const UNSET_DEPOSIT_REQUESTS_START_INDEX: u64 = u64::MAX;
-pub const FULL_EXIT_REQUEST_AMOUNT: u64 = 0;
+pub(crate) const UNSET_DEPOSIT_REQUESTS_START_INDEX: u64 = u64::MAX;
+pub(crate) const FULL_EXIT_REQUEST_AMOUNT: u64 = 0;
 
-pub const COMPOUNDING_WITHDRAWAL_PREFIX: FixedBytes<1> = FixedBytes([0x02]);
+pub(crate) const COMPOUNDING_WITHDRAWAL_PREFIX: FixedBytes<1> = FixedBytes([0x02]);
 
-pub const DEPOSIT_REQUEST_TYPE: FixedBytes<1> = FixedBytes([0x00]);
-pub const WITHDRAWAL_REQUEST_TYPE: FixedBytes<1> = FixedBytes([0x01]);
-pub const CONSOLIDATION_REQUEST_TYPE: FixedBytes<1> = FixedBytes([0x02]);
+pub(crate) const DEPOSIT_REQUEST_TYPE: FixedBytes<1> = FixedBytes([0x00]);
+pub(crate) const WITHDRAWAL_REQUEST_TYPE: FixedBytes<1> = FixedBytes([0x01]);
+pub(crate) const CONSOLIDATION_REQUEST_TYPE: FixedBytes<1> = FixedBytes([0x02]);
 
-pub const MIN_ACTIVATION_BALANCE: Gwei = 32_000_000_000;
-pub const MAX_EFFECTIVE_BALANCE_ELECTRA: Gwei = 2_048_000_000_000;
+pub(crate) const MIN_ACTIVATION_BALANCE: Gwei = 32_000_000_000;
+pub(crate) const MAX_EFFECTIVE_BALANCE_ELECTRA: Gwei = 2_048_000_000_000;
 
-pub const MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA: u64 = 4_096;
-pub const WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA: u64 = 4_096;
+pub(crate) const MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA: u64 = 4_096;
+pub(crate) const WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA: u64 = 4_096;
 
-pub const PENDING_DEPOSITS_LIMIT: u64 = 134_217_728;
-pub const PENDING_PARTIAL_WITHDRAWALS_LIMIT: u64 = 134_217_728;
-pub const PENDING_CONSOLIDATIONS_LIMIT: u64 = 262_144;
+pub(crate) const PENDING_DEPOSITS_LIMIT: u64 = 134_217_728;
+pub(crate) const PENDING_PARTIAL_WITHDRAWALS_LIMIT: u64 = 134_217_728;
+pub(crate) const PENDING_CONSOLIDATIONS_LIMIT: u64 = 262_144;
 
-pub const MAX_ATTESTER_SLASHINGS_ELECTRA: u64 = 1;
-pub const MAX_ATTESTATIONS_ELECTRA: u64 = 8;
+pub(crate) const MAX_ATTESTER_SLASHINGS_ELECTRA: u64 = 1;
+pub(crate) const MAX_ATTESTATIONS_ELECTRA: u64 = 8;
 
-pub const MAX_DEPOSIT_REQUESTS_PER_PAYLOAD: u64 = 8_192;
-pub const MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD: u64 = 16;
-pub const MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD: u64 = 2;
+pub(crate) const MAX_DEPOSIT_REQUESTS_PER_PAYLOAD: u64 = 8_192;
+pub(crate) const MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD: u64 = 16;
+pub(crate) const MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD: u64 = 2;
 
-pub const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 8;
+pub(crate) const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 8;
 
-pub const MAX_PENDING_DEPOSITS_PER_EPOCH: u64 = 16;
+pub(crate) const MAX_PENDING_DEPOSITS_PER_EPOCH: u64 = 16;
 
-pub const MAX_BLOBS_PER_BLOCK_ELECTRA: u64 = 9;
+pub(crate) const MAX_BLOBS_PER_BLOCK_ELECTRA: u64 = 9;
 
-pub const MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA: Gwei = 128_000_000_000;
-pub const MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT: Gwei = 256_000_000_000;
+pub(crate) const MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA: Gwei = 128_000_000_000;
+pub(crate) const MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT: Gwei = 256_000_000_000;
 
-pub struct PendingDeposit {
+pub(crate) struct PendingDeposit {
     pubkey: BLSPubkey,
     withdrawal_credentials: FixedBytes<32>,
     amount: Gwei,
@@ -48,18 +48,18 @@ pub struct PendingDeposit {
     slot: Slot,
 }
 
-pub struct PendingPartialWithdrawal {
+pub(crate) struct PendingPartialWithdrawal {
     validator_index: ValidatorIndex,
     amount: Gwei,
     withdrawable_epoch: Epoch,
 }
 
-pub struct PendingConsolidation {
+pub(crate) struct PendingConsolidation {
     source_index: ValidatorIndex,
     target_index: ValidatorIndex,
 }
 
-pub struct DepositRequest {
+pub(crate) struct DepositRequest {
     pubkey: BLSPubkey,
     withdrawal_credentials: FixedBytes<32>,
     amount: Gwei,
@@ -67,19 +67,19 @@ pub struct DepositRequest {
     index: u64,
 }
 
-pub struct WithdrawalRequest {
+pub(crate) struct WithdrawalRequest {
     source_address: ExecutionAddress,
     validator_pubkey: BLSPubkey,
     amount: Gwei,
 }
 
-pub struct ConsolidationRequest {
+pub(crate) struct ConsolidationRequest {
     source_address: ExecutionAddress,
     source_pubkey: BLSPubkey,
     target_pubkey: BLSPubkey,
 }
 
-pub struct ExecutionRequests {
+pub(crate) struct ExecutionRequests {
     // [New in Electra:EIP6110]
     deposits: [DepositRequest; MAX_DEPOSIT_REQUESTS_PER_PAYLOAD as usize],
     // [New in Electra:EIP7002:EIP7251]
@@ -88,21 +88,21 @@ pub struct ExecutionRequests {
     consolidations: [ConsolidationRequest; MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD as usize],
 }
 
-pub struct SingleAttestation {
+pub(crate) struct SingleAttestation {
     committee_index: CommitteeIndex,
     attester_index: ValidatorIndex,
     data: AttestationData,
     signature: BLSSignature,
 }
 
-pub struct AttesterSlashing {
+pub(crate) struct AttesterSlashing {
     // [Modified in Electra:EIP7549]
     attestation_1: IndexedAttestation,
     // [Modified in Electra:EIP7549]
     attestation_2: IndexedAttestation,
 }
 
-pub struct BeaconBlockBody {
+pub(crate) struct BeaconBlockBody {
     randao_reveal: BLSSignature,
     eth1_data: Eth1Data,
     graffiti: FixedBytes<32>,
@@ -121,7 +121,7 @@ pub struct BeaconBlockBody {
     execution_requests: ExecutionRequests,
 }
 
-pub struct Attestation {
+pub(crate) struct Attestation {
     // [Modified in Electra:EIP7549]
     aggregation_bits: [bool; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize],
     data: AttestationData,
@@ -130,14 +130,14 @@ pub struct Attestation {
     committee_bits: [bool; MAX_COMMITTEES_PER_SLOT as usize],
 }
 
-pub struct IndexedAttestation {
+pub(crate) struct IndexedAttestation {
     // [Modified in Electra:EIP7549]
     attesting_indices: [ValidatorIndex; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize],
     data: AttestationData,
     signature: BLSSignature,
 }
 
-pub struct BeaconState {
+pub(crate) struct BeaconState {
     genesis_time: u64,
     genesis_validators_root: Root,
     slot: Slot,
