@@ -4,6 +4,5 @@
 //! - `BeaconState`
 //! - `BeaconBlock`
 
-mod beacon_block;
-mod beacon_state;
 mod forks;
+
