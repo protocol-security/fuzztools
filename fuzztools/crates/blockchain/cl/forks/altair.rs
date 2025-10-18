@@ -1,36 +1,36 @@
 use alloy::primitives::FixedBytes;
 use super::phase0::*;
 
-pub type ParticipationFlags = u8;
+pub(crate) type ParticipationFlags = u8;
 
-pub const TIMELY_SOURCE_FLAG_INDEX: u64 = 0;
-pub const TIMELY_TARGET_FLAG_INDEX: u64 = 1;
-pub const TIMELY_HEAD_FLAG_INDEX: u64 = 2;
+pub(crate) const TIMELY_SOURCE_FLAG_INDEX: u64 = 0;
+pub(crate) const TIMELY_TARGET_FLAG_INDEX: u64 = 1;
+pub(crate) const TIMELY_HEAD_FLAG_INDEX: u64 = 2;
 
-pub const TIMELY_SOURCE_WEIGHT: u64 = 14;
-pub const TIMELY_TARGET_WEIGHT: u64 = 26;
-pub const TIMELY_HEAD_WEIGHT: u64 = 14;
-pub const SYNC_REWARD_WEIGHT: u64 = 2;
-pub const PROPOSER_WEIGHT: u64 = 8;
-pub const WEIGHT_DENOMINATOR: u64 = 64;
+pub(crate) const TIMELY_SOURCE_WEIGHT: u64 = 14;
+pub(crate) const TIMELY_TARGET_WEIGHT: u64 = 26;
+pub(crate) const TIMELY_HEAD_WEIGHT: u64 = 14;
+pub(crate) const SYNC_REWARD_WEIGHT: u64 = 2;
+pub(crate) const PROPOSER_WEIGHT: u64 = 8;
+pub(crate) const WEIGHT_DENOMINATOR: u64 = 64;
 
-pub const DOMAIN_SYNC_COMMITTEE: DomainType = FixedBytes([0x07, 0x00, 0x00, 0x00]);
-pub const DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF: DomainType = FixedBytes([0x08, 0x00, 0x00, 0x00]);
-pub const DOMAIN_CONTRIBUTION_AND_PROOF: DomainType = FixedBytes([0x09, 0x00, 0x00, 0x00]);
+pub(crate) const DOMAIN_SYNC_COMMITTEE: DomainType = FixedBytes([0x07, 0x00, 0x00, 0x00]);
+pub(crate) const DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF: DomainType = FixedBytes([0x08, 0x00, 0x00, 0x00]);
+pub(crate) const DOMAIN_CONTRIBUTION_AND_PROOF: DomainType = FixedBytes([0x09, 0x00, 0x00, 0x00]);
 
-pub const PARTICIPATION_FLAG_WEIGHTS: [u64; 3] = [TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, TIMELY_HEAD_WEIGHT];
+pub(crate) const PARTICIPATION_FLAG_WEIGHTS: [u64; 3] = [TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, TIMELY_HEAD_WEIGHT];
 
-pub const INACTIVITY_PENALTY_QUOTIENT_ALTAIR: u64 = 50_331_648;
-pub const MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR: u64 = 64;
-pub const PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR: u64 = 2;
+pub(crate) const INACTIVITY_PENALTY_QUOTIENT_ALTAIR: u64 = 50_331_648;
+pub(crate) const MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR: u64 = 64;
+pub(crate) const PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR: u64 = 2;
 
-pub const SYNC_COMMITTEE_SIZE: u64 = 512;
-pub const EPOCHS_PER_SYNC_COMMITTEE_PERIOD: u64 = 256;
+pub(crate) const SYNC_COMMITTEE_SIZE: u64 = 512;
+pub(crate) const EPOCHS_PER_SYNC_COMMITTEE_PERIOD: u64 = 256;
 
-pub const INACTIVITY_SCORE_BIAS: u64 = 4;
-pub const INACTIVITY_SCORE_RECOVERY_RATE: u64 = 16;
+pub(crate) const INACTIVITY_SCORE_BIAS: u64 = 4;
+pub(crate) const INACTIVITY_SCORE_RECOVERY_RATE: u64 = 16;
 
-pub struct BeaconBlockBody {
+pub(crate) struct BeaconBlockBody {
     randao_reveal: BLSSignature,
     eth1_data: Eth1Data,
     graffiti: FixedBytes<32>,
@@ -43,7 +43,7 @@ pub struct BeaconBlockBody {
     sync_aggregate: SyncAggregate,
 }
 
-pub struct BeaconState {
+pub(crate) struct BeaconState {
     genesis_time: u64,
     genesis_validators_root: Root,
     slot: Slot,
@@ -75,12 +75,12 @@ pub struct BeaconState {
     next_sync_committee: SyncCommittee,
 }
 
-pub struct SyncAggregate {
+pub(crate) struct SyncAggregate {
     sync_committee_bits: [bool; SYNC_COMMITTEE_SIZE as usize],
     sync_committee_signature: BLSSignature,
 }
 
-pub struct SyncCommittee {
+pub(crate) struct SyncCommittee {
     pubkeys: [BLSPubkey; SYNC_COMMITTEE_SIZE as usize],
     aggregate_pubkey: BLSPubkey,
 }

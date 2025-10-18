@@ -2,23 +2,23 @@ use alloy::primitives::{FixedBytes, U256};
 use super::phase0::*;
 use super::altair::*;
 
-pub type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
-pub type ExecutionAddress = FixedBytes<20>;
+pub(crate) type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
+pub(crate) type ExecutionAddress = FixedBytes<20>;
 
-pub const INACTIVITY_PENALTY_QUOTIENT_BELLATRIX: u64 = 16_777_216;
-pub const MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX: u64 = 32;
-pub const PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX: u64 = 3;
+pub(crate) const INACTIVITY_PENALTY_QUOTIENT_BELLATRIX: u64 = 16_777_216;
+pub(crate) const MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX: u64 = 32;
+pub(crate) const PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX: u64 = 3;
 
-pub const MAX_BYTES_PER_TRANSACTION: u64 = 1_073_741_824;
-pub const MAX_TRANSACTIONS_PER_PAYLOAD: u64 = 1_048_576;
-pub const BYTES_PER_LOGS_BLOOM: usize = 256;
-pub const MAX_EXTRA_DATA_BYTES: usize = 32;
+pub(crate) const MAX_BYTES_PER_TRANSACTION: u64 = 1_073_741_824;
+pub(crate) const MAX_TRANSACTIONS_PER_PAYLOAD: u64 = 1_048_576;
+pub(crate) const BYTES_PER_LOGS_BLOOM: usize = 256;
+pub(crate) const MAX_EXTRA_DATA_BYTES: usize = 32;
 
-pub const TERMINAL_TOTAL_DIFFICULTY: u128 = 58_750_000_000_000_000_000_000;
-pub const TERMINAL_BLOCK_HASH: Hash32 = FixedBytes([0; 32]);
-pub const TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: Epoch = FAR_FUTURE_EPOCH;
+pub(crate) const TERMINAL_TOTAL_DIFFICULTY: u128 = 58_750_000_000_000_000_000_000;
+pub(crate) const TERMINAL_BLOCK_HASH: Hash32 = FixedBytes([0; 32]);
+pub(crate) const TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: Epoch = FAR_FUTURE_EPOCH;
 
-pub struct BeaconBlockBody {
+pub(crate) struct BeaconBlockBody {
     randao_reveal: BLSSignature,
     eth1_data: Eth1Data,
     graffiti: FixedBytes<32>,
@@ -32,7 +32,7 @@ pub struct BeaconBlockBody {
     execution_payload: ExecutionPayload,
 }
 
-pub struct BeaconState {
+pub(crate) struct BeaconState {
     genesis_time: u64,
     genesis_validators_root: Root,
     slot: Slot,
@@ -61,7 +61,7 @@ pub struct BeaconState {
     latest_execution_payload_header: ExecutionPayloadHeader,
 }
 
-pub struct ExecutionPayload {
+pub(crate) struct ExecutionPayload {
     parent_hash: Hash32,
     fee_recipient: ExecutionAddress,
     state_root: FixedBytes<32>,
@@ -78,7 +78,7 @@ pub struct ExecutionPayload {
     transactions: [Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize],
 }
 
-pub struct ExecutionPayloadHeader {
+pub(crate) struct ExecutionPayloadHeader {
     parent_hash: Hash32,
     fee_recipient: ExecutionAddress,
     state_root: FixedBytes<32>,

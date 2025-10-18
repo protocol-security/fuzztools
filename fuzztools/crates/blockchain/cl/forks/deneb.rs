@@ -4,17 +4,17 @@ use super::altair::*;
 use super::bellatrix::*;
 use super::capella::*;
 
-pub type VersionedHash = FixedBytes<32>;
-pub type BlobIndex = u64;
-pub type KZGCommitment = FixedBytes<48>;
+pub(crate) type VersionedHash = FixedBytes<32>;
+pub(crate) type BlobIndex = u64;
+pub(crate) type KZGCommitment = FixedBytes<48>;
 
-pub const VERSIONED_HASH_VERSION_KZG: FixedBytes<1> = FixedBytes([0x01]);
+pub(crate) const VERSIONED_HASH_VERSION_KZG: FixedBytes<1> = FixedBytes([0x01]);
 
-pub const MAX_BLOB_COMMITMENTS_PER_BLOCK: u64 = 4096;
-pub const MAX_BLOBS_PER_BLOCK: u64 = 6;
-pub const MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT: u64 = 8;
+pub(crate) const MAX_BLOB_COMMITMENTS_PER_BLOCK: u64 = 4096;
+pub(crate) const MAX_BLOBS_PER_BLOCK: u64 = 6;
+pub(crate) const MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT: u64 = 8;
 
-pub struct BeaconBlockBody {
+pub(crate) struct BeaconBlockBody {
     randao_reveal: BLSSignature,
     eth1_data: Eth1Data,
     graffiti: FixedBytes<32>,
@@ -31,7 +31,7 @@ pub struct BeaconBlockBody {
     blob_kzg_commitments: [KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize],
 }
 
-pub struct ExecutionPayload {
+pub(crate) struct ExecutionPayload {
     parent_hash: Hash32,
     fee_recipient: ExecutionAddress,
     state_root: FixedBytes<32>,
@@ -53,7 +53,7 @@ pub struct ExecutionPayload {
     excess_blob_gas: u64,
 }
 
-pub struct ExecutionPayloadHeader {
+pub(crate) struct ExecutionPayloadHeader {
     parent_hash: Hash32,
     fee_recipient: ExecutionAddress,
     state_root: FixedBytes<32>,
@@ -75,7 +75,7 @@ pub struct ExecutionPayloadHeader {
     excess_blob_gas: u64,
 }
 
-pub struct BeaconState {
+pub(crate) struct BeaconState {
     genesis_time: u64,
     genesis_validators_root: Root,
     slot: Slot,

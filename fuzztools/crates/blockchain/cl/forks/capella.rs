@@ -3,38 +3,38 @@ use super::phase0::*;
 use super::altair::*;
 use super::bellatrix::*;
 
-pub type WithdrawalIndex = u64;
+pub(crate) type WithdrawalIndex = u64;
 
-pub const DOMAIN_BLS_TO_EXECUTION_CHANGE: DomainType = FixedBytes([0x0A, 0x00, 0x00, 0x00]);
+pub(crate) const DOMAIN_BLS_TO_EXECUTION_CHANGE: DomainType = FixedBytes([0x0A, 0x00, 0x00, 0x00]);
 
-pub const MAX_BLS_TO_EXECUTION_CHANGES: u64 = 16;
-pub const MAX_WITHDRAWALS_PER_PAYLOAD: u64 = 16;
-pub const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 16_384;
+pub(crate) const MAX_BLS_TO_EXECUTION_CHANGES: u64 = 16;
+pub(crate) const MAX_WITHDRAWALS_PER_PAYLOAD: u64 = 16;
+pub(crate) const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 16_384;
 
-pub struct Withdrawal {
+pub(crate) struct Withdrawal {
     index: WithdrawalIndex,
     validator_index: ValidatorIndex,
     address: ExecutionAddress,
     amount: Gwei,
 }
 
-pub struct BLSToExecutionChange {
+pub(crate) struct BLSToExecutionChange {
     validator_index: ValidatorIndex,
     from_bls_pubkey: BLSPubkey,
     to_execution_address: ExecutionAddress,
 }
 
-pub struct SignedBLSToExecutionChange {
+pub(crate) struct SignedBLSToExecutionChange {
     message: BLSToExecutionChange,
     signature: BLSSignature,
 }
 
-pub struct HistoricalSummary {
+pub(crate) struct HistoricalSummary {
     block_summary_root: Root,
     state_summary_root: Root,
 }
 
-pub struct ExecutionPayload {
+pub(crate) struct ExecutionPayload {
     parent_hash: Hash32,
     fee_recipient: ExecutionAddress,
     state_root: FixedBytes<32>,
@@ -53,7 +53,7 @@ pub struct ExecutionPayload {
     withdrawals: [Withdrawal; MAX_WITHDRAWALS_PER_PAYLOAD as usize],
 }
 
-pub struct ExecutionPayloadHeader {
+pub(crate) struct ExecutionPayloadHeader {
     parent_hash: Hash32,
     fee_recipient: ExecutionAddress,
     state_root: FixedBytes<32>,
@@ -72,7 +72,7 @@ pub struct ExecutionPayloadHeader {
     withdrawals_root: Root,
 }
 
-pub struct BeaconBlockBody {
+pub(crate) struct BeaconBlockBody {
     randao_reveal: BLSSignature,
     eth1_data: Eth1Data,
     graffiti: FixedBytes<32>,
@@ -87,7 +87,7 @@ pub struct BeaconBlockBody {
     bls_to_execution_changes: [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
 }
 
-pub struct BeaconState {
+pub(crate) struct BeaconState {
     genesis_time: u64,
     genesis_validators_root: Root,
     slot: Slot,

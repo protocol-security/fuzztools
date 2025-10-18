@@ -5,4 +5,3 @@
 //! - `BeaconBlock`
 
 mod forks;
-
