@@ -2,5 +2,5 @@
 //!
 //! WIP
 
-mod cl;
+pub mod cl;
 mod el;

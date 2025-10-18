@@ -10,6 +10,8 @@
 //! - `alloy::primitives::U256`
 //! - `alloy::rpc::types::Authorization`
 //! - `fuzztools::transactions::Transaction`
+//! - `fuzztools::blockchain::cl::BeaconState` (Fulu)
+//! - `fuzztools::blockchain::cl::BeaconBlockBody` (Electra)
 //! - `Vec<u8>`
 //!
 //! I will be adding more types as I need them, so stay tuned.
@@ -19,6 +21,7 @@ mod array;
 mod traits;
 mod transactions;
 mod uint;
+mod consensus;
 
 pub use traits::Mutable;
 
