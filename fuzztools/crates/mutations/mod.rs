@@ -16,6 +16,7 @@
 
 mod alloy;
 mod array;
+mod consensus;
 mod traits;
 mod transactions;
 mod uint;

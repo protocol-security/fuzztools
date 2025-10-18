@@ -1,3 +1,4 @@
+use std::todo;
 use rand::Rng;
 
 /// This traits implements the `mutate` method for a given type
@@ -76,4 +77,16 @@ pub(crate) trait TransactionMutations {
     fn mutate_blob_versioned_hashes(&mut self, random: &mut impl Rng);
     fn mutate_authorization_list(&mut self, random: &mut impl Rng);
     fn mutate_calldata(&mut self, random: &mut impl Rng);
+}
+
+pub(crate) trait BeaconStateMutations {
+    fn mutate_pending_deposits(&mut self, random: &mut impl Rng);
+    fn mutate_pending_partial_withdrawals(&mut self, random: &mut impl Rng);
+    fn mutate_pending_consolidations(&mut self, random: &mut impl Rng);
+}
+
+pub(crate) trait BeaconBlockBodyMutations {
+    fn mutate_attestations(&mut self, random: &mut impl Rng);
+    fn mutate_deposits(&mut self, random: &mut impl Rng);
+    fn mutate_execution_requests(&mut self, random: &mut impl Rng);
 }
