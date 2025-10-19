@@ -1,6 +1,11 @@
 init:
 	git submodule update --init --recursive
 
+make pull:
+	git stash
+	git pull
+	git stash pop
+
 # These are commands for rakoon, used for testing/running
 run-testnet:
 	kurtosis run --enclave testnet github.com/ethpandaops/ethereum-package --args-file ./network_params.yaml
