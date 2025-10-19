@@ -1,6 +1,6 @@
-use super::traits::{Mutable, ArrayMutations, FixedArrayMutations};
-use crate::blockchain::cl::forks::{altair::SyncAggregate, capella::{BLSToExecutionChange, SignedBLSToExecutionChange}, deneb::{ExecutionPayload, KZGCommitment}, electra::{Attestation, AttesterSlashing, ExecutionRequests, IndexedAttestation, WithdrawalRequest}, phase0::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, Eth1Data, ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, VoluntaryExit}};
-use alloy::eips::{eip6110::DepositRequest, eip7251::ConsolidationRequest};
+use super::traits::Mutable;
+use crate::blockchain::cl::{forks::{altair::SyncAggregate, capella::{BLSToExecutionChange, SignedBLSToExecutionChange, Withdrawal}, deneb::{ExecutionPayload, KZGCommitment}, electra::{Attestation, AttesterSlashing, ExecutionRequests, IndexedAttestation, WithdrawalRequest}, phase0::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, Eth1Data, ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, VoluntaryExit}}, BeaconBlockBody};
+use crate::blockchain::cl::forks::electra::{ConsolidationRequest, DepositRequest};
 use rand::Rng;
 
 impl Mutable for Eth1Data {
@@ -94,10 +94,28 @@ impl Mutable for AttesterSlashing {
 impl Mutable for Attestation {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         match random.random_range(0..=3) {
-            0 => self.aggregation_bits.mutate(random),
+            0 => {
+                let mut aggregation_bits = self.aggregation_bits.to_vec();
+                aggregation_bits.mutate(random);
+                aggregation_bits.resize(self.aggregation_bits.len(), 0);
+                self.aggregation_bits.copy_from_slice(&aggregation_bits);
+                false
+            }
             1 => self.data.mutate(random),
-            2 => self.signature.mutate(random),
-            3 => self.committee_bits.mutate(random),
+            2 => {
+                let mut signature = self.signature.to_vec();
+                signature.mutate(random);
+                signature.resize(self.signature.len(), 0);
+                self.signature.copy_from_slice(&signature);
+                false
+            }
+            3 => {
+                let mut committee_bits = self.committee_bits.to_vec();
+                committee_bits.mutate(random);
+                committee_bits.resize(self.committee_bits.len(), 0);
+                self.committee_bits.copy_from_slice(&committee_bits);
+                false
+            }
             _ => unreachable!(),
         }
     }
@@ -148,8 +166,26 @@ impl Mutable for SignedVoluntaryExit {
 impl Mutable for SyncAggregate {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         match random.random_range(0..=1) {
-            0 => self.sync_committee_bits.mutate(random),
+            0 => {
+                let mut sync_committee_bits = self.sync_committee_bits.to_vec();
+                sync_committee_bits.mutate(random);
+                sync_committee_bits.resize(self.sync_committee_bits.len(), 0);
+                self.sync_committee_bits.copy_from_slice(&sync_committee_bits);
+                false
+            }
             1 => self.sync_committee_signature.mutate(random),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Mutable for Withdrawal {
+    fn mutate(&mut self, random: &mut impl Rng) -> bool {
+        match random.random_range(0..=3) {
+            0 => self.index.mutate(random),
+            1 => self.validator_index.mutate(random),
+            2 => self.address.mutate(random),
+            3 => self.amount.mutate(random),
             _ => unreachable!(),
         }
     }
@@ -162,13 +198,25 @@ impl Mutable for ExecutionPayload {
             1 => self.fee_recipient.mutate(random),
             2 => self.state_root.mutate(random),
             3 => self.receipts_root.mutate(random),
-            4 => self.logs_bloom.mutate(random),
+            4 => {
+                let mut logs_bloom = self.logs_bloom.to_vec();
+                logs_bloom.mutate(random);
+                logs_bloom.resize(self.logs_bloom.len(), 0);
+                self.logs_bloom.copy_from_slice(&logs_bloom);
+                false
+            }
             5 => self.prev_randao.mutate(random),
             6 => self.block_number.mutate(random),
             7 => self.gas_limit.mutate(random),
             8 => self.gas_used.mutate(random),
             9 => self.timestamp.mutate(random),
-            10 => self.extra_data.mutate(random),
+            10 => {
+                let mut extra_data = self.extra_data.to_vec();
+                extra_data.mutate(random);
+                extra_data.resize(self.extra_data.len(), 0);
+                self.extra_data.copy_from_slice(&extra_data);
+                false
+            }
             11 => self.base_fee_per_gas.mutate(random),
             12 => self.block_hash.mutate(random),
             13 => self.transactions.mutate(random),
@@ -242,6 +290,27 @@ impl Mutable for ExecutionRequests {
             0 => self.deposits.mutate(random),
             1 => self.withdrawals.mutate(random),
             2 => self.consolidations.mutate(random),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Mutable for BeaconBlockBody {
+    fn mutate(&mut self, random: &mut impl Rng) -> bool {
+        match random.random_range(0..=12) {
+            0 => self.randao_reveal.mutate(random),
+            1 => self.eth1_data.mutate(random),
+            2 => self.graffiti.mutate(random),
+            3 => self.proposer_slashings.mutate(random),
+            4 => self.attester_slashings.mutate(random),
+            5 => self.attestations.mutate(random),
+            6 => self.deposits.mutate(random),
+            7 => self.voluntary_exits.mutate(random),
+            8 => self.sync_aggregate.mutate(random),
+            9 => self.execution_payload.mutate(random),
+            10 => self.bls_to_execution_changes.mutate(random),
+            11 => self.blob_kzg_commitments.mutate(random),
+            12 => self.execution_requests.mutate(random),
             _ => unreachable!(),
         }
     }

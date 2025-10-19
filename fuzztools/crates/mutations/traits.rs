@@ -37,7 +37,7 @@ pub(crate) trait UintInteresting {
     fn set_interesting(&mut self, random: &mut impl Rng);
 }
 
-pub(crate) trait ArrayMutations {
+pub(crate) trait ByteArrayMutations {
     fn byte_clone(&mut self, random: &mut impl Rng);
     fn byte_remove(&mut self, random: &mut impl Rng);
     fn byte_swap(&mut self, random: &mut impl Rng);
@@ -61,15 +61,9 @@ pub(crate) trait ArrayMutations {
     fn slice_mutate(&mut self, random: &mut impl Rng);
 }
 
-pub(crate) trait FixedArrayMutations {
-    fn byte_swap(&mut self, random: &mut impl Rng);
-    fn byte_mutate(&mut self, random: &mut impl Rng);
-
-    fn set_all_zero(&mut self);
-    fn set_all_one(&mut self);
-    fn set_all_max(&mut self);
-    fn set_all_pattern(&mut self);
-    fn set_all_random(&mut self, random: &mut impl Rng);
+pub(crate) trait ArrayMutations {
+    fn value_swap(&mut self, random: &mut impl Rng);
+    fn value_mutate(&mut self, random: &mut impl Rng);
 
     fn rotate_left_by_n(&mut self, random: &mut impl Rng);
     fn rotate_right_by_n(&mut self, random: &mut impl Rng);
@@ -78,11 +72,10 @@ pub(crate) trait FixedArrayMutations {
     fn reverse_array(&mut self);
 
     fn slice_swap(&mut self, random: &mut impl Rng);
-    fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng);
     fn slice_mutate(&mut self, random: &mut impl Rng);
 }
 
-pub(crate) trait ArrayInteresting {
+pub(crate) trait ByteArrayInteresting {
     fn set_interesting_u8(&mut self, random: &mut impl Rng);
     fn set_interesting_u8_be(&mut self, random: &mut impl Rng);
     fn set_interesting_u16_le(&mut self, random: &mut impl Rng);

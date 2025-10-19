@@ -5,6 +5,7 @@ use super::phase0::*;
 use super::altair::*;
 use super::electra::*;
 
+#[derive(Copy, Clone)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,

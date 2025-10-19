@@ -11,6 +11,7 @@ pub const MAX_BLS_TO_EXECUTION_CHANGES: u64 = 16;
 pub const MAX_WITHDRAWALS_PER_PAYLOAD: u64 = 16;
 pub const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 16_384;
 
+#[derive(Copy, Clone)]
 pub struct Withdrawal {
     pub index: WithdrawalIndex,
     pub validator_index: ValidatorIndex,
@@ -18,22 +19,26 @@ pub struct Withdrawal {
     pub amount: Gwei,
 }
 
+#[derive(Copy, Clone)]
 pub struct BLSToExecutionChange {
     pub validator_index: ValidatorIndex,
     pub from_bls_pubkey: BLSPubkey,
     pub to_execution_address: ExecutionAddress,
 }
 
+#[derive(Copy, Clone)]
 pub struct SignedBLSToExecutionChange {
     pub message: BLSToExecutionChange,
     pub signature: BLSSignature,
 }
 
+#[derive(Copy, Clone)]
 pub struct HistoricalSummary {
     pub block_summary_root: Root,
     pub state_summary_root: Root,
 }
 
+#[derive(Copy, Clone)]
 pub struct ExecutionPayload {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -53,6 +58,7 @@ pub struct ExecutionPayload {
     pub withdrawals: [Withdrawal; MAX_WITHDRAWALS_PER_PAYLOAD as usize],
 }
 
+#[derive(Copy, Clone)]
 pub struct ExecutionPayloadHeader {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -72,6 +78,7 @@ pub struct ExecutionPayloadHeader {
     pub withdrawals_root: Root,
 }
 
+#[derive(Copy, Clone)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -87,6 +94,7 @@ pub struct BeaconBlockBody {
     pub bls_to_execution_changes: [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
 }
 
+#[derive(Copy, Clone)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,

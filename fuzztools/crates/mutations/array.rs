@@ -1,10 +1,11 @@
-use super::{
-    traits::{FixedArrayMutations, ArrayMutations, Mutable, UintMutations},
-    INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES,
-};
-use crate::{blockchain::cl::forks::phase0::{MAX_COMMITTEES_PER_SLOT, MAX_VALIDATORS_PER_COMMITTEE}, mutations::traits::ArrayInteresting};
+use crate::blockchain::cl::forks::bellatrix::{Transaction, MAX_BYTES_PER_TRANSACTION, MAX_TRANSACTIONS_PER_PAYLOAD};
+use crate::blockchain::cl::forks::deneb::{KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK};
+use crate::blockchain::cl::forks::electra::{Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, WithdrawalRequest, MAX_ATTESTATIONS_ELECTRA, MAX_ATTESTER_SLASHINGS_ELECTRA, MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD, MAX_DEPOSIT_REQUESTS_PER_PAYLOAD, MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD};
+use crate::blockchain::cl::forks::phase0::{Deposit, ProposerSlashing, SignedVoluntaryExit, DEPOSIT_CONTRACT_TREE_DEPTH, MAX_COMMITTEES_PER_SLOT, MAX_DEPOSITS, MAX_PROPOSER_SLASHINGS, MAX_VALIDATORS_PER_COMMITTEE, MAX_VOLUNTARY_EXITS};
+use crate::blockchain::cl::forks::capella::{SignedBLSToExecutionChange, Withdrawal, MAX_BLS_TO_EXECUTION_CHANGES, MAX_WITHDRAWALS_PER_PAYLOAD};
+use crate::mutations::traits::{ArrayMutations, Mutable};
 use alloy::primitives::FixedBytes;
-use rand::{seq::SliceRandom, Rng};
+use rand::{Rng, seq::SliceRandom};
 
 macro_rules! check_not_empty {
     ($bytes:ident) => {
@@ -27,32 +28,15 @@ macro_rules! impl_mutate {
         impl Mutable for $type {
             #[inline(always)]
             fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                match random.random_range(0..=24) {
-                    0 => self.byte_clone(random),
-                    1 => self.byte_remove(random),
-                    2 => self.byte_swap(random),
-                    3 => self.byte_mutate(random),
-                    4 => self.set_all_zero(),
-                    5 => self.set_all_one(),
-                    6 => self.set_all_max(),
-                    7 => self.set_all_pattern(),
-                    8 => self.set_all_random(random),
-                    9 => self.shuffle_array(random),
-                    10 => self.rotate_left_by_n(random),
-                    11 => self.rotate_right_by_n(random),
-                    12 => self.reverse_array(),
-                    13 => self.slice_clone(random),
-                    14 => self.slice_swap(random),
-                    15 => self.slice_swap_with_invalid_utf8(random),
-                    16 => self.slice_mutate(random),
-                    17 => self.set_interesting_u8(random),
-                    18 => self.set_interesting_u8_be(random),
-                    19 => self.set_interesting_u16_le(random),
-                    20 => self.set_interesting_u16_be(random),
-                    21 => self.set_interesting_u32_le(random),
-                    22 => self.set_interesting_u32_be(random),
-                    23 => self.set_slice_with_invalid_utf8(random),
-                    24 => return true,
+                match random.random_range(0..=7) {
+                    0 => self.value_swap(random),
+                    1 => self.value_mutate(random),
+                    2 => self.rotate_left_by_n(random),
+                    3 => self.rotate_right_by_n(random),
+                    4 => self.shuffle_array(random),
+                    5 => self.reverse_array(),
+                    6 => self.slice_swap(random),
+                    7 => self.slice_mutate(random),
                     _ => unreachable!(),
                 }
 
@@ -66,22 +50,7 @@ macro_rules! impl_mutations {
     ($type:ty) => {
         impl ArrayMutations for $type {
             #[inline(always)]
-            fn byte_clone(&mut self, random: &mut impl Rng) {
-                check_not_empty!(self);
-                let idx = random.random_range(0..self.len());
-                let byte = self[idx];
-                self.push(byte);
-            }
-
-            #[inline(always)]
-            fn byte_remove(&mut self, random: &mut impl Rng) {
-                check_not_empty!(self);
-                let idx = random.random_range(0..self.len());
-                self.remove(idx);
-            }
-
-            #[inline(always)]
-            fn byte_swap(&mut self, random: &mut impl Rng) {
+            fn value_swap(&mut self, random: &mut impl Rng) {
                 check_not_smaller!(self, 2);
                 let idx1 = random.random_range(0..self.len());
                 let idx2 = random.random_range(0..self.len());
@@ -91,48 +60,10 @@ macro_rules! impl_mutations {
             }
 
             #[inline(always)]
-            fn byte_mutate(&mut self, random: &mut impl Rng) {
+            fn value_mutate(&mut self, random: &mut impl Rng) {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 self[idx].mutate(random);
-            }
-
-            #[inline(always)]
-            fn set_all_zero(&mut self) {
-                // No need to check as it is a NOOP if empty
-                self.fill(0x00);
-            }
-
-            #[inline(always)]
-            fn set_all_one(&mut self) {
-                // No need to check as it is a NOOP if empty
-                self.fill(0x01);
-            }
-
-            #[inline(always)]
-            fn set_all_max(&mut self) {
-                // No need to check as it is a NOOP if empty
-                self.fill(0xff);
-            }
-
-            #[inline(always)]
-            fn set_all_pattern(&mut self) {
-                check_not_empty!(self);
-                let mut i = 0;
-                self.iter_mut().for_each(|byte| {
-                    if i % 2 == 0 {
-                        byte.set_zero();
-                    } else {
-                        byte.set_max();
-                    }
-                    i += 1;
-                });
-            }
-
-            #[inline(always)]
-            fn set_all_random(&mut self, random: &mut impl Rng) {
-                check_not_empty!(self);
-                random.fill_bytes(self);
             }
 
             #[inline(always)]
@@ -162,15 +93,6 @@ macro_rules! impl_mutations {
             }
 
             #[inline(always)]
-            fn slice_clone(&mut self, random: &mut impl Rng) {
-                check_not_empty!(self);
-                let idx = random.random_range(0..self.len());
-                let len = random.random_range(0..self.len() - idx);
-                let slice_to_clone = self[idx..idx + len].to_vec();
-                self.extend_from_slice(&slice_to_clone);
-            }
-
-            #[inline(always)]
             fn slice_swap(&mut self, random: &mut impl Rng) {
                 check_not_smaller!(self, 2);
                 let idx1 = random.random_range(0..self.len());
@@ -189,411 +111,66 @@ macro_rules! impl_mutations {
             }
 
             #[inline(always)]
-            fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng) {
-                check_not_empty!(self);
-                let utf8 = INVALID_UTF8_SEQUENCES
-                    [random.random_range(0..INVALID_UTF8_SEQUENCES.len())]
-                .to_vec();
-
-                check_not_smaller!(self, utf8.len());
-
-                let idx2 = random.random_range(0..=self.len() - utf8.len());
-                self[idx2..idx2 + utf8.len()].copy_from_slice(&utf8);
-            }
-
-            #[inline(always)]
             fn slice_mutate(&mut self, random: &mut impl Rng) {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 let len = random.random_range(0..self.len() - idx);
-                let mut slice = self[idx..idx + len].to_vec();
 
-                match random.random_range(0..9) {
-                    0 => slice.byte_mutate(random),
-                    1 => slice.set_all_zero(),
-                    2 => slice.set_all_one(),
-                    3 => slice.set_all_max(),
-                    4 => slice.set_all_pattern(),
-                    5 => slice.shuffle(random),
-                    6 => slice.rotate_left_by_n(random),
-                    7 => slice.rotate_right_by_n(random),
-                    8 => slice.reverse_array(),
-                    _ => unreachable!(),
+                for i in idx..idx + len {
+                    self[i].mutate(random);
                 }
-
-                self[idx..idx + len].copy_from_slice(&slice);
             }
         }
     };
 }
 
-impl ArrayInteresting for Vec<u8> {
-    #[inline(always)]
-    fn set_interesting_u8(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let value_idx = random.random_range(0..INTERESTING_U8.len());
-        self[idx] = INTERESTING_U8[value_idx];
-    }
+impl_mutations!([u64; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize]);
+impl_mutate!([u64; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize]);
 
-    #[inline(always)]
-    fn set_interesting_u8_be(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let value_idx = random.random_range(0..INTERESTING_U8.len());
-        self[idx] = INTERESTING_U8[value_idx].reverse_bits();
-    }
+impl_mutations!([FixedBytes<32>; DEPOSIT_CONTRACT_TREE_DEPTH + 1]);
+impl_mutate!([FixedBytes<32>; DEPOSIT_CONTRACT_TREE_DEPTH + 1]);
 
-    #[inline(always)]
-    fn set_interesting_u16_le(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx = random.random_range(0..=self.len() - 2);
-        let value_idx = random.random_range(0..INTERESTING_U16.len());
-        let value = INTERESTING_U16[value_idx].to_le_bytes();
-        self[idx..idx + 2].copy_from_slice(&value);
-    }
+impl_mutations!([u8; MAX_BYTES_PER_TRANSACTION as usize]);
+impl_mutate!([u8; MAX_BYTES_PER_TRANSACTION as usize]);
 
-    #[inline(always)]
-    fn set_interesting_u16_be(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx = random.random_range(0..=self.len() - 2);
-        let value_idx = random.random_range(0..INTERESTING_U16.len());
-        let value = INTERESTING_U16[value_idx].to_be_bytes();
-        self[idx..idx + 2].copy_from_slice(&value);
-    }
+impl_mutations!([Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize]);
+impl_mutate!([Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize]);
 
-    #[inline(always)]
-    fn set_interesting_u32_le(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 4);
-        let idx = random.random_range(0..=self.len() - 4);
-        let value_idx = random.random_range(0..INTERESTING_U32.len());
-        let value = INTERESTING_U32[value_idx].to_le_bytes();
-        self[idx..idx + 4].copy_from_slice(&value);
-    }
+impl_mutations!([Withdrawal; MAX_WITHDRAWALS_PER_PAYLOAD as usize]);
+impl_mutate!([Withdrawal; MAX_WITHDRAWALS_PER_PAYLOAD as usize]);
 
-    #[inline(always)]
-    fn set_interesting_u32_be(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 4);
-        let idx = random.random_range(0..=self.len() - 4);
-        let value_idx = random.random_range(0..INTERESTING_U32.len());
-        let value = INTERESTING_U32[value_idx].to_be_bytes();
-        self[idx..idx + 4].copy_from_slice(&value);
-    }
+impl_mutations!([DepositRequest; MAX_DEPOSIT_REQUESTS_PER_PAYLOAD as usize]);
+impl_mutate!([DepositRequest; MAX_DEPOSIT_REQUESTS_PER_PAYLOAD as usize]);
 
-    #[inline(always)]
-    fn set_slice_with_invalid_utf8(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let utf8 =
-            INVALID_UTF8_SEQUENCES[random.random_range(0..INVALID_UTF8_SEQUENCES.len())].to_vec();
-        check_not_smaller!(self, utf8.len());
-        let idx = random.random_range(0..=self.len() - utf8.len());
-        self[idx..idx + utf8.len()].copy_from_slice(&utf8);
-    }
-}
+impl_mutations!([WithdrawalRequest; MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD as usize]);
+impl_mutate!([WithdrawalRequest; MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD as usize]);
 
-impl<const N: usize> FixedArrayMutations for [u8; N] {
-    #[inline(always)]
-    fn byte_swap(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx1 = random.random_range(0..self.len());
-        let idx2 = random.random_range(0..self.len());
-        if idx1 != idx2 {
-            self.swap(idx1, idx2);
-        }
-    }
+impl_mutations!([ConsolidationRequest; MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD as usize]);
+impl_mutate!([ConsolidationRequest; MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD as usize]);
 
-    #[inline(always)]
-    fn byte_mutate(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        self[idx].mutate(random);
-    }
+impl_mutations!([KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize]);
+impl_mutate!([KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize]);
 
-    #[inline(always)]
-    fn set_all_zero(&mut self) {
-        // No need to check as it is a NOOP if empty
-        self.fill(0x00);
-    }
+impl_mutations!([ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize]);
+impl_mutate!([ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize]);
 
-    #[inline(always)]
-    fn set_all_one(&mut self) {
-        // No need to check as it is a NOOP if empty
-        self.fill(0x01);
-    }
+impl_mutations!([AttesterSlashing; MAX_ATTESTER_SLASHINGS_ELECTRA as usize]);
+impl_mutate!([AttesterSlashing; MAX_ATTESTER_SLASHINGS_ELECTRA as usize]);
 
-    #[inline(always)]
-    fn set_all_max(&mut self) {
-        // No need to check as it is a NOOP if empty
-        self.fill(0xff);
-    }
+impl_mutations!([Attestation; MAX_ATTESTATIONS_ELECTRA as usize]);
+impl_mutate!([Attestation; MAX_ATTESTATIONS_ELECTRA as usize]);
 
-    #[inline(always)]
-    fn set_all_pattern(&mut self) {
-        check_not_empty!(self);
-        let mut i = 0;
-        self.iter_mut().for_each(|byte| {
-            if i % 2 == 0 {
-                byte.set_zero();
-            } else {
-                byte.set_max();
-            }
-            i += 1;
-        });
-    }
+impl_mutations!([Deposit; MAX_DEPOSITS as usize]);
+impl_mutate!([Deposit; MAX_DEPOSITS as usize]);
 
-    #[inline(always)]
-    fn set_all_random(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        random.fill_bytes(self);
-    }
+impl_mutations!([SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize]);
+impl_mutate!([SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize]);
 
-    #[inline(always)]
-    fn rotate_left_by_n(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let positions = random.random_range(0..self.len());
-        self.rotate_left(positions);
-    }
+impl_mutations!([SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize]);
+impl_mutate!([SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize]);
 
-    #[inline(always)]
-    fn rotate_right_by_n(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let positions = random.random_range(0..self.len());
-        self.rotate_right(positions);
-    }
+impl_mutations!([u8; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize]);
+impl_mutate!([u8; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize]);
 
-    #[inline(always)]
-    fn shuffle_array(&mut self, random: &mut impl Rng) {
-        // No need to check as it is a NOOP if empty
-        self.shuffle(random);
-    }
-
-    #[inline(always)]
-    fn reverse_array(&mut self) {
-        check_not_empty!(self);
-        self.reverse();
-    }
-
-    #[inline(always)]
-    fn slice_swap(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx1 = random.random_range(0..self.len());
-        let idx2 = random.random_range(0..self.len());
-
-        if idx1 != idx2 {
-            let max_idx = idx1.max(idx2);
-            let len = random.random_range(0..=self.len() - max_idx);
-
-            let slice1 = self[idx1..idx1 + len].to_vec();
-            let slice2 = self[idx2..idx2 + len].to_vec();
-
-            self[idx1..idx1 + len].copy_from_slice(&slice2);
-            self[idx2..idx2 + len].copy_from_slice(&slice1);
-        }
-    }
-
-    #[inline(always)]
-    fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let utf8 = INVALID_UTF8_SEQUENCES
-            [random.random_range(0..INVALID_UTF8_SEQUENCES.len())]
-        .to_vec();
-
-        check_not_smaller!(self, utf8.len());
-
-        let idx2 = random.random_range(0..=self.len() - utf8.len());
-        self[idx2..idx2 + utf8.len()].copy_from_slice(&utf8);
-    }
-
-    #[inline(always)]
-    fn slice_mutate(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let len = random.random_range(0..self.len() - idx);
-        let mut slice = self[idx..idx + len].to_vec();
-
-        match random.random_range(0..9) {
-            0 => slice.byte_mutate(random),
-            1 => slice.set_all_zero(),
-            2 => slice.set_all_one(),
-            3 => slice.set_all_max(),
-            4 => slice.set_all_pattern(),
-            5 => slice.shuffle(random),
-            6 => slice.rotate_left_by_n(random),
-            7 => slice.rotate_right_by_n(random),
-            8 => slice.reverse_array(),
-            _ => unreachable!(),
-        }
-
-        self[idx..idx + len].copy_from_slice(&slice);
-    }
-}
-
-impl<const N: usize> Mutable for [u8; N] {
-    fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=13) {
-            0 => self.byte_swap(random),
-            1 => self.byte_mutate(random),
-            2 => self.set_all_zero(),
-            3 => self.set_all_one(),
-            4 => self.set_all_max(),
-            5 => self.set_all_pattern(),
-            6 => self.set_all_random(random),
-            7 => self.rotate_left_by_n(random),
-            8 => self.rotate_right_by_n(random),
-            9 => self.shuffle_array(random),
-            10 => self.reverse_array(),
-            11 => self.slice_swap(random),
-            12 => self.slice_swap_with_invalid_utf8(random),
-            13 => self.slice_mutate(random),
-            _ => unreachable!(),
-        }
-
-        false
-    }
-}
-
-impl<const N: usize, const M: usize> FixedArrayMutations for [FixedBytes<M>; N] {
-    #[inline(always)]
-    fn byte_swap(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx1 = random.random_range(0..self.len());
-        let idx2 = random.random_range(0..self.len());
-        if idx1 != idx2 {
-            self.swap(idx1, idx2);
-        }
-    }
-
-    #[inline(always)]
-    fn byte_mutate(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        self[idx].mutate(random);
-    }
-
-    #[inline(always)]
-    fn set_all_zero(&mut self) {
-        // No need to check as it is a NOOP if empty
-        self.fill(0x00);
-    }
-
-    #[inline(always)]
-    fn set_all_one(&mut self) {
-        // No need to check as it is a NOOP if empty
-        self.fill(0x01);
-    }
-
-    #[inline(always)]
-    fn set_all_max(&mut self) {
-        // No need to check as it is a NOOP if empty
-        self.fill(0xff);
-    }
-
-    #[inline(always)]
-    fn set_all_pattern(&mut self) {
-        check_not_empty!(self);
-        let mut i = 0;
-        self.iter_mut().for_each(|byte| {
-            if i % 2 == 0 {
-                byte.set_zero();
-            } else {
-                byte.set_max();
-            }
-            i += 1;
-        });
-    }
-
-    #[inline(always)]
-    fn set_all_random(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        random.fill_bytes(self);
-    }
-
-    #[inline(always)]
-    fn rotate_left_by_n(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let positions = random.random_range(0..self.len());
-        self.rotate_left(positions);
-    }
-
-    #[inline(always)]
-    fn rotate_right_by_n(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let positions = random.random_range(0..self.len());
-        self.rotate_right(positions);
-    }
-
-    #[inline(always)]
-    fn shuffle_array(&mut self, random: &mut impl Rng) {
-        // No need to check as it is a NOOP if empty
-        self.shuffle(random);
-    }
-
-    #[inline(always)]
-    fn reverse_array(&mut self) {
-        check_not_empty!(self);
-        self.reverse();
-    }
-
-    #[inline(always)]
-    fn slice_swap(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx1 = random.random_range(0..self.len());
-        let idx2 = random.random_range(0..self.len());
-
-        if idx1 != idx2 {
-            let max_idx = idx1.max(idx2);
-            let len = random.random_range(0..=self.len() - max_idx);
-
-            let slice1 = self[idx1..idx1 + len].to_vec();
-            let slice2 = self[idx2..idx2 + len].to_vec();
-
-            self[idx1..idx1 + len].copy_from_slice(&slice2);
-            self[idx2..idx2 + len].copy_from_slice(&slice1);
-        }
-    }
-
-    #[inline(always)]
-    fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let utf8 = INVALID_UTF8_SEQUENCES
-            [random.random_range(0..INVALID_UTF8_SEQUENCES.len())]
-        .to_vec();
-
-        check_not_smaller!(self, utf8.len());
-
-        let idx2 = random.random_range(0..=self.len() - utf8.len());
-        self[idx2..idx2 + utf8.len()].copy_from_slice(&utf8);
-    }
-
-    #[inline(always)]
-    fn slice_mutate(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let len = random.random_range(0..self.len() - idx);
-        let mut slice = self[idx..idx + len].to_vec();
-
-        match random.random_range(0..9) {
-            0 => slice.byte_mutate(random),
-            1 => slice.set_all_zero(),
-            2 => slice.set_all_one(),
-            3 => slice.set_all_max(),
-            4 => slice.set_all_pattern(),
-            5 => slice.shuffle(random),
-            6 => slice.rotate_left_by_n(random),
-            7 => slice.rotate_right_by_n(random),
-            8 => slice.reverse_array(),
-            _ => unreachable!(),
-        }
-
-        self[idx..idx + len].copy_from_slice(&slice);
-    }
-}
-
-impl<const N: usize, const M: usize> Mutable for [FixedBytes<M>; N] {
-    fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        self[..]().unwrap.mutate(random)
-    }
-}
-
-impl_mutations!(Vec<u8>);
-impl_mutate!(Vec<u8>);
+impl_mutations!([u8; MAX_COMMITTEES_PER_SLOT as usize]);
+impl_mutate!([u8; MAX_COMMITTEES_PER_SLOT as usize]);
