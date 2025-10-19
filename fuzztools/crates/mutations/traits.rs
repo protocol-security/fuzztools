@@ -1,4 +1,3 @@
-use std::todo;
 use rand::Rng;
 
 /// This traits implements the `mutate` method for a given type
@@ -62,6 +61,27 @@ pub(crate) trait ArrayMutations {
     fn slice_mutate(&mut self, random: &mut impl Rng);
 }
 
+pub(crate) trait FixedArrayMutations {
+    fn byte_swap(&mut self, random: &mut impl Rng);
+    fn byte_mutate(&mut self, random: &mut impl Rng);
+
+    fn set_all_zero(&mut self);
+    fn set_all_one(&mut self);
+    fn set_all_max(&mut self);
+    fn set_all_pattern(&mut self);
+    fn set_all_random(&mut self, random: &mut impl Rng);
+
+    fn rotate_left_by_n(&mut self, random: &mut impl Rng);
+    fn rotate_right_by_n(&mut self, random: &mut impl Rng);
+    fn shuffle_array(&mut self, random: &mut impl Rng);
+
+    fn reverse_array(&mut self);
+
+    fn slice_swap(&mut self, random: &mut impl Rng);
+    fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng);
+    fn slice_mutate(&mut self, random: &mut impl Rng);
+}
+
 pub(crate) trait ArrayInteresting {
     fn set_interesting_u8(&mut self, random: &mut impl Rng);
     fn set_interesting_u8_be(&mut self, random: &mut impl Rng);
@@ -77,16 +97,4 @@ pub(crate) trait TransactionMutations {
     fn mutate_blob_versioned_hashes(&mut self, random: &mut impl Rng);
     fn mutate_authorization_list(&mut self, random: &mut impl Rng);
     fn mutate_calldata(&mut self, random: &mut impl Rng);
-}
-
-pub(crate) trait BeaconStateMutations {
-    fn mutate_pending_deposits(&mut self, random: &mut impl Rng);
-    fn mutate_pending_partial_withdrawals(&mut self, random: &mut impl Rng);
-    fn mutate_pending_consolidations(&mut self, random: &mut impl Rng);
-}
-
-pub(crate) trait BeaconBlockBodyMutations {
-    fn mutate_attestations(&mut self, random: &mut impl Rng);
-    fn mutate_deposits(&mut self, random: &mut impl Rng);
-    fn mutate_execution_requests(&mut self, random: &mut impl Rng);
 }

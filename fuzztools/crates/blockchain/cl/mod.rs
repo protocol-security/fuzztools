@@ -1,18 +1,12 @@
 //! # CL blockchain
 //!
-//! Implements the following types:
+//! Exports the latest:
 //! - `BeaconState`
 //! - `BeaconBlock`
 //! 
-//! As well as the consensus spec types as a whole, but as we do not need them, we only export the types above.
+//! As well as implements the consensus spec types as a whole.
 
-mod forks;
+pub mod forks;
 
-pub struct BeaconState {
-
-}
-
-pub struct BeaconBlock {}
-
-pub use forks::fulu::BeaconState;
 pub use forks::electra::BeaconBlockBody;
+pub use forks::fulu::BeaconState;

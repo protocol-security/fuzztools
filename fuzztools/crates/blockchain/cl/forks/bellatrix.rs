@@ -2,96 +2,95 @@ use alloy::primitives::{FixedBytes, U256};
 use super::phase0::*;
 use super::altair::*;
 
-pub(crate) type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
-pub(crate) type ExecutionAddress = FixedBytes<20>;
+pub type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
+pub type ExecutionAddress = FixedBytes<20>;
 
-pub(crate) const INACTIVITY_PENALTY_QUOTIENT_BELLATRIX: u64 = 16_777_216;
-pub(crate) const MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX: u64 = 32;
-pub(crate) const PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX: u64 = 3;
+pub const INACTIVITY_PENALTY_QUOTIENT_BELLATRIX: u64 = 16_777_216;
+pub const MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX: u64 = 32;
+pub const PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX: u64 = 3;
 
-pub(crate) const MAX_BYTES_PER_TRANSACTION: u64 = 1_073_741_824;
-pub(crate) const MAX_TRANSACTIONS_PER_PAYLOAD: u64 = 1_048_576;
-pub(crate) const BYTES_PER_LOGS_BLOOM: usize = 256;
-pub(crate) const MAX_EXTRA_DATA_BYTES: usize = 32;
+pub const MAX_BYTES_PER_TRANSACTION: u64 = 1_073_741_824;
+pub const MAX_TRANSACTIONS_PER_PAYLOAD: u64 = 1_048_576;
+pub const BYTES_PER_LOGS_BLOOM: usize = 256;
+pub const MAX_EXTRA_DATA_BYTES: usize = 32;
 
 pub const TERMINAL_TOTAL_DIFFICULTY: u128 = 58_750_000_000_000_000_000_000;
 pub const TERMINAL_BLOCK_HASH: Hash32 = FixedBytes([0; 32]);
 pub const TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: Epoch = FAR_FUTURE_EPOCH;
 
-pub(crate) struct BeaconBlockBody {
-    randao_reveal: BLSSignature,
-    eth1_data: Eth1Data,
-    graffiti: FixedBytes<32>,
-    proposer_slashings: [ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize],
-    attester_slashings: [AttesterSlashing; MAX_ATTESTER_SLASHINGS as usize],
-    attestations: [Attestation; MAX_ATTESTATIONS as usize],
-    deposits: [Deposit; MAX_DEPOSITS as usize],
-    voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
-    sync_aggregate: SyncAggregate,
+pub struct BeaconBlockBody {
+    pub randao_reveal: BLSSignature,
+    pub eth1_data: Eth1Data,
+    pub graffiti: FixedBytes<32>,
+    pub proposer_slashings: [ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize],
+    pub attester_slashings: [AttesterSlashing; MAX_ATTESTER_SLASHINGS as usize],
+    pub attestations: [Attestation; MAX_ATTESTATIONS as usize],
+    pub deposits: [Deposit; MAX_DEPOSITS as usize],
+    pub voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
+    pub sync_aggregate: SyncAggregate,
     // [New in Bellatrix]
-    execution_payload: ExecutionPayload,
+    pub execution_payload: ExecutionPayload,
 }
 
-pub(crate) struct BeaconState {
-    genesis_time: u64,
-    genesis_validators_root: Root,
-    slot: Slot,
-    fork: Fork,
-    latest_block_header: BeaconBlockHeader,
-    block_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
-    state_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
-    historical_roots: [Root; HISTORICAL_ROOTS_LIMIT as usize],
-    eth1_data: Eth1Data,
-    eth1_data_votes: [Eth1Data; (EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH) as usize],
-    eth1_deposit_index: u64,
-    validators: [Validator; VALIDATOR_REGISTRY_LIMIT as usize],
-    balances: [Gwei; VALIDATOR_REGISTRY_LIMIT as usize],
-    randao_mixes: [FixedBytes<32>; EPOCHS_PER_HISTORICAL_VECTOR as usize],
-    slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
-    previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    justification_bits: [bool; JUSTIFICATION_BITS_LENGTH],
-    previous_justified_checkpoint: Checkpoint,
-    current_justified_checkpoint: Checkpoint,
-    finalized_checkpoint: Checkpoint,
-    inactivity_scores: [u64; VALIDATOR_REGISTRY_LIMIT as usize],
-    current_sync_committee: SyncCommittee,
-    next_sync_committee: SyncCommittee,
+pub struct BeaconState {
+    pub genesis_time: u64,
+    pub genesis_validators_root: Root,
+    pub slot: Slot,
+    pub fork: Fork,
+    pub latest_block_header: BeaconBlockHeader,
+    pub block_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
+    pub state_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
+    pub historical_roots: [Root; HISTORICAL_ROOTS_LIMIT as usize],
+    pub eth1_data: Eth1Data,
+    pub eth1_data_votes: [Eth1Data; (EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH) as usize],
+    pub eth1_deposit_index: u64,
+    pub validators: [Validator; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub balances: [Gwei; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub randao_mixes: [FixedBytes<32>; EPOCHS_PER_HISTORICAL_VECTOR as usize],
+    pub slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
+    pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub previous_justified_checkpoint: Checkpoint,
+    pub current_justified_checkpoint: Checkpoint,
+    pub finalized_checkpoint: Checkpoint,
+    pub inactivity_scores: [u64; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub current_sync_committee: SyncCommittee,
+    pub next_sync_committee: SyncCommittee,
     // [New in Bellatrix]
-    latest_execution_payload_header: ExecutionPayloadHeader,
+    pub latest_execution_payload_header: ExecutionPayloadHeader,
 }
 
-pub(crate) struct ExecutionPayload {
-    parent_hash: Hash32,
-    fee_recipient: ExecutionAddress,
-    state_root: FixedBytes<32>,
-    receipts_root: FixedBytes<32>,
-    logs_bloom: [u8; BYTES_PER_LOGS_BLOOM],
-    prev_randao: FixedBytes<32>,
-    block_number: u64,
-    gas_limit: u64,
-    gas_used: u64,
-    timestamp: u64,
-    extra_data: [u8; MAX_EXTRA_DATA_BYTES],
-    base_fee_per_gas: U256,
-    block_hash: Hash32,
-    transactions: [Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize],
+pub struct ExecutionPayload {
+    pub parent_hash: Hash32,
+    pub fee_recipient: ExecutionAddress,
+    pub state_root: FixedBytes<32>,
+    pub receipts_root: FixedBytes<32>,
+    pub logs_bloom: [u8; BYTES_PER_LOGS_BLOOM],
+    pub prev_randao: FixedBytes<32>,
+    pub block_number: u64,
+    pub gas_limit: u64,
+    pub gas_used: u64,
+    pub timestamp: u64,
+    pub extra_data: [u8; MAX_EXTRA_DATA_BYTES],
+    pub base_fee_per_gas: U256,
+    pub block_hash: Hash32,
+    pub transactions: [Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize],
 }
 
-pub(crate) struct ExecutionPayloadHeader {
-    parent_hash: Hash32,
-    fee_recipient: ExecutionAddress,
-    state_root: FixedBytes<32>,
-    receipts_root: FixedBytes<32>,
-    logs_bloom: [u8; BYTES_PER_LOGS_BLOOM],
-    prev_randao: FixedBytes<32>,
-    block_number: u64,
-    gas_limit: u64,
-    gas_used: u64,
-    timestamp: u64,
-    extra_data: [u8; MAX_EXTRA_DATA_BYTES],
-    base_fee_per_gas: U256,
-    block_hash: Hash32,
-    transactions_root: Root,
+pub struct ExecutionPayloadHeader {
+    pub parent_hash: Hash32,
+    pub fee_recipient: ExecutionAddress,
+    pub state_root: FixedBytes<32>,
+    pub receipts_root: FixedBytes<32>,
+    pub logs_bloom: [u8; BYTES_PER_LOGS_BLOOM],
+    pub prev_randao: FixedBytes<32>,
+    pub block_number: u64,
+    pub gas_limit: u64,
+    pub gas_used: u64,
+    pub timestamp: u64,
+    pub extra_data: [u8; MAX_EXTRA_DATA_BYTES],
+    pub base_fee_per_gas: U256,
+    pub block_hash: Hash32,
+    pub transactions_root: Root,
 }
-

@@ -1,86 +1,86 @@
 use alloy::primitives::FixedBytes;
 use super::phase0::*;
 
-pub(crate) type ParticipationFlags = u8;
+pub type ParticipationFlags = u8;
 
-pub(crate) const TIMELY_SOURCE_FLAG_INDEX: u64 = 0;
-pub(crate) const TIMELY_TARGET_FLAG_INDEX: u64 = 1;
-pub(crate) const TIMELY_HEAD_FLAG_INDEX: u64 = 2;
+pub const TIMELY_SOURCE_FLAG_INDEX: u64 = 0;
+pub const TIMELY_TARGET_FLAG_INDEX: u64 = 1;
+pub const TIMELY_HEAD_FLAG_INDEX: u64 = 2;
 
-pub(crate) const TIMELY_SOURCE_WEIGHT: u64 = 14;
-pub(crate) const TIMELY_TARGET_WEIGHT: u64 = 26;
-pub(crate) const TIMELY_HEAD_WEIGHT: u64 = 14;
-pub(crate) const SYNC_REWARD_WEIGHT: u64 = 2;
-pub(crate) const PROPOSER_WEIGHT: u64 = 8;
-pub(crate) const WEIGHT_DENOMINATOR: u64 = 64;
+pub const TIMELY_SOURCE_WEIGHT: u64 = 14;
+pub const TIMELY_TARGET_WEIGHT: u64 = 26;
+pub const TIMELY_HEAD_WEIGHT: u64 = 14;
+pub const SYNC_REWARD_WEIGHT: u64 = 2;
+pub const PROPOSER_WEIGHT: u64 = 8;
+pub const WEIGHT_DENOMINATOR: u64 = 64;
 
-pub(crate) const DOMAIN_SYNC_COMMITTEE: DomainType = FixedBytes([0x07, 0x00, 0x00, 0x00]);
-pub(crate) const DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF: DomainType = FixedBytes([0x08, 0x00, 0x00, 0x00]);
-pub(crate) const DOMAIN_CONTRIBUTION_AND_PROOF: DomainType = FixedBytes([0x09, 0x00, 0x00, 0x00]);
+pub const DOMAIN_SYNC_COMMITTEE: DomainType = FixedBytes([0x07, 0x00, 0x00, 0x00]);
+pub const DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF: DomainType = FixedBytes([0x08, 0x00, 0x00, 0x00]);
+pub const DOMAIN_CONTRIBUTION_AND_PROOF: DomainType = FixedBytes([0x09, 0x00, 0x00, 0x00]);
 
-pub(crate) const PARTICIPATION_FLAG_WEIGHTS: [u64; 3] = [TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, TIMELY_HEAD_WEIGHT];
+pub const PARTICIPATION_FLAG_WEIGHTS: [u64; 3] = [TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, TIMELY_HEAD_WEIGHT];
 
-pub(crate) const INACTIVITY_PENALTY_QUOTIENT_ALTAIR: u64 = 50_331_648;
-pub(crate) const MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR: u64 = 64;
-pub(crate) const PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR: u64 = 2;
+pub const INACTIVITY_PENALTY_QUOTIENT_ALTAIR: u64 = 50_331_648;
+pub const MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR: u64 = 64;
+pub const PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR: u64 = 2;
 
-pub(crate) const SYNC_COMMITTEE_SIZE: u64 = 512;
-pub(crate) const EPOCHS_PER_SYNC_COMMITTEE_PERIOD: u64 = 256;
+pub const SYNC_COMMITTEE_SIZE: u64 = 512;
+pub const EPOCHS_PER_SYNC_COMMITTEE_PERIOD: u64 = 256;
 
-pub(crate) const INACTIVITY_SCORE_BIAS: u64 = 4;
-pub(crate) const INACTIVITY_SCORE_RECOVERY_RATE: u64 = 16;
+pub const INACTIVITY_SCORE_BIAS: u64 = 4;
+pub const INACTIVITY_SCORE_RECOVERY_RATE: u64 = 16;
 
-pub(crate) struct BeaconBlockBody {
-    randao_reveal: BLSSignature,
-    eth1_data: Eth1Data,
-    graffiti: FixedBytes<32>,
-    proposer_slashings: [ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize],
-    attester_slashings: [AttesterSlashing; MAX_ATTESTER_SLASHINGS as usize],
-    attestations: [Attestation; MAX_ATTESTATIONS as usize],
-    deposits: [Deposit; MAX_DEPOSITS as usize],
-    voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
+pub struct BeaconBlockBody {
+    pub randao_reveal: BLSSignature,
+    pub eth1_data: Eth1Data,
+    pub graffiti: FixedBytes<32>,
+    pub proposer_slashings: [ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize],
+    pub attester_slashings: [AttesterSlashing; MAX_ATTESTER_SLASHINGS as usize],
+    pub attestations: [Attestation; MAX_ATTESTATIONS as usize],
+    pub deposits: [Deposit; MAX_DEPOSITS as usize],
+    pub voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
     // [New in Altair]
-    sync_aggregate: SyncAggregate,
+    pub sync_aggregate: SyncAggregate,
 }
 
-pub(crate) struct BeaconState {
-    genesis_time: u64,
-    genesis_validators_root: Root,
-    slot: Slot,
-    fork: Fork,
-    latest_block_header: BeaconBlockHeader,
-    block_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
-    state_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
-    historical_roots: [Root; HISTORICAL_ROOTS_LIMIT as usize],
-    eth1_data: Eth1Data,
-    eth1_data_votes: [Eth1Data; (EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH) as usize],
-    eth1_deposit_index: u64,
-    validators: [Validator; VALIDATOR_REGISTRY_LIMIT as usize],
-    balances: [Gwei; VALIDATOR_REGISTRY_LIMIT as usize],
-    randao_mixes: [FixedBytes<32>; EPOCHS_PER_HISTORICAL_VECTOR as usize],
-    slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
+pub struct BeaconState {
+    pub genesis_time: u64,
+    pub genesis_validators_root: Root,
+    pub slot: Slot,
+    pub fork: Fork,
+    pub latest_block_header: BeaconBlockHeader,
+    pub block_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
+    pub state_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
+    pub historical_roots: [Root; HISTORICAL_ROOTS_LIMIT as usize],
+    pub eth1_data: Eth1Data,
+    pub eth1_data_votes: [Eth1Data; (EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH) as usize],
+    pub eth1_deposit_index: u64,
+    pub validators: [Validator; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub balances: [Gwei; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub randao_mixes: [FixedBytes<32>; EPOCHS_PER_HISTORICAL_VECTOR as usize],
+    pub slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
     // [Modified in Altair]
-    previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
     // [Modified in Altair]
-    current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    justification_bits: [bool; JUSTIFICATION_BITS_LENGTH],
-    previous_justified_checkpoint: Checkpoint,
-    current_justified_checkpoint: Checkpoint,
-    finalized_checkpoint: Checkpoint,
+    pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub previous_justified_checkpoint: Checkpoint,
+    pub current_justified_checkpoint: Checkpoint,
+    pub finalized_checkpoint: Checkpoint,
     // [New in Altair]
-    inactivity_scores: [u64; VALIDATOR_REGISTRY_LIMIT as usize],
+    pub inactivity_scores: [u64; VALIDATOR_REGISTRY_LIMIT as usize],
     // [New in Altair]
-    current_sync_committee: SyncCommittee,
+    pub current_sync_committee: SyncCommittee,
     // [New in Altair]
-    next_sync_committee: SyncCommittee,
+    pub next_sync_committee: SyncCommittee,
 }
 
-pub(crate) struct SyncAggregate {
-    sync_committee_bits: [bool; SYNC_COMMITTEE_SIZE as usize],
-    sync_committee_signature: BLSSignature,
+pub struct SyncAggregate {
+    pub sync_committee_bits: [u8;SYNC_COMMITTEE_SIZE as usize],
+    pub sync_committee_signature: BLSSignature,
 }
 
-pub(crate) struct SyncCommittee {
-    pubkeys: [BLSPubkey; SYNC_COMMITTEE_SIZE as usize],
-    aggregate_pubkey: BLSPubkey,
+pub struct SyncCommittee {
+    pub pubkeys: [BLSPubkey; SYNC_COMMITTEE_SIZE as usize],
+    pub aggregate_pubkey: BLSPubkey,
 }

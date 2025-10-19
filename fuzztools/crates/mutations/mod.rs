@@ -22,7 +22,6 @@ mod consensus;
 mod traits;
 mod transactions;
 mod uint;
-mod consensus;
 
 pub use traits::Mutable;
 

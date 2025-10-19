@@ -24,11 +24,11 @@ impl Mutable for Bytes {
     }
 }
 
-impl Mutable for FixedBytes<32> {
+impl<const N: usize> Mutable for FixedBytes<N> {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         let mut bytes = self.to_vec();
         let should_set_to_none = bytes.mutate(random);
-        bytes.resize(32, 0);
+        bytes.resize(N, 0);
         *self = FixedBytes::from_slice(&bytes);
         should_set_to_none
     }
