@@ -14,7 +14,7 @@ pub const MAX_TRANSACTIONS_PER_PAYLOAD: u64 = 1_048_576;
 pub const BYTES_PER_LOGS_BLOOM: usize = 256;
 pub const MAX_EXTRA_DATA_BYTES: usize = 32;
 
-pub const TERMINAL_TOTAL_DIFFICULTY: u64 = 58_750_000_000_000_000_000_000;
+pub const TERMINAL_TOTAL_DIFFICULTY: u128 = 58_750_000_000_000_000_000_000;
 pub const TERMINAL_BLOCK_HASH: Hash32 = FixedBytes([0; 32]);
 pub const TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: Epoch = FAR_FUTURE_EPOCH;
 
@@ -72,7 +72,7 @@ pub struct ExecutionPayload {
     gas_limit: u64,
     gas_used: u64,
     timestamp: u64,
-    extra_data: [u8; MAX_EXTRA_DATA_BYTES as usize],
+    extra_data: [u8; MAX_EXTRA_DATA_BYTES],
     base_fee_per_gas: U256,
     block_hash: Hash32,
     transactions: [Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize],
@@ -89,7 +89,7 @@ pub struct ExecutionPayloadHeader {
     gas_limit: u64,
     gas_used: u64,
     timestamp: u64,
-    extra_data: [u8; MAX_EXTRA_DATA_BYTES as usize],
+    extra_data: [u8; MAX_EXTRA_DATA_BYTES],
     base_fee_per_gas: U256,
     block_hash: Hash32,
     transactions_root: Root,

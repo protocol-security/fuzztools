@@ -1,9 +1,10 @@
 //! # CL blockchain
 //!
-//! Implements the following types:
-//! - `BeaconState`
-//! - `BeaconBlock`
+//! Exports the latest fork types:
+//! - `BeaconState` (Fulu)
+//! - `BeaconBlockBody` (Electra)
 
-mod beacon_block;
-mod beacon_state;
 mod forks;
+
+pub use forks::fulu::BeaconState;
+pub use forks::electra::BeaconBlockBody;
