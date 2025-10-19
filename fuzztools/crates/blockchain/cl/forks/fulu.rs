@@ -1,9 +1,9 @@
+use super::{altair::*, electra::*, phase0::*};
+use crate::blockchain::cl::forks::{
+    capella::{HistoricalSummary, WithdrawalIndex},
+    deneb::ExecutionPayloadHeader,
+};
 use alloy::primitives::FixedBytes;
-use crate::blockchain::cl::forks::capella::{HistoricalSummary, WithdrawalIndex};
-use crate::blockchain::cl::forks::deneb::ExecutionPayloadHeader;
-use super::phase0::*;
-use super::altair::*;
-use super::electra::*;
 
 #[derive(Copy, Clone)]
 pub struct BeaconState {
@@ -24,7 +24,7 @@ pub struct BeaconState {
     pub slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
     pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
     pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub justification_bits: [u8; JUSTIFICATION_BITS_LENGTH],
     pub previous_justified_checkpoint: Checkpoint,
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,
@@ -42,7 +42,8 @@ pub struct BeaconState {
     pub consolidation_balance_to_consume: Gwei,
     pub earliest_consolidation_epoch: Epoch,
     pub pending_deposits: [PendingDeposit; PENDING_DEPOSITS_LIMIT as usize],
-    pub pending_partial_withdrawals: [PendingPartialWithdrawal; PENDING_PARTIAL_WITHDRAWALS_LIMIT as usize],
+    pub pending_partial_withdrawals:
+        [PendingPartialWithdrawal; PENDING_PARTIAL_WITHDRAWALS_LIMIT as usize],
     pub pending_consolidations: [PendingConsolidation; PENDING_CONSOLIDATIONS_LIMIT as usize],
     // [New in Fulu:EIP7917]
     pub proposer_lookahead: [ValidatorIndex; ((MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH) as usize],

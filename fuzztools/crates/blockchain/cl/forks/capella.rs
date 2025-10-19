@@ -1,7 +1,5 @@
+use super::{altair::*, bellatrix::*, phase0::*};
 use alloy::primitives::{FixedBytes, U256};
-use super::phase0::*;
-use super::altair::*;
-use super::bellatrix::*;
 
 pub type WithdrawalIndex = u64;
 
@@ -91,7 +89,8 @@ pub struct BeaconBlockBody {
     pub sync_aggregate: SyncAggregate,
     pub execution_payload: ExecutionPayload,
     // [New in Capella]
-    pub bls_to_execution_changes: [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
+    pub bls_to_execution_changes:
+        [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
 }
 
 #[derive(Copy, Clone)]
@@ -113,7 +112,7 @@ pub struct BeaconState {
     pub slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
     pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
     pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub justification_bits: [u8; JUSTIFICATION_BITS_LENGTH],
     pub previous_justified_checkpoint: Checkpoint,
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,

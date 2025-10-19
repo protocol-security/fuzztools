@@ -1,6 +1,20 @@
 use super::traits::Mutable;
-use crate::blockchain::cl::{forks::{altair::SyncAggregate, capella::{BLSToExecutionChange, SignedBLSToExecutionChange, Withdrawal}, deneb::{ExecutionPayload, KZGCommitment}, electra::{Attestation, AttesterSlashing, ExecutionRequests, IndexedAttestation, WithdrawalRequest}, phase0::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, Eth1Data, ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, VoluntaryExit}}, BeaconBlockBody};
-use crate::blockchain::cl::forks::electra::{ConsolidationRequest, DepositRequest};
+use crate::blockchain::cl::{
+    forks::{
+        altair::SyncAggregate,
+        capella::{BLSToExecutionChange, SignedBLSToExecutionChange, Withdrawal},
+        deneb::{ExecutionPayload, KZGCommitment},
+        electra::{
+            Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, ExecutionRequests,
+            IndexedAttestation, WithdrawalRequest,
+        },
+        phase0::{
+            AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, Eth1Data,
+            ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, VoluntaryExit,
+        },
+    },
+    BeaconBlockBody,
+};
 use rand::Rng;
 
 impl Mutable for Eth1Data {
@@ -100,7 +114,7 @@ impl Mutable for Attestation {
                 aggregation_bits.resize(self.aggregation_bits.len(), 0);
                 self.aggregation_bits.copy_from_slice(&aggregation_bits);
                 false
-            }
+            },
             1 => self.data.mutate(random),
             2 => {
                 let mut signature = self.signature.to_vec();
@@ -108,14 +122,14 @@ impl Mutable for Attestation {
                 signature.resize(self.signature.len(), 0);
                 self.signature.copy_from_slice(&signature);
                 false
-            }
+            },
             3 => {
                 let mut committee_bits = self.committee_bits.to_vec();
                 committee_bits.mutate(random);
                 committee_bits.resize(self.committee_bits.len(), 0);
                 self.committee_bits.copy_from_slice(&committee_bits);
                 false
-            }
+            },
             _ => unreachable!(),
         }
     }
@@ -172,7 +186,7 @@ impl Mutable for SyncAggregate {
                 sync_committee_bits.resize(self.sync_committee_bits.len(), 0);
                 self.sync_committee_bits.copy_from_slice(&sync_committee_bits);
                 false
-            }
+            },
             1 => self.sync_committee_signature.mutate(random),
             _ => unreachable!(),
         }
@@ -204,7 +218,7 @@ impl Mutable for ExecutionPayload {
                 logs_bloom.resize(self.logs_bloom.len(), 0);
                 self.logs_bloom.copy_from_slice(&logs_bloom);
                 false
-            }
+            },
             5 => self.prev_randao.mutate(random),
             6 => self.block_number.mutate(random),
             7 => self.gas_limit.mutate(random),
@@ -216,7 +230,7 @@ impl Mutable for ExecutionPayload {
                 extra_data.resize(self.extra_data.len(), 0);
                 self.extra_data.copy_from_slice(&extra_data);
                 false
-            }
+            },
             11 => self.base_fee_per_gas.mutate(random),
             12 => self.block_hash.mutate(random),
             13 => self.transactions.mutate(random),

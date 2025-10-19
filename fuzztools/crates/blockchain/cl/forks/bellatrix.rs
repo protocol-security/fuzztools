@@ -1,6 +1,5 @@
+use super::{altair::*, phase0::*};
 use alloy::primitives::{FixedBytes, U256};
-use super::phase0::*;
-use super::altair::*;
 
 pub type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
 pub type ExecutionAddress = FixedBytes<20>;
@@ -52,7 +51,7 @@ pub struct BeaconState {
     pub slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
     pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
     pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub justification_bits: [u8; JUSTIFICATION_BITS_LENGTH],
     pub previous_justified_checkpoint: Checkpoint,
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,

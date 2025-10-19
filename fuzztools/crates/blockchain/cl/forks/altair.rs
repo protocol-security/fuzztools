@@ -1,5 +1,5 @@
-use alloy::primitives::FixedBytes;
 use super::phase0::*;
+use alloy::primitives::FixedBytes;
 
 pub type ParticipationFlags = u8;
 
@@ -18,7 +18,8 @@ pub const DOMAIN_SYNC_COMMITTEE: DomainType = FixedBytes([0x07, 0x00, 0x00, 0x00
 pub const DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF: DomainType = FixedBytes([0x08, 0x00, 0x00, 0x00]);
 pub const DOMAIN_CONTRIBUTION_AND_PROOF: DomainType = FixedBytes([0x09, 0x00, 0x00, 0x00]);
 
-pub const PARTICIPATION_FLAG_WEIGHTS: [u64; 3] = [TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, TIMELY_HEAD_WEIGHT];
+pub const PARTICIPATION_FLAG_WEIGHTS: [u64; 3] =
+    [TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, TIMELY_HEAD_WEIGHT];
 
 pub const INACTIVITY_PENALTY_QUOTIENT_ALTAIR: u64 = 50_331_648;
 pub const MIN_SLASHING_PENALTY_QUOTIENT_ALTAIR: u64 = 64;
@@ -65,7 +66,7 @@ pub struct BeaconState {
     pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
     // [Modified in Altair]
     pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub justification_bits: [u8; JUSTIFICATION_BITS_LENGTH],
     pub previous_justified_checkpoint: Checkpoint,
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,
@@ -79,7 +80,7 @@ pub struct BeaconState {
 
 #[derive(Copy, Clone)]
 pub struct SyncAggregate {
-    pub sync_committee_bits: [u8;SYNC_COMMITTEE_SIZE as usize],
+    pub sync_committee_bits: [u8; SYNC_COMMITTEE_SIZE as usize],
     pub sync_committee_signature: BLSSignature,
 }
 

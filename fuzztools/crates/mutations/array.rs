@@ -1,11 +1,27 @@
-use crate::blockchain::cl::forks::bellatrix::{Transaction, MAX_BYTES_PER_TRANSACTION, MAX_TRANSACTIONS_PER_PAYLOAD};
-use crate::blockchain::cl::forks::deneb::{KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK};
-use crate::blockchain::cl::forks::electra::{Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, WithdrawalRequest, MAX_ATTESTATIONS_ELECTRA, MAX_ATTESTER_SLASHINGS_ELECTRA, MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD, MAX_DEPOSIT_REQUESTS_PER_PAYLOAD, MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD};
-use crate::blockchain::cl::forks::phase0::{Deposit, ProposerSlashing, SignedVoluntaryExit, DEPOSIT_CONTRACT_TREE_DEPTH, MAX_COMMITTEES_PER_SLOT, MAX_DEPOSITS, MAX_PROPOSER_SLASHINGS, MAX_VALIDATORS_PER_COMMITTEE, MAX_VOLUNTARY_EXITS};
-use crate::blockchain::cl::forks::capella::{SignedBLSToExecutionChange, Withdrawal, MAX_BLS_TO_EXECUTION_CHANGES, MAX_WITHDRAWALS_PER_PAYLOAD};
-use crate::mutations::traits::{ArrayMutations, Mutable};
+use crate::{
+    blockchain::cl::forks::{
+        bellatrix::{Transaction, MAX_BYTES_PER_TRANSACTION, MAX_TRANSACTIONS_PER_PAYLOAD},
+        capella::{
+            SignedBLSToExecutionChange, Withdrawal, MAX_BLS_TO_EXECUTION_CHANGES,
+            MAX_WITHDRAWALS_PER_PAYLOAD,
+        },
+        deneb::{KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK},
+        electra::{
+            Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, WithdrawalRequest,
+            MAX_ATTESTATIONS_ELECTRA, MAX_ATTESTER_SLASHINGS_ELECTRA,
+            MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD, MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,
+            MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,
+        },
+        phase0::{
+            Deposit, ProposerSlashing, SignedVoluntaryExit, DEPOSIT_CONTRACT_TREE_DEPTH,
+            MAX_COMMITTEES_PER_SLOT, MAX_DEPOSITS, MAX_PROPOSER_SLASHINGS,
+            MAX_VALIDATORS_PER_COMMITTEE, MAX_VOLUNTARY_EXITS,
+        },
+    },
+    mutations::traits::{ArrayMutations, Mutable},
+};
 use alloy::primitives::FixedBytes;
-use rand::{Rng, seq::SliceRandom};
+use rand::{seq::SliceRandom, Rng};
 
 macro_rules! check_not_empty {
     ($bytes:ident) => {

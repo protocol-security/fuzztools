@@ -1,8 +1,5 @@
+use super::{altair::*, bellatrix::*, capella::*, phase0::*};
 use alloy::primitives::{FixedBytes, U256};
-use super::phase0::*;
-use super::altair::*;
-use super::bellatrix::*;
-use super::capella::*;
 
 pub type VersionedHash = FixedBytes<32>;
 pub type BlobIndex = u64;
@@ -27,7 +24,8 @@ pub struct BeaconBlockBody {
     pub sync_aggregate: SyncAggregate,
     // [Modified in Deneb:EIP4844]
     pub execution_payload: ExecutionPayload,
-    pub bls_to_execution_changes: [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
+    pub bls_to_execution_changes:
+        [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
     // [New in Deneb:EIP4844]
     pub blob_kzg_commitments: [KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize],
 }
@@ -97,7 +95,7 @@ pub struct BeaconState {
     pub slashings: [Gwei; EPOCHS_PER_SLASHINGS_VECTOR as usize],
     pub previous_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
     pub current_epoch_participation: [ParticipationFlags; VALIDATOR_REGISTRY_LIMIT as usize],
-    pub justification_bits: [u8;JUSTIFICATION_BITS_LENGTH],
+    pub justification_bits: [u8; JUSTIFICATION_BITS_LENGTH],
     pub previous_justified_checkpoint: Checkpoint,
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,

@@ -1,9 +1,13 @@
+use super::{
+    altair::*,
+    bellatrix::ExecutionAddress,
+    capella::*,
+    deneb::{
+        ExecutionPayload, ExecutionPayloadHeader, KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK,
+    },
+    phase0::*,
+};
 use alloy::primitives::FixedBytes;
-use super::phase0::*;
-use super::altair::*;
-use super::bellatrix::ExecutionAddress;
-use super::capella::*;
-use super::deneb::{ExecutionPayload, ExecutionPayloadHeader, KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK};
 
 pub const UNSET_DEPOSIT_REQUESTS_START_INDEX: u64 = u64::MAX;
 pub const FULL_EXIT_REQUEST_AMOUNT: u64 = 0;
@@ -125,7 +129,8 @@ pub struct BeaconBlockBody {
     pub voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
     pub sync_aggregate: SyncAggregate,
     pub execution_payload: ExecutionPayload,
-    pub bls_to_execution_changes: [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
+    pub bls_to_execution_changes:
+        [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
     pub blob_kzg_commitments: [KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize],
     // [New in Electra]
     pub execution_requests: ExecutionRequests,
@@ -144,7 +149,8 @@ pub struct Attestation {
 #[derive(Copy, Clone)]
 pub struct IndexedAttestation {
     // [Modified in Electra:EIP7549]
-    pub attesting_indices: [ValidatorIndex; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize],
+    pub attesting_indices:
+        [ValidatorIndex; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize],
     pub data: AttestationData,
     pub signature: BLSSignature,
 }
@@ -194,7 +200,8 @@ pub struct BeaconState {
     // [New in Electra:EIP7251]
     pub pending_deposits: [PendingDeposit; PENDING_DEPOSITS_LIMIT as usize],
     // [New in Electra:EIP7251]
-    pub pending_partial_withdrawals: [PendingPartialWithdrawal; PENDING_PARTIAL_WITHDRAWALS_LIMIT as usize],
+    pub pending_partial_withdrawals:
+        [PendingPartialWithdrawal; PENDING_PARTIAL_WITHDRAWALS_LIMIT as usize],
     // [New in Electra:EIP7251]
     pub pending_consolidations: [PendingConsolidation; PENDING_CONSOLIDATIONS_LIMIT as usize],
 }
