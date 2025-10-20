@@ -7,7 +7,7 @@ where
     T: Mutable + Copy + Default + Random + Phantom,
 {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=9) {
+        match random.random_range(0..=10) {
             // Push a random value
             0 => self.push(T::random(random)),
             // Remove a random element from the vector

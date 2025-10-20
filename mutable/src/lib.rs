@@ -58,7 +58,7 @@ pub fn mutable_derive(item: TokenStream) -> TokenStream {
                 #[automatically_derived]
                 impl Mutable for #id {
                     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                        match random.random_range(0..=#field_count) {
+                        match random.random_range(0..#field_count) {
                             #(#match_arms)*
                             _ => unreachable!(),
                         }
