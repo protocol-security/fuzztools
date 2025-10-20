@@ -1,11 +1,16 @@
 use super::{altair::*, electra::*, phase0::*};
-use crate::blockchain::cl::forks::{
-    capella::{HistoricalSummary, WithdrawalIndex},
-    deneb::ExecutionPayloadHeader,
+use crate::{
+    blockchain::cl::forks::{
+        capella::{HistoricalSummary, WithdrawalIndex},
+        deneb::ExecutionPayloadHeader,
+    },
+    mutations::Mutable,
 };
 use alloy::primitives::FixedBytes;
+use mutable::Mutable;
+use rand::Rng;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,

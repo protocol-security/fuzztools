@@ -1,6 +1,8 @@
 use super::{altair::*, phase0::*};
+use crate::mutations::Mutable;
 use alloy::primitives::{FixedBytes, U256};
-
+use mutable::Mutable;
+use rand::Rng;
 pub type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
 pub type ExecutionAddress = FixedBytes<20>;
 
@@ -17,7 +19,7 @@ pub const TERMINAL_TOTAL_DIFFICULTY: u128 = 58_750_000_000_000_000_000_000;
 pub const TERMINAL_BLOCK_HASH: Hash32 = FixedBytes([0; 32]);
 pub const TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: Epoch = FAR_FUTURE_EPOCH;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -32,7 +34,7 @@ pub struct BeaconBlockBody {
     pub execution_payload: ExecutionPayload,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,
@@ -62,7 +64,7 @@ pub struct BeaconState {
     pub latest_execution_payload_header: ExecutionPayloadHeader,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct ExecutionPayload {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -80,7 +82,7 @@ pub struct ExecutionPayload {
     pub transactions: [Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize],
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct ExecutionPayloadHeader {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,

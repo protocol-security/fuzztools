@@ -179,7 +179,20 @@ impl App {
                     // Mutate transactions if fuzzing is enabled
                     let mutate_start = Instant::now();
                     if self.fuzzing {
-                        unsigned_txs.iter_mut().for_each(|tx| { tx.mutate(random); });
+                        unsigned_txs.iter_mut().for_each(|tx| {
+                            // @todo this is temporal as no way to access TX::to within the AL struct
+                            let access_list_length = tx.access_list.as_ref().map(|al| al.0.len()).unwrap_or(0);
+                            tx.mutate(random);
+                            let diff = tx.access_list.as_ref().map(|al| al.0.len()).unwrap_or(0) - access_list_length;
+                            if diff > 0 {
+                                if let Some(last_item) = tx.access_list.as_mut().unwrap().0.last_mut() {
+                                    if let Some(to_addr) = tx.to {
+                                        last_item.address = to_addr;
+                                    }
+                                }
+                            }
+
+                        });
                     }
                     self.mutate_time = mutate_start.elapsed();
 

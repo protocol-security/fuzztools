@@ -1,8 +1,8 @@
 use super::{
-    traits::{ByteArrayMutations, Mutable, UintMutations},
-    INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES,
+    constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
+    traits::{BytesMutations, Mutable, UintMutations},
 };
-use crate::mutations::traits::ByteArrayInteresting;
+use crate::mutations::traits::InterestingMutations;
 use rand::{seq::SliceRandom, Rng};
 
 macro_rules! check_not_empty {
@@ -26,36 +26,30 @@ macro_rules! impl_mutate {
         impl Mutable for $type {
             #[inline(always)]
             fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                match random.random_range(0..=24) {
-                    0 => self.byte_clone(random),
-                    1 => self.byte_remove(random),
-                    2 => self.byte_swap(random),
-                    3 => self.byte_mutate(random),
-                    4 => self.set_all_zero(),
-                    5 => self.set_all_one(),
-                    6 => self.set_all_max(),
-                    7 => self.set_all_pattern(),
-                    8 => self.set_all_random(random),
-                    9 => self.shuffle_array(random),
-                    10 => self.rotate_left_by_n(random),
-                    11 => self.rotate_right_by_n(random),
-                    12 => self.reverse_array(),
-                    13 => self.slice_clone(random),
-                    14 => self.slice_swap(random),
-                    15 => self.slice_swap_with_invalid_utf8(random),
-                    16 => self.slice_mutate(random),
-                    17 => self.set_interesting_u8(random),
-                    18 => self.set_interesting_u8_be(random),
-                    19 => self.set_interesting_u16_le(random),
-                    20 => self.set_interesting_u16_be(random),
-                    21 => self.set_interesting_u32_le(random),
-                    22 => self.set_interesting_u32_be(random),
-                    23 => self.set_slice_with_invalid_utf8(random),
-                    24 => return true,
+                match random.random_range(0..=19) {
+                    0 => self.random_byte_push(random),
+                    1 => self.byte_clone(random),
+                    2 => self.byte_remove(random),
+                    3 => self.byte_swap(random),
+                    4 => self.byte_mutate(random),
+                    5 => self.set_all_zero(),
+                    6 => self.set_all_one(),
+                    7 => self.set_all_max(),
+                    8 => self.set_all_pattern(),
+                    9 => self.set_all_random(random),
+                    10 => self.shuffle_array(random),
+                    11 => self.rotate_left_by_n(random),
+                    12 => self.rotate_right_by_n(random),
+                    13 => self.reverse_array(),
+                    14 => self.slice_clone(random),
+                    15 => self.slice_swap(random),
+                    16 => self.slice_swap_with_invalid_utf8(random),
+                    17 => self.slice_mutate(random),
+                    18 => self.set_interesting(random),
+                    19 => return true,
                     _ => unreachable!(),
                 }
-
-                false
+                return false;
             }
         }
     };
@@ -63,7 +57,13 @@ macro_rules! impl_mutate {
 
 macro_rules! impl_mutations {
     ($type:ty) => {
-        impl ByteArrayMutations for $type {
+        impl BytesMutations for $type {
+            #[inline(always)]
+            fn random_byte_push(&mut self, random: &mut impl Rng) {
+                let byte = random.random::<u8>();
+                self.push(byte);
+            }
+
             #[inline(always)]
             fn byte_clone(&mut self, random: &mut impl Rng) {
                 check_not_empty!(self);
@@ -226,67 +226,61 @@ macro_rules! impl_mutations {
     };
 }
 
-impl ByteArrayInteresting for Vec<u8> {
-    #[inline(always)]
-    fn set_interesting_u8(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let value_idx = random.random_range(0..INTERESTING_U8.len());
-        self[idx] = INTERESTING_U8[value_idx];
-    }
-
-    #[inline(always)]
-    fn set_interesting_u8_be(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let value_idx = random.random_range(0..INTERESTING_U8.len());
-        self[idx] = INTERESTING_U8[value_idx].reverse_bits();
-    }
-
-    #[inline(always)]
-    fn set_interesting_u16_le(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx = random.random_range(0..=self.len() - 2);
-        let value_idx = random.random_range(0..INTERESTING_U16.len());
-        let value = INTERESTING_U16[value_idx].to_le_bytes();
-        self[idx..idx + 2].copy_from_slice(&value);
-    }
-
-    #[inline(always)]
-    fn set_interesting_u16_be(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 2);
-        let idx = random.random_range(0..=self.len() - 2);
-        let value_idx = random.random_range(0..INTERESTING_U16.len());
-        let value = INTERESTING_U16[value_idx].to_be_bytes();
-        self[idx..idx + 2].copy_from_slice(&value);
-    }
-
-    #[inline(always)]
-    fn set_interesting_u32_le(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 4);
-        let idx = random.random_range(0..=self.len() - 4);
-        let value_idx = random.random_range(0..INTERESTING_U32.len());
-        let value = INTERESTING_U32[value_idx].to_le_bytes();
-        self[idx..idx + 4].copy_from_slice(&value);
-    }
-
-    #[inline(always)]
-    fn set_interesting_u32_be(&mut self, random: &mut impl Rng) {
-        check_not_smaller!(self, 4);
-        let idx = random.random_range(0..=self.len() - 4);
-        let value_idx = random.random_range(0..INTERESTING_U32.len());
-        let value = INTERESTING_U32[value_idx].to_be_bytes();
-        self[idx..idx + 4].copy_from_slice(&value);
-    }
-
-    #[inline(always)]
-    fn set_slice_with_invalid_utf8(&mut self, random: &mut impl Rng) {
-        check_not_empty!(self);
-        let utf8 =
-            INVALID_UTF8_SEQUENCES[random.random_range(0..INVALID_UTF8_SEQUENCES.len())].to_vec();
-        check_not_smaller!(self, utf8.len());
-        let idx = random.random_range(0..=self.len() - utf8.len());
-        self[idx..idx + utf8.len()].copy_from_slice(&utf8);
+impl InterestingMutations for Vec<u8> {
+    fn set_interesting(&mut self, random: &mut impl Rng) {
+        match random.random_range(0..=7) {
+            0 => {
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                let value_idx = random.random_range(0..INTERESTING_U8.len());
+                self[idx] = INTERESTING_U8[value_idx];
+            },
+            1 => {
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                let value_idx = random.random_range(0..INTERESTING_U8.len());
+                self[idx] = INTERESTING_U8[value_idx].reverse_bits();
+            },
+            2 => {
+                check_not_smaller!(self, 2);
+                let idx = random.random_range(0..=self.len() - 2);
+                let value_idx = random.random_range(0..INTERESTING_U16.len());
+                let value = INTERESTING_U16[value_idx].to_le_bytes();
+                self[idx..idx + 2].copy_from_slice(&value);
+            },
+            3 => {
+                check_not_smaller!(self, 2);
+                let idx = random.random_range(0..=self.len() - 2);
+                let value_idx = random.random_range(0..INTERESTING_U16.len());
+                let value = INTERESTING_U16[value_idx].to_be_bytes();
+                self[idx..idx + 2].copy_from_slice(&value);
+            },
+            4 => {
+                check_not_smaller!(self, 4);
+                let idx = random.random_range(0..=self.len() - 4);
+                let value_idx = random.random_range(0..INTERESTING_U32.len());
+                let value = INTERESTING_U32[value_idx].to_le_bytes();
+                self[idx..idx + 4].copy_from_slice(&value);
+            },
+            5 => {
+                check_not_smaller!(self, 4);
+                let idx = random.random_range(0..=self.len() - 4);
+                let value_idx = random.random_range(0..INTERESTING_U32.len());
+                let value = INTERESTING_U32[value_idx].to_be_bytes();
+                self[idx..idx + 4].copy_from_slice(&value);
+            },
+            6 => {
+                check_not_empty!(self);
+                let utf8 = INVALID_UTF8_SEQUENCES
+                    [random.random_range(0..INVALID_UTF8_SEQUENCES.len())]
+                .to_vec();
+                check_not_smaller!(self, utf8.len());
+                let idx = random.random_range(0..=self.len() - utf8.len());
+                self[idx..idx + utf8.len()].copy_from_slice(&utf8);
+            },
+            7 => return,
+            _ => unreachable!(),
+        }
     }
 }
 

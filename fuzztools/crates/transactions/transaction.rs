@@ -1,12 +1,14 @@
-use crate::{encode_field, field_len};
+use crate::{encode_field, field_len, mutations::Mutable};
 use alloy::{
     eips::eip7702::SignedAuthorization,
     primitives::{utils::keccak256, Address, Bytes, B256, U256},
     rpc::types::{AccessList, Authorization},
 };
 use alloy_rlp::{BufMut, Encodable, Header};
+use mutable::Mutable;
+use rand::Rng;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Mutable)]
 /// A wrapper around all possible fields an Ethereum transaction can have
 pub struct Transaction {
     // Transaction type

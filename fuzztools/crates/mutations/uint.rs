@@ -1,50 +1,9 @@
 use super::{
-    traits::{Mutable, UintInteresting, UintMutations},
-    INTERESTING_U16, INTERESTING_U32, INTERESTING_U8,
+    constants::{EVEN, INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, ODD},
+    traits::{InterestingMutations, Mutable, UintMutations},
 };
 use rand::Rng;
 use std::mem::size_of;
-
-macro_rules! impl_mutate {
-    ($type:ty) => {
-        impl Mutable for $type {
-            #[inline(always)]
-            fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                match random.random_range(0..=25) {
-                    0 => self.flip_bit(random),
-                    1 => self.add(random),
-                    2 => self.add_one(),
-                    3 => self.add_mod(random),
-                    4 => self.sub(random),
-                    5 => self.sub_one(),
-                    6 => self.sub_mod(random),
-                    7 => self.mul(random),
-                    8 => self.mul_mod(random),
-                    9 => self.div(random),
-                    10 => self.remainder(random),
-                    11 => self.set_zero(),
-                    12 => self.set_one(),
-                    13 => self.set_max(),
-                    14 => self.set_random(random),
-                    15 => self.xor(random),
-                    16 => self.and(random),
-                    17 => self.or(random),
-                    18 => self.not(),
-                    19 => self.rotate_left(random),
-                    20 => self.rotate_right(random),
-                    21 => self.shift_left(random),
-                    22 => self.shift_right(random),
-                    23 => self.reverse_bits(),
-                    24 => self.set_interesting(random),
-                    25 => return true,
-                    _ => unreachable!(),
-                }
-
-                false
-            }
-        }
-    };
-}
 
 macro_rules! impl_mutations {
     ($type:ty) => {
@@ -197,32 +156,53 @@ macro_rules! impl_mutations {
             fn reverse_bits(&mut self) {
                 *self = (*self).reverse_bits();
             }
+
+            #[inline(always)]
+            fn swap_adjacent_bits(&mut self) {
+                let v = *self as u128;
+                *self = (((v >> 1) & EVEN) | ((v << 1) & ODD)) as $type;
+            }
+
+            #[inline(always)]
+            fn fisher_yates_shuffle(&mut self, random: &mut impl Rng) {
+                let mut bytes = self.to_le_bytes();
+                for i in (1..bytes.len()).rev() {
+                    let j = random.random_range(0..=i);
+                    bytes.swap(i, j);
+                }
+                *self = <$type>::from_le_bytes(bytes);
+            }
+
+            #[inline(always)]
+            fn to_gray_code_encoding(&mut self) {
+                *self ^= *self >> 1;
+            }
         }
     };
 }
 
-impl UintInteresting for u8 {
+impl InterestingMutations for u8 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
         let idx = random.random_range(0..INTERESTING_U8.len());
         *self = INTERESTING_U8[idx];
     }
 }
 
-impl UintInteresting for u16 {
+impl InterestingMutations for u16 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
         let idx = random.random_range(0..INTERESTING_U16.len());
         *self = INTERESTING_U16[idx];
     }
 }
 
-impl UintInteresting for u32 {
+impl InterestingMutations for u32 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
         let idx = random.random_range(0..INTERESTING_U32.len());
         *self = INTERESTING_U32[idx];
     }
 }
 
-impl UintInteresting for u64 {
+impl InterestingMutations for u64 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
         let hi_idx = random.random_range(0..INTERESTING_U32.len());
         let lo_idx = random.random_range(0..INTERESTING_U32.len());
@@ -232,7 +212,7 @@ impl UintInteresting for u64 {
     }
 }
 
-impl UintInteresting for u128 {
+impl InterestingMutations for u128 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
         let hi_hi_idx = random.random_range(0..INTERESTING_U32.len());
         let hi_lo_idx = random.random_range(0..INTERESTING_U32.len());
@@ -252,8 +232,50 @@ impl_mutations!(u32);
 impl_mutations!(u64);
 impl_mutations!(u128);
 
-impl_mutate!(u8);
-impl_mutate!(u16);
-impl_mutate!(u32);
-impl_mutate!(u64);
-impl_mutate!(u128);
+macro_rules! impl_mutable {
+    ($type:ty) => {
+        impl Mutable for $type {
+            fn mutate(&mut self, random: &mut impl Rng) -> bool {
+                match random.random_range(0..=28) {
+                    0 => self.flip_bit(random),
+                    1 => self.add(random),
+                    2 => self.add_one(),
+                    3 => self.add_mod(random),
+                    4 => self.sub(random),
+                    5 => self.sub_one(),
+                    6 => self.sub_mod(random),
+                    7 => self.mul(random),
+                    8 => self.mul_mod(random),
+                    9 => self.div(random),
+                    10 => self.remainder(random),
+                    11 => self.set_zero(),
+                    12 => self.set_one(),
+                    13 => self.set_max(),
+                    14 => self.set_random(random),
+                    15 => self.xor(random),
+                    16 => self.and(random),
+                    17 => self.or(random),
+                    18 => self.not(),
+                    19 => self.rotate_left(random),
+                    20 => self.rotate_right(random),
+                    21 => self.shift_left(random),
+                    22 => self.shift_right(random),
+                    23 => self.reverse_bits(),
+                    24 => self.set_interesting(random),
+                    25 => self.swap_adjacent_bits(),
+                    26 => self.fisher_yates_shuffle(random),
+                    27 => self.to_gray_code_encoding(),
+                    28 => return true,
+                    _ => unreachable!(),
+                }
+                return false;
+            }
+        }
+    };
+}
+
+impl_mutable!(u8);
+impl_mutable!(u16);
+impl_mutable!(u32);
+impl_mutable!(u64);
+impl_mutable!(u128);

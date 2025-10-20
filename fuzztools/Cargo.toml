@@ -14,6 +14,7 @@ thiserror.workspace = true
 tokio.workspace = true
 secp256k1.workspace = true
 anyhow.workspace = true
+mutable.workspace = true
 
 [lib]
 path = "crates/lib.rs"

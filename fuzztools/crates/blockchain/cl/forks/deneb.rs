@@ -1,6 +1,8 @@
 use super::{altair::*, bellatrix::*, capella::*, phase0::*};
+use crate::mutations::Mutable;
 use alloy::primitives::{FixedBytes, U256};
-
+use mutable::Mutable;
+use rand::Rng;
 pub type VersionedHash = FixedBytes<32>;
 pub type BlobIndex = u64;
 pub type KZGCommitment = FixedBytes<48>;
@@ -11,7 +13,7 @@ pub const MAX_BLOB_COMMITMENTS_PER_BLOCK: u64 = 4096;
 pub const MAX_BLOBS_PER_BLOCK: u64 = 6;
 pub const MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT: u64 = 8;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -30,7 +32,7 @@ pub struct BeaconBlockBody {
     pub blob_kzg_commitments: [KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize],
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct ExecutionPayload {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -53,7 +55,7 @@ pub struct ExecutionPayload {
     pub excess_blob_gas: u64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct ExecutionPayloadHeader {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -76,7 +78,7 @@ pub struct ExecutionPayloadHeader {
     pub excess_blob_gas: u64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,
