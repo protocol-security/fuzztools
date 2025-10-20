@@ -1,21 +1,27 @@
 use crate::{
     blockchain::cl::forks::{
+        altair::SYNC_COMMITTEE_SIZE,
         bellatrix::{Transaction, MAX_BYTES_PER_TRANSACTION, MAX_TRANSACTIONS_PER_PAYLOAD},
         capella::{
-            SignedBLSToExecutionChange, Withdrawal, MAX_BLS_TO_EXECUTION_CHANGES,
-            MAX_WITHDRAWALS_PER_PAYLOAD,
+            HistoricalSummary, SignedBLSToExecutionChange, Withdrawal,
+            MAX_BLS_TO_EXECUTION_CHANGES, MAX_WITHDRAWALS_PER_PAYLOAD,
         },
         deneb::{KZGCommitment, MAX_BLOB_COMMITMENTS_PER_BLOCK},
         electra::{
-            Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, WithdrawalRequest,
+            Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest,
+            PendingConsolidation, PendingDeposit, PendingPartialWithdrawal, WithdrawalRequest,
             MAX_ATTESTATIONS_ELECTRA, MAX_ATTESTER_SLASHINGS_ELECTRA,
             MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD, MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,
-            MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,
+            MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD, PENDING_CONSOLIDATIONS_LIMIT,
+            PENDING_DEPOSITS_LIMIT, PENDING_PARTIAL_WITHDRAWALS_LIMIT,
         },
         phase0::{
-            Deposit, ProposerSlashing, SignedVoluntaryExit, DEPOSIT_CONTRACT_TREE_DEPTH,
+            Deposit, Eth1Data, ProposerSlashing, Root, SignedVoluntaryExit, Validator,
+            DEPOSIT_CONTRACT_TREE_DEPTH, EPOCHS_PER_ETH1_VOTING_PERIOD,
+            EPOCHS_PER_HISTORICAL_VECTOR, EPOCHS_PER_SLASHINGS_VECTOR, HISTORICAL_ROOTS_LIMIT,
             MAX_COMMITTEES_PER_SLOT, MAX_DEPOSITS, MAX_PROPOSER_SLASHINGS,
-            MAX_VALIDATORS_PER_COMMITTEE, MAX_VOLUNTARY_EXITS,
+            MAX_VALIDATORS_PER_COMMITTEE, MAX_VOLUNTARY_EXITS, MIN_SEED_LOOKAHEAD, SLOTS_PER_EPOCH,
+            SLOTS_PER_HISTORICAL_ROOT, VALIDATOR_REGISTRY_LIMIT,
         },
     },
     mutations::traits::{ArrayMutations, Mutable},
@@ -190,3 +196,45 @@ impl_mutate!([u8; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usiz
 
 impl_mutations!([u8; MAX_COMMITTEES_PER_SLOT as usize]);
 impl_mutate!([u8; MAX_COMMITTEES_PER_SLOT as usize]);
+
+impl_mutations!([Root; SLOTS_PER_HISTORICAL_ROOT as usize]);
+impl_mutate!([Root; SLOTS_PER_HISTORICAL_ROOT as usize]);
+
+impl_mutations!([Root; HISTORICAL_ROOTS_LIMIT as usize]);
+impl_mutate!([Root; HISTORICAL_ROOTS_LIMIT as usize]);
+
+impl_mutations!([Eth1Data; (EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH) as usize]);
+impl_mutate!([Eth1Data; (EPOCHS_PER_ETH1_VOTING_PERIOD * SLOTS_PER_EPOCH) as usize]);
+
+impl_mutations!([Validator; VALIDATOR_REGISTRY_LIMIT as usize]);
+impl_mutate!([Validator; VALIDATOR_REGISTRY_LIMIT as usize]);
+
+impl_mutations!([u64; VALIDATOR_REGISTRY_LIMIT as usize]);
+impl_mutate!([u64; VALIDATOR_REGISTRY_LIMIT as usize]);
+
+impl_mutations!([FixedBytes<32>; EPOCHS_PER_HISTORICAL_VECTOR as usize]);
+impl_mutate!([FixedBytes<32>; EPOCHS_PER_HISTORICAL_VECTOR as usize]);
+
+impl_mutations!([u64; EPOCHS_PER_SLASHINGS_VECTOR as usize]);
+impl_mutate!([u64; EPOCHS_PER_SLASHINGS_VECTOR as usize]);
+
+impl_mutations!([u8; VALIDATOR_REGISTRY_LIMIT as usize]);
+impl_mutate!([u8; VALIDATOR_REGISTRY_LIMIT as usize]);
+
+impl_mutations!([HistoricalSummary; HISTORICAL_ROOTS_LIMIT as usize]);
+impl_mutate!([HistoricalSummary; HISTORICAL_ROOTS_LIMIT as usize]);
+
+impl_mutations!([PendingDeposit; PENDING_DEPOSITS_LIMIT as usize]);
+impl_mutate!([PendingDeposit; PENDING_DEPOSITS_LIMIT as usize]);
+
+impl_mutations!([PendingPartialWithdrawal; PENDING_PARTIAL_WITHDRAWALS_LIMIT as usize]);
+impl_mutate!([PendingPartialWithdrawal; PENDING_PARTIAL_WITHDRAWALS_LIMIT as usize]);
+
+impl_mutations!([PendingConsolidation; PENDING_CONSOLIDATIONS_LIMIT as usize]);
+impl_mutate!([PendingConsolidation; PENDING_CONSOLIDATIONS_LIMIT as usize]);
+
+impl_mutations!([u64; ((MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH) as usize]);
+impl_mutate!([u64; ((MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH) as usize]);
+
+impl_mutations!([FixedBytes<48>; SYNC_COMMITTEE_SIZE as usize]);
+impl_mutate!([FixedBytes<48>; SYNC_COMMITTEE_SIZE as usize]);
