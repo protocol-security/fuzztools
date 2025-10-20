@@ -3,6 +3,7 @@ use crate::mutations::Mutable;
 use alloy::primitives::{FixedBytes, U256};
 use mutable::Mutable;
 use rand::Rng;
+
 pub type Transaction = [u8; MAX_BYTES_PER_TRANSACTION as usize];
 pub type ExecutionAddress = FixedBytes<20>;
 

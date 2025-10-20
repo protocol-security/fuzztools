@@ -1,8 +1,9 @@
 pub(crate) const EVEN: u128 = 0x5555_5555_5555_5555_5555_5555_5555_5555;
 pub(crate) const ODD: u128 = 0xAAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA;
 
-/// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub(crate) const INTERESTING_U8: [u8; 29] = [
+/// Set of interesting u8 values.
+// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
+pub const INTERESTING_U8: [u8; 29] = [
     0,   // 00000000
     1,   // 00000001
     2,   // 00000010
@@ -34,8 +35,9 @@ pub(crate) const INTERESTING_U8: [u8; 29] = [
     255, // 11111111
 ];
 
-/// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub(crate) const INTERESTING_U16: [u16; 44] = [
+/// Set of interesting u16 values.
+// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
+pub const INTERESTING_U16: [u16; 44] = [
     // INTERESTING_U8
     0,   // 0000000000000000
     1,   // 0000000000000001
@@ -84,8 +86,9 @@ pub(crate) const INTERESTING_U16: [u16; 44] = [
     0xffff, // 1111111111111111
 ];
 
-/// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub(crate) const INTERESTING_U32: [u32; 86] = [
+/// Set of interesting u32 values.
+// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
+pub const INTERESTING_U32: [u32; 86] = [
     // INTERESTING_U8
     0,   // 00000000000000000000000000000000
     1,   // 00000000000000000000000000000001
@@ -181,7 +184,8 @@ pub(crate) const INTERESTING_U32: [u32; 86] = [
     0x80808080, // 10000000100000001000000010000000
 ];
 
-pub(crate) const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
+/// Set of invalid utf8 values.
+pub const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
     // Lone continuation bytes
     &[0x80], // 10000000
     &[0xBF], // 10111111
@@ -226,7 +230,8 @@ pub(crate) const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
     &[0xE0, 0x9F, 0xBF], // 3-byte overlong for U+07FF (should be 2-byte)
 ];
 
-pub(crate) const INTERESTING_ADDRESSES: [&str; 17] = [
+/// Set of interesting addresses.
+pub const INTERESTING_ADDRESSES: [&str; 17] = [
     // System address
     "0xfffffffffffffffffffffffffffffffffffffffe",
     // Beacon block root address
@@ -263,7 +268,7 @@ pub(crate) const INTERESTING_ADDRESSES: [&str; 17] = [
     "0x0000000000000000000000000000000000000100",
 ];
 
-/// Storage keys for access list testing. Taken from interesting values
+/// Storage keys for testing access lists.
 pub static STORAGE_KEYS: [&str; 244] = [
     // Interesting 8-bit values (padded to 32 bytes)
     "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -522,7 +527,7 @@ pub static STORAGE_KEYS: [&str; 244] = [
 ];
 
 /// Interesting chain IDs for EIP-7702 authorization testing
-pub(crate) const INTERESTING_CHAIN_IDS: [u64; 10] = [
+pub const INTERESTING_CHAIN_IDS: [u64; 10] = [
     0,        // Invalid chain ID
     1,        // Ethereum Mainnet
     11155111, // Sepolia testnet

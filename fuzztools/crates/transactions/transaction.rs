@@ -1,4 +1,3 @@
-use crate::{encode_field, field_len, mutations::Mutable};
 use alloy::{
     eips::eip7702::SignedAuthorization,
     primitives::{utils::keccak256, Address, Bytes, B256, U256},
@@ -7,6 +6,27 @@ use alloy::{
 use alloy_rlp::{BufMut, Encodable, Header};
 use mutable::Mutable;
 use rand::Rng;
+use crate::mutations::Mutable;
+
+/// RLP encodes an `Option` field.
+macro_rules! encode_field {
+    ($field:expr, $out:expr) => {
+        if let Some(value) = &$field {
+            value.encode($out);
+        }
+    };
+}
+
+/// Gets the RLP length of an `Option` field.
+macro_rules! field_len {
+    ($field:expr) => {
+        if let Some(value) = &$field {
+            value.length()
+        } else {
+            0
+        }
+    };
+}
 
 #[derive(Clone, Default, Mutable)]
 /// A wrapper around all possible fields an Ethereum transaction can have

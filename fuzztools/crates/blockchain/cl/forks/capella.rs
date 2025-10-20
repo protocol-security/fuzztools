@@ -3,6 +3,7 @@ use crate::mutations::Mutable;
 use alloy::primitives::{FixedBytes, U256};
 use mutable::Mutable;
 use rand::Rng;
+
 pub type WithdrawalIndex = u64;
 
 pub const DOMAIN_BLS_TO_EXECUTION_CHANGE: DomainType = FixedBytes([0x0A, 0x00, 0x00, 0x00]);

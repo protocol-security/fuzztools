@@ -1,18 +1,21 @@
 use rand::Rng;
 
-/// This trait implements the `mutate` method for a given type
+/// Implements the `mutate` method for a given type
 pub trait Mutable {
     /// Applies a random mutation to the type, ensuring it will always output a different value
     fn mutate(&mut self, random: &mut impl Rng) -> bool;
 }
 
+/// Implements the `random` method for a given type
 pub trait Random {
+    /// Returns a random value of the type
     fn random(random: &mut impl Rng) -> Self;
 }
 
-pub trait Phantom {}
 
-pub trait UintMutations {
+pub(crate) trait Phantom {}
+
+pub(crate) trait UintMutations {
     fn flip_bit(&mut self, random: &mut impl Rng);
     fn add(&mut self, random: &mut impl Rng);
     fn add_one(&mut self);
@@ -42,11 +45,11 @@ pub trait UintMutations {
     fn to_gray_code_encoding(&mut self);
 }
 
-pub trait InterestingMutations {
+pub(crate) trait InterestingMutations {
     fn set_interesting(&mut self, random: &mut impl Rng);
 }
 
-pub trait BytesMutations {
+pub(crate) trait BytesMutations {
     fn random_byte_push(&mut self, random: &mut impl Rng);
     fn byte_clone(&mut self, random: &mut impl Rng);
     fn byte_remove(&mut self, random: &mut impl Rng);
@@ -71,7 +74,7 @@ pub trait BytesMutations {
     fn slice_mutate(&mut self, random: &mut impl Rng);
 }
 
-pub trait ArrayMutations {
+pub(crate) trait ArrayMutations {
     fn value_swap(&mut self, random: &mut impl Rng);
     fn value_mutate(&mut self, random: &mut impl Rng);
 

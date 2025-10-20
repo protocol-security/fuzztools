@@ -2,6 +2,7 @@ use crate::mutations::Mutable;
 use alloy::primitives::FixedBytes;
 use mutable::Mutable;
 use rand::Rng;
+
 pub type Slot = u64;
 pub type Epoch = u64;
 pub type CommitteeIndex = u64;

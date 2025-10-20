@@ -11,6 +11,7 @@ use crate::mutations::Mutable;
 use alloy::primitives::FixedBytes;
 use mutable::Mutable;
 use rand::Rng;
+
 pub const UNSET_DEPOSIT_REQUESTS_START_INDEX: u64 = u64::MAX;
 pub const FULL_EXIT_REQUEST_AMOUNT: u64 = 0;
 

@@ -20,6 +20,7 @@ cd <NAME>
 3. Now, you only need to add under the `main.rs` the usual `loop` and put the code of your fuzzer in there. For example, if we were to fuzz the next `struct`
 
 ```rs
+#[derive(Mutable)]
 struct Payload {
     a: u64,
     b: u64
@@ -30,13 +31,10 @@ fn main() {
         a: 3,
         b: 5
     };
+    let mut random = SmallRng::seed_from_u64(0);
 
     loop {
-        if StdRng::random_bool(0.5) {
-            base.a.mutate();
-        } else {
-            base.b.mutate();
-        }
+        base.mutate(random);
 
         if base.a + base.b == 5 {
             panic!("POC");
@@ -45,7 +43,7 @@ fn main() {
 }
 ``` 
 
-You only need to implement the % where you call mutate on each and either check the needed condition or send a payload. For example, check the implementation of [rakoon](./rakoon/), where it makes use of it extensively. If you wanna load the Cargo documentation, run
+and that's it. For example, check the implementation of [rakoon](./rakoon/), where it makes use of it extensively. If you wanna load the Cargo documentation, run
 
 ```sh
 cargo doc --no-deps --workspace --open 

@@ -1,7 +1,6 @@
 //! # Builders
 //!
-//! This module contains some builders that **ALWAYS** generate **VALID** Ethereum types according
-//! to protocol rules:
+//! This module contains the next builders:
 //!
 //! - `TransactionBuilder` - Handles the logic of creating **VALID** transactions per mempool rules.
 //!
