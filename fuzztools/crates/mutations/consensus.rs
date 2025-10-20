@@ -3,7 +3,7 @@ use crate::blockchain::cl::{
     forks::{
         altair::SyncAggregate,
         capella::{BLSToExecutionChange, SignedBLSToExecutionChange, Withdrawal},
-        deneb::{ExecutionPayload, KZGCommitment},
+        deneb::ExecutionPayload,
         electra::{
             Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, ExecutionRequests,
             IndexedAttestation, WithdrawalRequest,
@@ -28,7 +28,7 @@ impl Mutable for Eth1Data {
     }
 }
 
-impl BeaconBlockHeader {
+impl Mutable for BeaconBlockHeader {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         match random.random_range(0..=4) {
             0 => self.slot.mutate(random),
@@ -73,7 +73,7 @@ impl Mutable for Checkpoint {
 
 impl Mutable for AttestationData {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=3) {
+        match random.random_range(0..=4) {
             0 => self.slot.mutate(random),
             1 => self.index.mutate(random),
             2 => self.beacon_block_root.mutate(random),
@@ -116,13 +116,7 @@ impl Mutable for Attestation {
                 false
             },
             1 => self.data.mutate(random),
-            2 => {
-                let mut signature = self.signature.to_vec();
-                signature.mutate(random);
-                signature.resize(self.signature.len(), 0);
-                self.signature.copy_from_slice(&signature);
-                false
-            },
+            2 => self.signature.mutate(random),
             3 => {
                 let mut committee_bits = self.committee_bits.to_vec();
                 committee_bits.mutate(random);
