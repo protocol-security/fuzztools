@@ -1,12 +1,18 @@
 use rand::Rng;
 
-/// This traits implements the `mutate` method for a given type
+/// This trait implements the `mutate` method for a given type
 pub trait Mutable {
     /// Applies a random mutation to the type, ensuring it will always output a different value
     fn mutate(&mut self, random: &mut impl Rng) -> bool;
 }
 
-pub(crate) trait UintMutations {
+pub trait Random {
+    fn random(random: &mut impl Rng) -> Self;
+}
+
+pub trait Phantom {}
+
+pub trait UintMutations {
     fn flip_bit(&mut self, random: &mut impl Rng);
     fn add(&mut self, random: &mut impl Rng);
     fn add_one(&mut self);
@@ -31,13 +37,17 @@ pub(crate) trait UintMutations {
     fn shift_left(&mut self, random: &mut impl Rng);
     fn shift_right(&mut self, random: &mut impl Rng);
     fn reverse_bits(&mut self);
+    fn swap_adjacent_bits(&mut self);
+    fn fisher_yates_shuffle(&mut self, random: &mut impl Rng);
+    fn to_gray_code_encoding(&mut self);
 }
 
-pub(crate) trait UintInteresting {
+pub trait InterestingMutations {
     fn set_interesting(&mut self, random: &mut impl Rng);
 }
 
-pub(crate) trait ByteArrayMutations {
+pub trait BytesMutations {
+    fn random_byte_push(&mut self, random: &mut impl Rng);
     fn byte_clone(&mut self, random: &mut impl Rng);
     fn byte_remove(&mut self, random: &mut impl Rng);
     fn byte_swap(&mut self, random: &mut impl Rng);
@@ -61,7 +71,7 @@ pub(crate) trait ByteArrayMutations {
     fn slice_mutate(&mut self, random: &mut impl Rng);
 }
 
-pub(crate) trait ArrayMutations {
+pub trait ArrayMutations {
     fn value_swap(&mut self, random: &mut impl Rng);
     fn value_mutate(&mut self, random: &mut impl Rng);
 
@@ -73,21 +83,4 @@ pub(crate) trait ArrayMutations {
 
     fn slice_swap(&mut self, random: &mut impl Rng);
     fn slice_mutate(&mut self, random: &mut impl Rng);
-}
-
-pub(crate) trait ByteArrayInteresting {
-    fn set_interesting_u8(&mut self, random: &mut impl Rng);
-    fn set_interesting_u8_be(&mut self, random: &mut impl Rng);
-    fn set_interesting_u16_le(&mut self, random: &mut impl Rng);
-    fn set_interesting_u16_be(&mut self, random: &mut impl Rng);
-    fn set_interesting_u32_le(&mut self, random: &mut impl Rng);
-    fn set_interesting_u32_be(&mut self, random: &mut impl Rng);
-    fn set_slice_with_invalid_utf8(&mut self, random: &mut impl Rng);
-}
-
-pub(crate) trait TransactionMutations {
-    fn mutate_access_list(&mut self, random: &mut impl Rng);
-    fn mutate_blob_versioned_hashes(&mut self, random: &mut impl Rng);
-    fn mutate_authorization_list(&mut self, random: &mut impl Rng);
-    fn mutate_calldata(&mut self, random: &mut impl Rng);
 }

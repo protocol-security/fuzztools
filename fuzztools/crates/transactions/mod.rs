@@ -9,7 +9,7 @@
 //! the usual RLP encoding, decoding and signing hash methods, so they work out of the box **AND**
 //! are equivalent to the ones in `alloy` (if not please lmk but I am 99% sure they are).
 
-mod transaction;
+pub mod transaction;
 mod signed;
 
 pub use signed::SignedTransaction;

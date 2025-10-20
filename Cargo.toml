@@ -9,7 +9,7 @@ resolver = "3"
 members = [
     "rakoon", 
     "fuzztools"
-, "raidan"]
+, "raidan", "mutable"]
 
 [workspace.dependencies]
 rand = { version = "0.9.0" }
@@ -24,8 +24,12 @@ secp256k1 = { version = "0.31.1", features = ["std", "hashes", "recovery"] }
 thiserror = "2.0.17"
 futures = "0.3.31"
 anyhow = "1.0.100"
+syn = "2.0.107"
+quote = "1.0.41"
+proc-macro2 = "1.0.101"
 
 fuzztools = { path = "fuzztools" }
+mutable = { path = "mutable" }
 
 [profile.release]
 codegen-units = 1
