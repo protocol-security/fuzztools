@@ -7,9 +7,12 @@ rust-version = "1.90"
 [workspace]
 resolver = "3"
 members = [
-    "rakoon", 
-    "fuzztools"
-, "raidan", "mutable"]
+    "rakoon",
+    "fuzztools",
+    "raidan",
+    "mutable",
+    "dff/rust"
+]
 
 [workspace.dependencies]
 rand = { version = "0.9.0" }
