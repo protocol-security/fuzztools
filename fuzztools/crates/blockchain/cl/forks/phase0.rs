@@ -115,7 +115,7 @@ pub struct Validator {
     pub pubkey: BLSPubkey,
     pub withdrawal_credentials: FixedBytes<32>,
     pub effective_balance: Gwei,
-    pub slashed: u8,
+    pub slashed: bool,
     pub activation_eligibility_epoch: Epoch,
     pub activation_epoch: Epoch,
     pub exit_epoch: Epoch,
