@@ -1,3 +1,5 @@
+//! Mutation implementations for Alloy types used in Ethereum fuzzing.
+
 use super::traits::Mutable;
 use crate::mutations::{
     constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
@@ -259,12 +261,12 @@ impl Mutable for Vec<Authorization> {
             _ => unreachable!(),
         }
 
-        return false;
+        false
     }
 }
 
 impl Mutable for Vec<SignedAuthorization> {
     fn mutate(&mut self, _random: &mut impl Rng) -> bool {
-        return false; // NOOP as this is an optimization field
+        false // NOOP as this is an optimization field
     }
 }
