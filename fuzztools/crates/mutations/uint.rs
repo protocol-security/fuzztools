@@ -1,3 +1,5 @@
+//! Mutation implementations for unsigned integer types.
+
 use super::{
     constants::{EVEN, INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, ODD},
     traits::{InterestingMutations, Mutable, UintMutations},
@@ -174,7 +176,7 @@ macro_rules! impl_mutations {
             }
 
             #[inline(always)]
-            fn to_gray_code_encoding(&mut self) {
+            fn gray_code_encoding(&mut self) {
                 *self ^= *self >> 1;
             }
         }
@@ -264,7 +266,7 @@ macro_rules! impl_mutable {
                     24 => self.set_interesting(random),
                     25 => self.swap_adjacent_bits(),
                     26 => self.fisher_yates_shuffle(random),
-                    27 => self.to_gray_code_encoding(),
+                    27 => self.gray_code_encoding(),
                     28 => return true,
                     _ => unreachable!(),
                 }

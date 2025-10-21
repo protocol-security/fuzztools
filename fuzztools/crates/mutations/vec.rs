@@ -1,3 +1,5 @@
+//! Mutation implementations for generic vectors.
+
 use super::traits::Mutable;
 use crate::mutations::traits::{Phantom, Random};
 use rand::{seq::SliceRandom, Rng};
@@ -71,6 +73,6 @@ where
             _ => unreachable!(),
         }
 
-        return false;
+        false
     }
 }

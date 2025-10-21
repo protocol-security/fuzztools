@@ -1,3 +1,5 @@
+//! Mutation implementations for fixed-size arrays.
+
 use super::{
     constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
     traits::{ArrayMutations, Mutable},
@@ -39,7 +41,7 @@ where
             8 => return true,
             _ => unreachable!(),
         }
-        return false;
+        false
     }
 }
 

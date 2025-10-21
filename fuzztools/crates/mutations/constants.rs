@@ -1,9 +1,18 @@
+//! Interesting values and constants for mutation testing.
+//!
+//! Contains edge cases, boundary values, and known problematic inputs
+//! sourced from AFL++, Ethereum EIPs, and fuzzing research.
+
+/// Bitmask for even-positioned bits.
 pub(crate) const EVEN: u128 = 0x5555_5555_5555_5555_5555_5555_5555_5555;
+
+/// Bitmask for odd-positioned bits.
 pub(crate) const ODD: u128 = 0xAAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA;
 
-/// Set of interesting u8 values.
-// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub const INTERESTING_U8: [u8; 29] = [
+/// Interesting 8-bit values from AFL++.
+///
+/// Source: <https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359>
+pub(crate) const INTERESTING_U8: [u8; 29] = [
     0,   // 00000000
     1,   // 00000001
     2,   // 00000010
@@ -35,9 +44,10 @@ pub const INTERESTING_U8: [u8; 29] = [
     255, // 11111111
 ];
 
-/// Set of interesting u16 values.
-// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub const INTERESTING_U16: [u16; 44] = [
+/// Interesting 16-bit values from AFL++.
+///
+/// Source: <https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359>
+pub(crate) const INTERESTING_U16: [u16; 44] = [
     // INTERESTING_U8
     0,   // 0000000000000000
     1,   // 0000000000000001
@@ -86,9 +96,10 @@ pub const INTERESTING_U16: [u16; 44] = [
     0xffff, // 1111111111111111
 ];
 
-/// Set of interesting u32 values.
-// Taken from https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359
-pub const INTERESTING_U32: [u32; 86] = [
+/// Interesting 32-bit values from AFL++ and Ethereum EIPs.
+///
+/// Source: <https://github.com/AFLplusplus/AFLplusplus/blob/stable/include/config.h#L359>
+pub(crate) const INTERESTING_U32: [u32; 86] = [
     // INTERESTING_U8
     0,   // 00000000000000000000000000000000
     1,   // 00000000000000000000000000000001
@@ -184,8 +195,11 @@ pub const INTERESTING_U32: [u32; 86] = [
     0x80808080, // 10000000100000001000000010000000
 ];
 
-/// Set of invalid utf8 values.
-pub const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
+/// Invalid UTF-8 byte sequences for string fuzzing.
+///
+/// Includes lone continuation bytes, overlong encodings, incomplete sequences,
+/// surrogate pairs, and out-of-range code points.
+pub(crate) const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
     // Lone continuation bytes
     &[0x80], // 10000000
     &[0xBF], // 10111111
@@ -230,8 +244,10 @@ pub const INVALID_UTF8_SEQUENCES: &[&[u8]] = &[
     &[0xE0, 0x9F, 0xBF], // 3-byte overlong for U+07FF (should be 2-byte)
 ];
 
-/// Set of interesting addresses.
-pub const INTERESTING_ADDRESSES: [&str; 17] = [
+/// Interesting Ethereum addresses for transaction fuzzing.
+///
+/// Includes system addresses, precompiles, and special contracts.
+pub(crate) const INTERESTING_ADDRESSES: [&str; 17] = [
     // System address
     "0xfffffffffffffffffffffffffffffffffffffffe",
     // Beacon block root address
@@ -268,7 +284,9 @@ pub const INTERESTING_ADDRESSES: [&str; 17] = [
     "0x0000000000000000000000000000000000000100",
 ];
 
-/// Storage keys for testing access lists.
+/// Storage keys for access list fuzzing.
+///
+/// Contains boundary values, powers of 2, and transaction-specific keys.
 pub static STORAGE_KEYS: [&str; 244] = [
     // Interesting 8-bit values (padded to 32 bytes)
     "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -526,8 +544,10 @@ pub static STORAGE_KEYS: [&str; 244] = [
     "0xa58a4dabe4e61062381f3c5cfbdf9475da4d7753b95c2ceda3146a839317ef22",
 ];
 
-/// Interesting chain IDs for EIP-7702 authorization testing
-pub const INTERESTING_CHAIN_IDS: [u64; 10] = [
+/// Interesting chain IDs for EIP-7702 authorization testing.
+///
+/// Includes mainnet, testnets, L2s, and edge cases.
+pub(crate) const INTERESTING_CHAIN_IDS: [u64; 10] = [
     0,        // Invalid chain ID
     1,        // Ethereum Mainnet
     11155111, // Sepolia testnet
