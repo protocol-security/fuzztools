@@ -1,3 +1,5 @@
+//! Mutation implementations for byte sequences (`Vec<u8>`).
+
 use super::{
     constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
     traits::{BytesMutations, Mutable, UintMutations},
