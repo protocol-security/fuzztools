@@ -33,6 +33,7 @@ proc-macro2 = "1.0.101"
 
 fuzztools = { path = "fuzztools" }
 mutable = { path = "mutable" }
+dff = { path = "dff/rust" }
 
 [profile.release]
 codegen-units = 1

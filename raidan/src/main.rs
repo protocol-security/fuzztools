@@ -21,15 +21,6 @@ struct Cli {
 
     #[arg(long, help = "Seed for the random generator")]
     seed: u64,
-
-    #[arg(long, help = "Whether to spin up prysm")]
-    prysm: bool,
-
-    #[arg(long, help = "Whether to spin up lighthouse")]
-    lighthouse: bool,
-
-    #[arg(long, help = "Whether to spin up teku")]
-    teku: bool,
 }
 
 #[tokio::main]
@@ -39,14 +30,11 @@ async fn main() -> Result<()> {
     let prelude = format!(
         "{HEADER}\n{GREEN}INFO{RESET}      Method:                    \
          {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Seed:                      \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Prysm:                     \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Lighthouse:                \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Teku:                      {RED}{}{RESET}\n\n",
-        cli.method, cli.seed, cli.prysm, cli.lighthouse, cli.teku
+         {RED}{}{RESET}\n\n",
+        cli.method, cli.seed
     );
 
-    let mut app =
-        App::new(cli.method, cli.seed, cli.prysm, cli.lighthouse, cli.teku, prelude).await?;
+    let mut app = App::new(cli.method, cli.seed, prelude).await?;
 
     let mut random = SmallRng::seed_from_u64(cli.seed);
     let result = app.run(&mut random).await;

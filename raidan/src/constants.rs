@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use clap::ValueEnum;
 
 /// The header displayed when running the tool
@@ -20,4 +22,13 @@ pub(crate) const RESET: &str = "\x1b[0m";
 pub(crate) enum Method {
     ProcessSlot,
     ProcessEpoch,
+}
+
+impl Display for Method {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Method::ProcessSlot => write!(f, "process_slot"),
+            Method::ProcessEpoch => write!(f, "process_epoch"),
+        }
+    }
 }

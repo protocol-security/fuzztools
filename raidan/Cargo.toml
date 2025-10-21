@@ -8,5 +8,6 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+dff.workspace = true
 rand.workspace = true
 tokio.workspace = true
