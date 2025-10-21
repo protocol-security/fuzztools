@@ -1,10 +1,38 @@
+//! # Mutable
+//!
+//! This crate implements the `Mutable` derive macro. In a nutshell, any struct that derives
+//! `Mutable` will expose a `mutate` method that will mutate randomly its fields with interesting
+//! mutations.
+//!
+//! ## Example
+//!
+//! ```rust
+//! #[derive(Mutable)]
+//! struct Whatever {
+//!     a: u64,
+//!     b: u64,
+//! }
+//!
+//! fn main() {
+//!     let mut whatever = Whatever { a: 0, b: 0 };
+//!     let mut random = SmallRng::seed_from_u64(0);
+//!
+//!     loop {
+//!         whatever.mutate(random);
+//!
+//!         if whatever.a + whatever.b == 5 {
+//!             panic!("POC");
+//!         }
+//!     }
+//! }
+//! ```
+
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Type};
 
-/// Check if a type is `Option<T>`
 fn is_option(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty {
         if let Some(segment) = type_path.path.segments.last() {
@@ -15,6 +43,7 @@ fn is_option(ty: &Type) -> bool {
 }
 
 #[proc_macro_derive(Mutable)]
+/// Derives the `Mutable` trait for a given struct.
 pub fn mutable_derive(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let id = &input.ident;
@@ -27,10 +56,8 @@ pub fn mutable_derive(item: TokenStream) -> TokenStream {
 
                 // Handle both named fields and tuple struct fields
                 let field_access = if let Some(field_name) = &field.ident {
-                    // Named field: self.field_name
                     quote! { self.#field_name }
                 } else {
-                    // Tuple struct field: self.0, self.1, etc.
                     let index = syn::Index::from(i);
                     quote! { self.#index }
                 };

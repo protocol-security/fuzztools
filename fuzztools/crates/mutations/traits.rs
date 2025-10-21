@@ -10,14 +10,13 @@ pub trait Mutable {
 
 /// Trait for generating random instances of a type.
 pub trait Random {
+    /// Returns a random value of the type
     fn random(random: &mut impl Rng) -> Self;
 }
 
-pub trait Phantom {}
+pub(crate) trait Phantom {}
 
-/// Mutation operations for unsigned integer types.
-pub trait UintMutations {
-    /// Flips a random bit.
+pub(crate) trait UintMutations {
     fn flip_bit(&mut self, random: &mut impl Rng);
     /// Adds a random value with saturation.
     fn add(&mut self, random: &mut impl Rng);

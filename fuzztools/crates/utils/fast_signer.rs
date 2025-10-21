@@ -6,9 +6,7 @@ use anyhow::Result;
 use secp256k1::{ecdsa::RecoveryId, Message, Secp256k1, SecretKey};
 
 #[derive(Clone)]
-/// This implements a faster signer than alloy's one. It uses the
-/// secp256k1 bindings instead of pure rust ones, with an increase
-/// in speed of about 20-30%
+/// Blazingly fast secp256k1 signer.
 pub struct FastPrivateKeySigner {
     /// The key used for signing transactions
     secret_key: SecretKey,

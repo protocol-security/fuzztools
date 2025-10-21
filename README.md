@@ -29,7 +29,8 @@ cd <NAME>
 
 Add your fuzzing logic to `main.rs`. The typical pattern involves creating a base payload structure and mutating it within a loop:
 
-```rust
+```rs
+#[derive(Mutable)]
 struct Payload {
     a: u64,
     b: u64
@@ -40,14 +41,10 @@ fn main() {
         a: 3,
         b: 5
     };
+    let mut random = SmallRng::seed_from_u64(0);
 
     loop {
-        // Randomly mutate fields
-        if StdRng::random_bool(0.5) {
-            base.a.mutate();
-        } else {
-            base.b.mutate();
-        }
+        base.mutate(random);
 
         // Check your target condition or send the payload
         if base.a + base.b == 5 {
@@ -57,15 +54,7 @@ fn main() {
 }
 ```
 
-The core pattern is to call `mutate()` on fields you want to fuzz, then check conditions or send payloads to your target system.
-
-## Examples
-
-See the [rakoon](./rakoon/) implementation for a comprehensive example of using `fuzztools` in a real fuzzer.
-
-## Documentation
-
-Generate and view the API documentation locally:
+and that's it. For example, check the implementation of [rakoon](./rakoon/), where it makes use of it extensively. If you wanna load the Cargo documentation, run
 
 ```sh
 cargo doc --no-deps --workspace --open

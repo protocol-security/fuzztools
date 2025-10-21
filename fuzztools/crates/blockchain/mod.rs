@@ -1,6 +1,9 @@
 //! # Blockchain
 //!
-//! WIP
+//! Implements the consensus and execution spec types and constants, so that they can be easily exported and used wherever needed (for example, in `raidan`).
 
-pub mod cl;
+mod cl;
 mod el;
+
+pub use cl::forks::electra::BeaconBlockBody;
+pub use cl::forks::fulu::BeaconState;
