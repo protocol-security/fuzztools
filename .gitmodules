@@ -7,6 +7,3 @@
 [submodule "raidan/clients/teku"]
 	path = raidan/clients/teku
 	url = https://github.com/nethoxa/teku.git
-[submodule "dff"]
-	path = dff
-	url = https://github.com/jtraglia/dff.git

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
 contract AccessListTarget {
     constructor() {
         // Set storage at boundary values with random data
