@@ -1,3 +1,4 @@
+use crate::mutations::Mutable;
 use alloy::{
     eips::eip7702::SignedAuthorization,
     primitives::{utils::keccak256, Address, Bytes, B256, U256},
@@ -6,7 +7,6 @@ use alloy::{
 use alloy_rlp::{BufMut, Encodable, Header};
 use mutable::Mutable;
 use rand::Rng;
-use crate::mutations::Mutable;
 
 /// RLP encodes an `Option` field.
 macro_rules! encode_field {

@@ -40,11 +40,7 @@ async fn main() -> Result<()> {
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Seed:                   \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Type:                   \
          {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        {RED}{}{RESET}\n\n",
-        cli.url,
-        cli.key,
-        cli.seed,
-        cli.tx_type,
-        cli.fuzzing,
+        cli.url, cli.key, cli.seed, cli.tx_type, cli.fuzzing,
     );
 
     // Create the application

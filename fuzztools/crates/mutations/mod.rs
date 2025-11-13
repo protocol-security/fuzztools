@@ -12,5 +12,4 @@ mod alloy;
 mod vec;
 mod bool;
 
-pub use crate::mutations::traits::*;
-pub use crate::mutations::constants::*;
+pub use crate::mutations::{constants::*, traits::*};

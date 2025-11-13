@@ -13,8 +13,7 @@ mod transaction;
 
 use alloy::transports::TransportError;
 pub use cache::rpc::RpcCache;
-pub use contracts::access_list_target::AccessListTarget;
-pub use contracts::precompile_target::PrecompileTarget;
+pub use contracts::{access_list_target::AccessListTarget, precompile_target::PrecompileTarget};
 use thiserror::Error;
 pub use transaction::TransactionBuilder;
 

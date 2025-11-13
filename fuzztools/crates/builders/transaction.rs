@@ -13,7 +13,6 @@ use rand::Rng;
 pub struct TransactionBuilder {
     chain_id: u64,
     access_list_target: Address,
-    precompile_target: Address,
     signer_nonce: u64,
     auth_nonce: u64,
     cache: RpcCache,
@@ -21,10 +20,10 @@ pub struct TransactionBuilder {
 
 impl TransactionBuilder {
     #[inline]
-    pub async fn new(access_list_target: Address, precompile_target: Address, node: &RootProvider) -> Result<Self> {
+    pub async fn new(access_list_target: Address, node: &RootProvider) -> Result<Self> {
         let cache = RpcCache::fetch(node).await?;
         let chain_id = node.get_chain_id().await?;
-        Ok(Self { chain_id, access_list_target, precompile_target, signer_nonce: 0, auth_nonce: 0, cache })
+        Ok(Self { chain_id, access_list_target, signer_nonce: 0, auth_nonce: 0, cache })
     }
 
     /// Refreshes the cache by fetching it from the given node

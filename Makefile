@@ -18,3 +18,10 @@ rm-testnet:
 
 geth-testnet:
 	geth --dev --dev.period 12 --ipcpath /tmp/geth.ipc --datadir ./tmp/geth-db
+
+reth-testnet:
+	reth node \
+		--dev \
+		--dev.block-time 12s \
+		--datadir ./tmp/reth-db \
+		--ipcpath /tmp/reth.ipc \

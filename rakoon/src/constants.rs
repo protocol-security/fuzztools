@@ -29,5 +29,5 @@ pub(crate) enum TransactionType {
     Eip7702,
 }
 
-pub(crate) const DEFAULT_TXS_PER_CORE: u64 = 50;
+pub(crate) const DEFAULT_TXS_PER_CORE: u64 = 100;
 pub(crate) const DEFAULT_SEMAPHORE_PERMITS: usize = 500;

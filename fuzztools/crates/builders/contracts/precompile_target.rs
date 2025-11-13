@@ -23,7 +23,7 @@ sol! {
         }
 
         address public delegateForwarder;
-        
+
         constructor(TestType testType, address precompile) payable {
             // Deploy delegate forwarder for nested tests
             delegateForwarder = address(new DelegateForwarder());
@@ -51,7 +51,7 @@ sol! {
                 // Do nothing
             }
         }
-        
+
         // Test 1: Only EXT* operations
         function testOnlyExtChecks() public {
             checkAllPrecompileAddresses();
@@ -98,7 +98,7 @@ sol! {
         function testSelfDestructToPrecompile(address payable precompileAddr) public {
             // Check EXT* operations before selfdestruct
             checkAddress(precompileAddr);
-            
+
             selfdestruct(precompileAddr);
 
             // Check EXT* operations after selfdestruct
@@ -114,13 +114,13 @@ sol! {
                 size := extcodesize(target)
             }
             emit CodeSizeChecked(target, size);
-            
+
             // EXTCODECOPY
             bytes memory code = new bytes(size);
             assembly {
                 extcodecopy(target, add(code, 0x20), 0, size)
             }
-            
+
             // EXTCODEHASH
             bytes32 codeHash;
             assembly {
@@ -137,19 +137,19 @@ sol! {
         function checkAllPrecompileAddresses() internal {
             // Check for 0 address
             checkAddress(address(0));
-            
+
             // Check for normal precompiles (0x01 to 0x11)
             for (uint160 i = 1; i <= 0x11; i++) {
                 checkAddress(address(i));
             }
-            
+
             // Check for p256 (0x100)
             checkAddress(address(0x100));
-            
+
             // Check for random addresses next to and before p256
             checkAddress(address(0xff));   // Before 0x100
             checkAddress(address(0x101));  // After 0x100
-            
+
             // Check addresses around the last normal precompile
             checkAddress(address(0x12));   // After 0x11
         }
@@ -167,18 +167,18 @@ sol! {
 
             for (uint256 i = 0; i < targets.length; i++) {
                 address target = targets[i];
-                
+
                 // Check EXT* operations
                 checkAddress(target);
-                
+
                 // Check balance before
                 uint256 balBefore = target.balance;
                 emit BalanceChecked(target, balBefore);
-                
+
                 // CALL
                 (bool success,) = target.call{value: valuePerCall}("");
                 emit CallResult(target, success);
-                
+
                 // Check balance after
                 uint256 balAfter = target.balance;
                 emit BalanceChecked(target, balAfter);
@@ -201,13 +201,13 @@ sol! {
 
             for (uint256 i = 0; i < targets.length; i++) {
                 address target = targets[i];
-                
+
                 // Check EXT* operations
                 checkAddress(target);
-                
+
                 // STATICCALL
                 (bool success,) = target.staticcall("");
-                
+
                 // Check EXT* operations
                 checkAddress(target);
             }
@@ -226,18 +226,18 @@ sol! {
 
             for (uint256 i = 0; i < targets.length; i++) {
                 address target = targets[i];
-                
+
                 // Check EXT* operations
                 checkAddress(target);
-                
+
                 // Check balance before
                 uint256 balBefore = target.balance;
                 emit BalanceChecked(target, balBefore);
-                
+
                 // DELEGATECALL
                 (bool success,) = target.delegatecall("");
                 emit CallResult(target, success);
-                
+
                 // Check balance after
                 uint256 balAfter = target.balance;
                 emit BalanceChecked(target, balAfter);
@@ -260,21 +260,21 @@ sol! {
 
             for (uint256 i = 0; i < targets.length; i++) {
                 address target = targets[i];
-                
+
                 // Check EXT* operations
                 checkAddress(target);
-                
+
                 // Check balance before
                 uint256 balBefore = target.balance;
                 emit BalanceChecked(target, balBefore);
-                
+
                 // CALLCODE (deprecated but still works)
                 bool success;
                 assembly {
                     success := callcode(gas(), target, valuePerCall, 0, 0, 0, 0)
                 }
                 emit CallResult(target, success);
-                
+
                 // Check balance after
                 uint256 balAfter = target.balance;
                 emit BalanceChecked(target, balAfter);
@@ -297,21 +297,21 @@ sol! {
 
             for (uint256 i = 0; i < targets.length; i++) {
                 address target = targets[i];
-                
+
                 // Check EXT* operations
                 checkAddress(target);
-                
+
                 // Check balance before
                 uint256 balBefore = target.balance;
                 emit BalanceChecked(target, balBefore);
-                
+
                 // Encode target address + any data for the nested delegatecall
                 bytes memory data = abi.encodePacked(target);
-                
+
                 // Delegatecall to forwarder which will delegatecall to precompile
                 (bool success,) = delegateForwarder.delegatecall(data);
                 emit CallResult(target, success);
-                
+
                 // Check balance after
                 uint256 balAfter = target.balance;
                 emit BalanceChecked(target, balAfter);

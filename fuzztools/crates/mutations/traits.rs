@@ -2,7 +2,8 @@ use rand::Rng;
 
 /// Core trait for types that can be mutated during fuzzing.
 ///
-/// Returns `true` if the mutation should propagate to the parent (e.g., setting an `Option` to `None`).
+/// Returns `true` if the mutation should propagate to the parent (e.g., setting an `Option` to
+/// `None`).
 pub trait Mutable {
     /// Applies a random mutation to the value.
     fn mutate(&mut self, random: &mut impl Rng) -> bool;

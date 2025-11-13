@@ -1,7 +1,7 @@
 //! # Fuzztools
 //!
-//! This crate implements many types as well as stuff I will be using in my fuzzers. The reason why is because I am
-//! lazy as fuck and do not wanna copy-paste the same code over and over again :P
+//! This crate implements many types as well as stuff I will be using in my fuzzers. The reason why
+//! is because I am lazy as fuck and do not wanna copy-paste the same code over and over again :P
 //!
 //! ## Modules
 //!
@@ -9,7 +9,8 @@
 //! - [`builders`] - Handles the logic of creating **VALID** types according to protocol rules.
 //! - [`evm`] - Handles the logic of creating **VALID** calldata for the EVM for pre-deployed contracts (like [AccessListTarget](https://github.com/nethoxa/fuzzers/blob/main/fuzztools/crates/builders/contracts/AccessListTarget.sol)).
 //! - [`mutations`] - Implements the `Mutable` trait for:
-//!     - Alloy's `Address`, `Bytes`, `FixedBytes<N>`, `U256`, `Authorization`, `AccessList`, `Vec<Authorization>` and `Vec<SignedAuthorization>`.
+//!     - Alloy's `Address`, `Bytes`, `FixedBytes<N>`, `U256`, `Authorization`, `AccessList`,
+//!       `Vec<Authorization>` and `Vec<SignedAuthorization>`.
 //!     - `[T; N]` and `[u8; N]` arrays.
 //!     - `Vec<T>` and `Vec<u8>`.
 //!     - `u8`, `u16`, `u32`, `u64`, `u128`.

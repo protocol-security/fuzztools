@@ -3,12 +3,19 @@ use crate::constants::{
     RESET,
 };
 use alloy::{
-    eips::eip7702::SignedAuthorization, hex, primitives::Address, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider, WsConnect}, rpc::types::Header, signers::{SignerSync, local::PrivateKeySigner}
+    eips::eip7702::SignedAuthorization,
+    hex,
+    providers::{Provider, ProviderBuilder, RootProvider},
+    rpc::types::Header,
+    signers::{local::PrivateKeySigner, SignerSync},
 };
 use anyhow::Result;
 use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
 use fuzztools::{
-    builders::{AccessListTarget, PrecompileTarget::{self, TestType}, TransactionBuilder},
+    builders::{
+        AccessListTarget,
+        TransactionBuilder,
+    },
     mutations::Mutable,
     transactions::{SignedTransaction, Transaction},
     utils::FastPrivateKeySigner,
@@ -48,6 +55,9 @@ pub struct App {
     /// Stream of block headers
     stream: Pin<Box<dyn Stream<Item = Header> + Send>>,
 
+    /// Semaphore that controls the fire-and-forget throughput
+    semaphore: Arc<Semaphore>,
+
     // Stats
     total_txs_sent: u64,
     txs_since_last_update: u64,
@@ -71,15 +81,14 @@ impl App {
         let key_bytes = hex::decode(key)?;
         let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
         let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
-        
-        let access_list_target = AccessListTarget::deploy(&deployer).await?; // @audit improve this
-        let precompile_target = PrecompileTarget::deploy(&deployer, TestType::Nothing, Address::ZERO).await?;
+
+        let access_list_target = AccessListTarget::deploy(&deployer).await?;
 
         // Then, create the main connection to the node
         let node = ProviderBuilder::default().connect(&url).await?;
 
         // Create `Builder` with the deployed contract address
-        let builder = TransactionBuilder::new(*access_list_target.address(), *precompile_target.address(), &node).await?;
+        let builder = TransactionBuilder::new(*access_list_target.address(), &node).await?;
 
         // Create our signer and auth signer
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
@@ -90,6 +99,9 @@ impl App {
         let sub = node.subscribe_blocks().await?;
         let stream = Box::pin(sub.into_stream());
 
+        // Create the semaphore
+        let semaphore = Arc::new(Semaphore::new(DEFAULT_SEMAPHORE_PERMITS));
+
         Ok(Self {
             prelude,
             node,
@@ -99,6 +111,7 @@ impl App {
             signer,
             auth_signer,
             stream,
+            semaphore,
             total_txs_sent: 0,
             txs_since_last_update: 0,
             start_time: Instant::now(),
@@ -112,6 +125,7 @@ impl App {
 
     pub async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
         let num_cores = std::thread::available_parallelism().unwrap().get();
+
         loop {
             tokio::select! {
                 // If there is a new block, refresh cache
@@ -139,26 +153,15 @@ impl App {
                     let mutate_start = Instant::now();
                     if self.fuzzing {
                         unsigned_txs.iter_mut().for_each(|tx| {
-                            // @todo this is temporal as no way to access TX::to within the AL struct
-                            let access_list_length = tx.access_list.as_ref().map(|al| al.0.len()).unwrap_or(0);
                             tx.mutate(random);
-                            let diff = tx.access_list.as_ref().map(|al| al.0.len()).unwrap_or(0) - access_list_length;
-                            if diff > 0 {
-                                if let Some(last_item) = tx.access_list.as_mut().unwrap().0.last_mut() {
-                                    if let Some(to_addr) = tx.to {
-                                        last_item.address = to_addr;
-                                    }
-                                }
-                            }
-
                         });
                     }
                     self.mutate_time = mutate_start.elapsed();
 
-                    // Sign transactions (including authorization lists)
+                    // Sign transactions (including authorization lists) and encode them
                     let signing_start = Instant::now();
-                    let signed_txs: Vec<SignedTransaction> = unsigned_txs.into_par_iter().map(|mut tx| {
-                        if let Some(authorizations) = &tx.authorization_list {
+                    let signed_txs: Vec<String> = unsigned_txs.into_par_iter().map(|mut tx| {
+                        let signed_tx = if let Some(authorizations) = &tx.authorization_list {
                             // Sign the authorizations in parallel
                             let signed_authorizations = authorizations
                                 .par_iter()
@@ -181,25 +184,28 @@ impl App {
                                 transaction: tx,
                                 signature,
                             }
-                        }
+                        };
+
+                        let mut encoded = String::new();
+                        encoded.push_str("0x");
+                        encoded.push_str(&hex::encode(signed_tx.encode()));
+                        encoded
                     }).collect::<Vec<_>>();
                     self.signing_time = signing_start.elapsed();
 
                     // Send the RPC requests through fire-and-forget tasks
                     let wait_start = Instant::now();
+                    let signed_txs_len = signed_txs.len() as u64;
                     let futures = FuturesUnordered::new();
-                    for tx in &signed_txs {
-                        let mut encoded = String::new();
-                        encoded.push_str("0x");
-                        encoded.push_str(&hex::encode(tx.encode()));
-
-                        futures.push(self.node.client().request::<_, ()>("eth_sendRawTransaction", (encoded,)));
+                    for tx in signed_txs {
+                        futures.push(self.node.client().request::<_, ()>("eth_sendRawTransaction", (tx,)));
                     }
-                    tokio::spawn(async move { join_all(futures).await; });
+                    let permit = self.semaphore.clone().acquire_owned().await.unwrap();
+                    tokio::spawn(async move { join_all(futures).await; drop(permit); });
                     self.wait_time = wait_start.elapsed();
 
-                    self.total_txs_sent += DEFAULT_TXS_PER_CORE * num_cores as u64;
-                    self.txs_since_last_update += DEFAULT_TXS_PER_CORE * num_cores as u64;
+                    self.total_txs_sent += signed_txs_len;
+                    self.txs_since_last_update += signed_txs_len;
 
                     // Update terminal logging
                     if self.last_update.elapsed().as_secs_f64() >= 1.0 {
@@ -224,7 +230,7 @@ impl App {
             "[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: \
              {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Build: \
              {RED}{:>6.2}ms{RESET} | Mutate: {RED}{:>6.2}ms{RESET} | Sign: {RED}{:>6.2}ms{RESET} \
-             | Network wait time: {RED}{:>6.2}ms{RESET}",
+             | Network wait time: {RED}{:>6.2}ms{RESET} | Semaphore permits: {RED}{}{RESET}",
             self.total_txs_sent,
             self.txs_since_last_update,
             self.start_time.elapsed().as_secs() / 3600,
@@ -234,6 +240,7 @@ impl App {
             self.mutate_time.as_secs_f64() * 1000.0,
             self.signing_time.as_secs_f64() * 1000.0,
             self.wait_time.as_secs_f64() * 1000.0,
+            self.semaphore.available_permits(),
         );
 
         io::stdout().flush()?;

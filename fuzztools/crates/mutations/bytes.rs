@@ -185,9 +185,8 @@ impl BytesMutations for Vec<u8> {
     #[inline(always)]
     fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng) {
         check_not_empty!(self);
-        let utf8 = INVALID_UTF8_SEQUENCES
-            [random.random_range(0..INVALID_UTF8_SEQUENCES.len())]
-        .to_vec();
+        let utf8 =
+            INVALID_UTF8_SEQUENCES[random.random_range(0..INVALID_UTF8_SEQUENCES.len())].to_vec();
 
         check_not_smaller!(self, utf8.len());
 
