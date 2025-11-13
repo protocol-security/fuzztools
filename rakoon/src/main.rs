@@ -23,11 +23,8 @@ struct Cli {
     #[arg(long, help = "Seed for the random generator")]
     seed: u64,
 
-    #[arg(long, help = "IPC url to send transactions to")]
-    ipc: Option<String>,
-
-    #[arg(long, help = "WS url in case of IPC is not available")]
-    ws: Option<String>,
+    #[arg(long, help = "URL to send transactions to (supports IPC, WS and HTTP)")]
+    url: String,
 
     #[arg(long, help = "If false, it spams VALID transactions")]
     fuzzing: bool,
@@ -38,14 +35,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let prelude = format!(
-        "{HEADER}\n{GREEN}INFO{RESET}      IPC:                    \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      WS:                     \
+        "{HEADER}\n{GREEN}INFO{RESET}      URL:                    \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Key:                    \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Seed:                   \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Type:                   \
          {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        {RED}{}{RESET}\n\n",
-        cli.ipc.as_deref().unwrap_or("None"),
-        cli.ws.as_deref().unwrap_or("None"),
+        cli.url,
         cli.key,
         cli.seed,
         cli.tx_type,
@@ -53,7 +48,7 @@ async fn main() -> Result<()> {
     );
 
     // Create the application
-    let mut app = App::new(cli.tx_type, cli.key, cli.ipc, cli.ws, cli.fuzzing, prelude).await?;
+    let mut app = App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, prelude).await?;
 
     // Run the application
     let mut random = SmallRng::seed_from_u64(cli.seed);

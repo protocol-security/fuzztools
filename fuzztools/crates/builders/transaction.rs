@@ -12,7 +12,8 @@ use rand::Rng;
 /// Handles the logic of creating **VALID** transactions per mempool rules
 pub struct TransactionBuilder {
     chain_id: u64,
-    contract_address: Address,
+    access_list_target: Address,
+    precompile_target: Address,
     signer_nonce: u64,
     auth_nonce: u64,
     cache: RpcCache,
@@ -20,10 +21,10 @@ pub struct TransactionBuilder {
 
 impl TransactionBuilder {
     #[inline]
-    pub async fn new(contract_address: Address, node: &RootProvider) -> Result<Self> {
+    pub async fn new(access_list_target: Address, precompile_target: Address, node: &RootProvider) -> Result<Self> {
         let cache = RpcCache::fetch(node).await?;
         let chain_id = node.get_chain_id().await?;
-        Ok(Self { chain_id, contract_address, signer_nonce: 0, auth_nonce: 0, cache })
+        Ok(Self { chain_id, access_list_target, precompile_target, signer_nonce: 0, auth_nonce: 0, cache })
     }
 
     /// Refreshes the cache by fetching it from the given node
@@ -64,7 +65,7 @@ impl TransactionBuilder {
         // we just add a single entry
         let idx = random.random_range(0..STORAGE_KEYS.len());
         let key = FixedBytes::from_hex(STORAGE_KEYS[idx]).unwrap();
-        let item = AccessListItem { address: self.contract_address, storage_keys: vec![key] };
+        let item = AccessListItem { address: self.access_list_target, storage_keys: vec![key] };
 
         (AccessList(vec![item]), Bytes::from(key))
     }

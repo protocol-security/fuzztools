@@ -3,16 +3,12 @@ use crate::constants::{
     RESET,
 };
 use alloy::{
-    eips::eip7702::SignedAuthorization,
-    hex,
-    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider, WsConnect},
-    rpc::types::Header,
-    signers::{local::PrivateKeySigner, SignerSync},
+    eips::eip7702::SignedAuthorization, hex, primitives::Address, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider, WsConnect}, rpc::types::Header, signers::{SignerSync, local::PrivateKeySigner}
 };
 use anyhow::Result;
 use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
 use fuzztools::{
-    builders::{AccessListTarget, TransactionBuilder},
+    builders::{AccessListTarget, PrecompileTarget::{self, TestType}, TransactionBuilder},
     mutations::Mutable,
     transactions::{SignedTransaction, Transaction},
     utils::FastPrivateKeySigner,
@@ -31,17 +27,14 @@ pub struct App {
     /// Rakoon prelude to display
     prelude: String,
 
-    /// Nodes
-    nodes: Vec<RootProvider>,
+    /// Main node connection
+    node: RootProvider,
 
     /// Transaction type
     tx_type: TransactionType,
 
     /// Whether fuzzing is enabled or not
     fuzzing: bool,
-
-    /// Batch size per cycle
-    batch_size: u64,
 
     /// Transaction builder
     builder: TransactionBuilder,
@@ -54,9 +47,6 @@ pub struct App {
 
     /// Stream of block headers
     stream: Pin<Box<dyn Stream<Item = Header> + Send>>,
-
-    /// Semaphore that controls the fire-and-forget throughput
-    semaphore: Arc<Semaphore>,
 
     // Stats
     total_txs_sent: u64,
@@ -73,72 +63,42 @@ impl App {
     pub async fn new(
         tx_type: TransactionType,
         key: String,
-        ipc: Option<String>,
-        ws: Option<String>,
+        url: String,
         fuzzing: bool,
         prelude: String,
     ) -> Result<Self> {
-        // First, create our signer, auth signer and contract deployer
+        // First, deploy our custom contracts
         let key_bytes = hex::decode(key)?;
-        let tmp_signer = PrivateKeySigner::from_slice(&key_bytes)?;
-        let deployer = if let Some(ipc) = ipc.clone() {
-            let conn = IpcConnect::new(ipc.clone());
-            ProviderBuilder::new().wallet(tmp_signer.clone()).connect_ipc(conn).await?
-        } else if let Some(ws) = ws.clone() {
-            let conn = WsConnect::new(ws.clone());
-            ProviderBuilder::new().wallet(tmp_signer.clone()).connect_ws(conn).await?
-        } else {
-            return Err(anyhow::anyhow!("Invalid URL"));
-        };
+        let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
+        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
+        
+        let access_list_target = AccessListTarget::deploy(&deployer).await?; // @audit improve this
+        let precompile_target = PrecompileTarget::deploy(&deployer, TestType::Nothing, Address::ZERO).await?;
 
-        // Then, deploy the access list target if enabled
-        let address = AccessListTarget::deploy(&deployer).await?;
+        // Then, create the main connection to the node
+        let node = ProviderBuilder::default().connect(&url).await?;
 
-        // Then, create our signer and auth signer
+        // Create `Builder` with the deployed contract address
+        let builder = TransactionBuilder::new(*access_list_target.address(), *precompile_target.address(), &node).await?;
+
+        // Create our signer and auth signer
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
         let auth_signer = FastPrivateKeySigner::new(&auth_key_bytes)?;
         let signer = FastPrivateKeySigner::new(&key_bytes)?;
 
-        // Then, connect to the node via IPC (or WS if IPC is not available)
-        let num_cores = std::thread::available_parallelism().unwrap().get();
-        let nodes: Vec<RootProvider> = if let Some(ipc) = ipc.clone() {
-            let futures = (0..num_cores).map(|_| {
-                let conn = IpcConnect::new(ipc.clone());
-                ProviderBuilder::new().disable_recommended_fillers().connect_ipc(conn)
-            });
-            join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
-        } else if let Some(ws) = ws.clone() {
-            let futures = (0..num_cores).map(|_| {
-                let conn = WsConnect::new(ws.clone());
-                ProviderBuilder::new().disable_recommended_fillers().connect_ws(conn)
-            });
-            join_all(futures).await.into_iter().collect::<Result<Vec<_>, _>>()?
-        } else {
-            return Err(anyhow::anyhow!("Invalid URL"));
-        };
-
-        // Create `Builder` and `FastPrivateSigner`s
-        let builder = TransactionBuilder::new(*address.address(), &nodes[0]).await?;
-
         // Subscribe to block header stream
-        let sub = nodes[0].subscribe_blocks().await?;
+        let sub = node.subscribe_blocks().await?;
         let stream = Box::pin(sub.into_stream());
-
-        // Set up the semaphore
-        let semaphore = Arc::new(Semaphore::new(DEFAULT_SEMAPHORE_PERMITS));
-        let batch_size = num_cores as u64 * DEFAULT_TXS_PER_CORE;
 
         Ok(Self {
             prelude,
-            nodes,
+            node,
             tx_type,
             fuzzing,
-            batch_size,
             builder,
             signer,
             auth_signer,
             stream,
-            semaphore,
             total_txs_sent: 0,
             txs_since_last_update: 0,
             start_time: Instant::now(),
@@ -151,24 +111,23 @@ impl App {
     }
 
     pub async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
-        let mut idx = 0;
+        let num_cores = std::thread::available_parallelism().unwrap().get();
         loop {
             tokio::select! {
                 // If there is a new block, refresh cache
                 Some(_) = self.stream.next() => {
-                    self.builder.refresh_cache(&self.nodes[idx]).await?;
-                    idx = (idx + 1) % self.nodes.len();
+                    self.builder.refresh_cache(&self.node).await?;
                 }
 
                 _ = tokio::task::yield_now() => {
-                    if self.nodes[idx].get_chain_id().await.is_err() {
+                    if self.node.get_chain_id().await.is_err() {
                         eprintln!("\n\n\x1b[1;31m[!] Crash detected, shutting down...\x1b[0m");
                         return Ok(());
                     }
 
                     // Build transactions
                     let build_start = Instant::now();
-                    let mut unsigned_txs: Vec<Transaction> = (0..self.batch_size).map(|_| match self.tx_type {
+                    let mut unsigned_txs: Vec<Transaction> = (0..DEFAULT_TXS_PER_CORE * num_cores as u64).map(|_| match self.tx_type {
                         TransactionType::Legacy => self.builder.build_legacy_tx(random),
                         TransactionType::Al => self.builder.build_access_list_tx(random),
                         TransactionType::Eip1559 => self.builder.build_eip1559_tx(random),
@@ -234,14 +193,13 @@ impl App {
                         encoded.push_str("0x");
                         encoded.push_str(&hex::encode(tx.encode()));
 
-                        futures.push(self.nodes[idx].client().request::<_, ()>("eth_sendRawTransaction", (encoded,)));
+                        futures.push(self.node.client().request::<_, ()>("eth_sendRawTransaction", (encoded,)));
                     }
-                    let permit = self.semaphore.clone().acquire_owned().await.unwrap();
-                    tokio::spawn(async move { join_all(futures).await; drop(permit); });
+                    tokio::spawn(async move { join_all(futures).await; });
                     self.wait_time = wait_start.elapsed();
 
-                    self.total_txs_sent += self.batch_size as u64;
-                    self.txs_since_last_update += self.batch_size as u64;
+                    self.total_txs_sent += DEFAULT_TXS_PER_CORE * num_cores as u64;
+                    self.txs_since_last_update += DEFAULT_TXS_PER_CORE * num_cores as u64;
 
                     // Update terminal logging
                     if self.last_update.elapsed().as_secs_f64() >= 1.0 {
@@ -249,7 +207,6 @@ impl App {
                         self.txs_since_last_update = 0;
                         self.last_update = Instant::now();
                     }
-                    idx = (idx + 1) % self.nodes.len();
                 }
             }
         }
@@ -267,7 +224,7 @@ impl App {
             "[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: \
              {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Build: \
              {RED}{:>6.2}ms{RESET} | Mutate: {RED}{:>6.2}ms{RESET} | Sign: {RED}{:>6.2}ms{RESET} \
-             | Network wait time: {RED}{:>6.2}ms{RESET} | Free permits: {RED}{}{RESET}",
+             | Network wait time: {RED}{:>6.2}ms{RESET}",
             self.total_txs_sent,
             self.txs_since_last_update,
             self.start_time.elapsed().as_secs() / 3600,
@@ -277,7 +234,6 @@ impl App {
             self.mutate_time.as_secs_f64() * 1000.0,
             self.signing_time.as_secs_f64() * 1000.0,
             self.wait_time.as_secs_f64() * 1000.0,
-            self.semaphore.available_permits(),
         );
 
         io::stdout().flush()?;
