@@ -4,6 +4,7 @@ use super::{
     constants::{EVEN, INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, ODD},
     traits::{InterestingMutations, Mutable, UintMutations},
 };
+use crate::utils::RandomChoice;
 use rand::Rng;
 use std::mem::size_of;
 
@@ -185,44 +186,39 @@ macro_rules! impl_mutations {
 
 impl InterestingMutations for u8 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
-        let idx = random.random_range(0..INTERESTING_U8.len());
-        *self = INTERESTING_U8[idx];
+        *self = *random.choice(&INTERESTING_U8);
     }
 }
 
 impl InterestingMutations for u16 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
-        let idx = random.random_range(0..INTERESTING_U16.len());
-        *self = INTERESTING_U16[idx];
+        *self = *random.choice(&INTERESTING_U16);
     }
 }
 
 impl InterestingMutations for u32 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
-        let idx = random.random_range(0..INTERESTING_U32.len());
-        *self = INTERESTING_U32[idx];
+        *self = *random.choice(&INTERESTING_U32);
     }
 }
 
 impl InterestingMutations for u64 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
-        let hi_idx = random.random_range(0..INTERESTING_U32.len());
-        let lo_idx = random.random_range(0..INTERESTING_U32.len());
-        let hi = INTERESTING_U32[hi_idx] as u64;
-        let lo = INTERESTING_U32[lo_idx] as u64;
+        let hi = *random.choice(&INTERESTING_U32) as u64;
+        let lo = *random.choice(&INTERESTING_U32) as u64;
         *self = (hi << 32) | lo;
     }
 }
 
 impl InterestingMutations for u128 {
     fn set_interesting(&mut self, random: &mut impl Rng) {
-        let hi_hi_idx = random.random_range(0..INTERESTING_U32.len());
-        let hi_lo_idx = random.random_range(0..INTERESTING_U32.len());
-        let lo_hi_idx = random.random_range(0..INTERESTING_U32.len());
-        let lo_lo_idx = random.random_range(0..INTERESTING_U32.len());
+        let hi_hi = *random.choice(&INTERESTING_U32) as u64;
+        let hi_lo = *random.choice(&INTERESTING_U32) as u64;
+        let lo_hi = *random.choice(&INTERESTING_U32) as u64;
+        let lo_lo = *random.choice(&INTERESTING_U32) as u64;
 
-        let hi = ((INTERESTING_U32[hi_hi_idx] as u64) << 32) | (INTERESTING_U32[hi_lo_idx] as u64);
-        let lo = ((INTERESTING_U32[lo_hi_idx] as u64) << 32) | (INTERESTING_U32[lo_lo_idx] as u64);
+        let hi = (hi_hi << 32) | hi_lo;
+        let lo = (lo_hi << 32) | lo_lo;
 
         *self = ((hi as u128) << 64) | (lo as u128);
     }

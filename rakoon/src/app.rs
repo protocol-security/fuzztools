@@ -197,9 +197,11 @@ impl App {
                     let wait_start = Instant::now();
                     let signed_txs_len = signed_txs.len() as u64;
                     let futures = FuturesUnordered::new();
+
                     for tx in signed_txs {
                         futures.push(self.node.client().request::<_, ()>("eth_sendRawTransaction", (tx,)));
                     }
+
                     let permit = self.semaphore.clone().acquire_owned().await.unwrap();
                     tokio::spawn(async move { join_all(futures).await; drop(permit); });
                     self.wait_time = wait_start.elapsed();

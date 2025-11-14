@@ -5,6 +5,7 @@ use crate::mutations::{
     constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
     traits::{Phantom, Random},
 };
+use crate::utils::RandomChoice;
 use alloy::{
     eips::eip7702::SignedAuthorization,
     hex::FromHex,
@@ -145,8 +146,8 @@ impl Mutable for AccessList {
                 let num_keys = random.random_range(0..STORAGE_KEYS.len());
                 let storage_keys = (0..num_keys)
                     .map(|_| {
-                        let key_idx = random.random_range(0..STORAGE_KEYS.len());
-                        FixedBytes::from_hex(STORAGE_KEYS[key_idx]).unwrap()
+                        let key_str = random.choice(&STORAGE_KEYS);
+                        FixedBytes::from_hex(key_str).unwrap()
                     })
                     .collect();
 
@@ -220,11 +221,11 @@ impl Mutable for Vec<Authorization> {
             6 => {
                 // Add authorization with interesting address
                 let address = Address::from_hex(
-                    INTERESTING_ADDRESSES[random.random_range(0..INTERESTING_ADDRESSES.len())],
+                    random.choice(&INTERESTING_ADDRESSES),
                 )
                 .unwrap();
                 let chain_id = U256::from(
-                    INTERESTING_CHAIN_IDS[random.random_range(0..INTERESTING_CHAIN_IDS.len())],
+                    *random.choice(&INTERESTING_CHAIN_IDS),
                 );
                 let nonce = random.random::<u64>();
 

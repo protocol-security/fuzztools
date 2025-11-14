@@ -1,5 +1,5 @@
 use super::{RpcCache, DEFAULT_GAS_LIMIT, DEFAULT_INPUT_SIZE};
-use crate::{mutations::STORAGE_KEYS, transactions::Transaction};
+use crate::{mutations::STORAGE_KEYS, transactions::Transaction, utils::RandomChoice};
 use alloy::{
     hex::FromHex,
     primitives::{Address, Bytes, FixedBytes, U256},
@@ -62,8 +62,8 @@ impl TransactionBuilder {
     fn generate_access_list_and_input(&self, random: &mut impl Rng) -> (AccessList, Bytes) {
         // As the randomness of valid txs come from `to`, to speed things up
         // we just add a single entry
-        let idx = random.random_range(0..STORAGE_KEYS.len());
-        let key = FixedBytes::from_hex(STORAGE_KEYS[idx]).unwrap();
+        let key_str = random.choice(&STORAGE_KEYS);
+        let key = FixedBytes::from_hex(key_str).unwrap();
         let item = AccessListItem { address: self.access_list_target, storage_keys: vec![key] };
 
         (AccessList(vec![item]), Bytes::from(key))

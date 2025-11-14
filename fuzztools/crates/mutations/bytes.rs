@@ -5,6 +5,7 @@ use super::{
     traits::{BytesMutations, Mutable, UintMutations},
 };
 use crate::mutations::traits::InterestingMutations;
+use crate::utils::RandomChoice;
 use rand::{seq::SliceRandom, Rng};
 
 macro_rules! check_not_empty {
@@ -185,8 +186,7 @@ impl BytesMutations for Vec<u8> {
     #[inline(always)]
     fn slice_swap_with_invalid_utf8(&mut self, random: &mut impl Rng) {
         check_not_empty!(self);
-        let utf8 =
-            INVALID_UTF8_SEQUENCES[random.random_range(0..INVALID_UTF8_SEQUENCES.len())].to_vec();
+        let utf8 = random.choice(&INVALID_UTF8_SEQUENCES).to_vec();
 
         check_not_smaller!(self, utf8.len());
 
@@ -224,48 +224,40 @@ impl InterestingMutations for Vec<u8> {
             0 => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
-                let value_idx = random.random_range(0..INTERESTING_U8.len());
-                self[idx] = INTERESTING_U8[value_idx];
+                self[idx] = *random.choice(&INTERESTING_U8);
             },
             1 => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
-                let value_idx = random.random_range(0..INTERESTING_U8.len());
-                self[idx] = INTERESTING_U8[value_idx].reverse_bits();
+                self[idx] = random.choice(&INTERESTING_U8).reverse_bits();
             },
             2 => {
                 check_not_smaller!(self, 2);
                 let idx = random.random_range(0..=self.len() - 2);
-                let value_idx = random.random_range(0..INTERESTING_U16.len());
-                let value = INTERESTING_U16[value_idx].to_le_bytes();
+                let value = random.choice(&INTERESTING_U16).to_le_bytes();
                 self[idx..idx + 2].copy_from_slice(&value);
             },
             3 => {
                 check_not_smaller!(self, 2);
                 let idx = random.random_range(0..=self.len() - 2);
-                let value_idx = random.random_range(0..INTERESTING_U16.len());
-                let value = INTERESTING_U16[value_idx].to_be_bytes();
+                let value = random.choice(&INTERESTING_U16).to_be_bytes();
                 self[idx..idx + 2].copy_from_slice(&value);
             },
             4 => {
                 check_not_smaller!(self, 4);
                 let idx = random.random_range(0..=self.len() - 4);
-                let value_idx = random.random_range(0..INTERESTING_U32.len());
-                let value = INTERESTING_U32[value_idx].to_le_bytes();
+                let value = random.choice(&INTERESTING_U32).to_le_bytes();
                 self[idx..idx + 4].copy_from_slice(&value);
             },
             5 => {
                 check_not_smaller!(self, 4);
                 let idx = random.random_range(0..=self.len() - 4);
-                let value_idx = random.random_range(0..INTERESTING_U32.len());
-                let value = INTERESTING_U32[value_idx].to_be_bytes();
+                let value = random.choice(&INTERESTING_U32).to_be_bytes();
                 self[idx..idx + 4].copy_from_slice(&value);
             },
             6 => {
                 check_not_empty!(self);
-                let utf8 = INVALID_UTF8_SEQUENCES
-                    [random.random_range(0..INVALID_UTF8_SEQUENCES.len())]
-                .to_vec();
+                let utf8 = random.choice(&INVALID_UTF8_SEQUENCES).to_vec();
                 check_not_smaller!(self, utf8.len());
                 let idx = random.random_range(0..=self.len() - utf8.len());
                 self[idx..idx + utf8.len()].copy_from_slice(&utf8);
