@@ -4,7 +4,8 @@ use rand::Rng;
 pub trait RandomChoice {
     /// Picks one random element from a slice.
     /// Returns `None` if the slice is empty.
-    /// **NOTE**: This function does not check if the slice is empty. If the slice is empty, it will panic.
+    /// **NOTE**: This function does not check if the slice is empty. If the slice is empty, it will
+    /// panic.
     fn choice<'a, T>(&mut self, items: &'a [T]) -> &'a T;
 }
 
@@ -17,8 +18,8 @@ impl<R: Rng + ?Sized> RandomChoice for R {
 
 #[cfg(test)]
 mod tests {
-    use rand::{SeedableRng, rngs::SmallRng};
     use super::*;
+    use rand::{rngs::SmallRng, SeedableRng};
 
     #[test]
     fn test_choice() {

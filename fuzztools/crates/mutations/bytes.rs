@@ -4,8 +4,7 @@ use super::{
     constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
     traits::{BytesMutations, Mutable, UintMutations},
 };
-use crate::mutations::traits::InterestingMutations;
-use crate::utils::RandomChoice;
+use crate::{mutations::traits::InterestingMutations, utils::RandomChoice};
 use rand::{seq::SliceRandom, Rng};
 
 macro_rules! check_not_empty {
@@ -56,16 +55,15 @@ impl Mutable for Vec<u8> {
 impl BytesMutations for Vec<u8> {
     #[inline(always)]
     fn random_byte_push(&mut self, random: &mut impl Rng) {
-        let byte = random.random::<u8>();
+        let byte = random.random();
         self.push(byte);
     }
 
     #[inline(always)]
     fn byte_clone(&mut self, random: &mut impl Rng) {
         check_not_empty!(self);
-        let idx = random.random_range(0..self.len());
-        let byte = self[idx];
-        self.push(byte);
+        let byte = random.choice(self);
+        self.push(*byte);
     }
 
     #[inline(always)]

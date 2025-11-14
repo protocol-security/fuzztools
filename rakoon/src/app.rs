@@ -12,10 +12,7 @@ use alloy::{
 use anyhow::Result;
 use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
 use fuzztools::{
-    builders::{
-        AccessListTarget,
-        TransactionBuilder,
-    },
+    builders::{AccessListTarget, TransactionBuilder},
     mutations::Mutable,
     transactions::{SignedTransaction, Transaction},
     utils::FastPrivateKeySigner,

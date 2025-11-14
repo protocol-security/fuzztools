@@ -1,11 +1,13 @@
 //! Mutation implementations for Alloy types used in Ethereum fuzzing.
 
 use super::traits::Mutable;
-use crate::mutations::{
-    constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
-    traits::{Phantom, Random},
+use crate::{
+    mutations::{
+        constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
+        traits::{Phantom, Random},
+    },
+    utils::RandomChoice,
 };
-use crate::utils::RandomChoice;
 use alloy::{
     eips::eip7702::SignedAuthorization,
     hex::FromHex,
@@ -19,7 +21,6 @@ impl Random for Address {
         Address::from(random.random::<[u8; 20]>())
     }
 }
-
 impl Mutable for Bytes {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         let mut vec = self.to_vec();
@@ -32,7 +33,7 @@ impl Mutable for Bytes {
 impl Random for Bytes {
     fn random(random: &mut impl Rng) -> Self {
         let length = random.random_range(0..=1024);
-        let mut bytes = Vec::with_capacity(length);
+        let mut bytes = vec![0u8; length];
         random.fill_bytes(&mut bytes);
         Bytes::from(bytes)
     }
@@ -50,9 +51,8 @@ impl<const N: usize> Mutable for FixedBytes<N> {
 
 impl<const N: usize> Random for FixedBytes<N> {
     fn random(random: &mut impl Rng) -> Self {
-        let mut bytes = Vec::with_capacity(N);
-        random.fill_bytes(&mut bytes);
-        FixedBytes::from_slice(&bytes)
+        let bytes = random.random::<[u8; N]>();
+        FixedBytes(bytes)
     }
 }
 
@@ -70,24 +70,18 @@ impl Mutable for U256 {
 
 impl Random for U256 {
     fn random(random: &mut impl Rng) -> Self {
-        let mut bytes = [0u8; 32];
-        random.fill_bytes(&mut bytes);
-        U256::from_be_slice(&bytes)
+        let bytes = random.random::<[u8; 32]>();
+        U256::from_be_bytes(bytes)
     }
 }
 
 impl Mutable for Authorization {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        self.address.mutate(random) || self.chain_id.mutate(random) || self.nonce.mutate(random)
-    }
-}
-
-impl Random for Authorization {
-    fn random(random: &mut impl Rng) -> Self {
-        Authorization {
-            address: Address::random(random),
-            chain_id: U256::random(random),
-            nonce: random.random::<u64>(),
+        match random.random_range(0..=2) {
+            0 => self.address.mutate(random),
+            1 => self.chain_id.mutate(random),
+            2 => self.nonce.mutate(random),
+            _ => unreachable!(),
         }
     }
 }
@@ -102,10 +96,10 @@ impl Mutable for AccessList {
             1 => self.0.clear(), // Reset the access list
             2 => {
                 // Add a random entry
-                let address = Address::from(random.random::<[u8; 20]>());
-                let num_keys = random.random::<u8>() as usize;
+                let address = Address::random(random);
+                let num_keys = random.random::<u8>(); // @audit max 255 keys
                 let storage_keys =
-                    (0..num_keys).map(|_| FixedBytes::from(random.random::<[u8; 32]>())).collect();
+                    (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
                 self.0.push(AccessListItem { address, storage_keys });
             },
@@ -131,10 +125,10 @@ impl Mutable for AccessList {
                 // Replace a random entry
                 if !self.0.is_empty() {
                     let idx = random.random_range(0..self.0.len());
-                    let address = Address::from(random.random::<[u8; 20]>());
-                    let num_keys = random.random::<u8>() as usize;
+                    let address = Address::random(random);
+                    let num_keys = random.random::<u8>(); // @audit max 255 keys
                     let storage_keys = (0..num_keys)
-                        .map(|_| FixedBytes::from(random.random::<[u8; 32]>()))
+                        .map(|_| FixedBytes::random(random))
                         .collect();
 
                     self.0[idx] = AccessListItem { address, storage_keys };
@@ -142,8 +136,8 @@ impl Mutable for AccessList {
             },
             6 => {
                 // Add entry with storage keys from `STORAGE_KEYS`
-                let address = Address::from(random.random::<[u8; 20]>());
-                let num_keys = random.random_range(0..STORAGE_KEYS.len());
+                let address = Address::random(random);
+                let num_keys = random.random::<u8>(); // @audit max 255 keys
                 let storage_keys = (0..num_keys)
                     .map(|_| {
                         let key_str = random.choice(&STORAGE_KEYS);
@@ -156,8 +150,7 @@ impl Mutable for AccessList {
             7 => {
                 // Mutate an element of `self`
                 if !self.0.is_empty() {
-                    let item_idx = random.random_range(0..self.0.len());
-                    let item = &mut self.0[item_idx];
+                    let mut item = random.choice(&self.0).clone();
                     item.address.mutate(random);
                     if !item.storage_keys.is_empty() {
                         item.storage_keys.iter_mut().for_each(|key| {
@@ -183,9 +176,9 @@ impl Mutable for Vec<Authorization> {
             1 => self.clear(), // Reset the authorization list
             2 => {
                 // Add a random authorization entry
-                let address = Address::from(random.random::<[u8; 20]>());
-                let chain_id = U256::from(random.random::<u64>());
-                let nonce = random.random::<u64>();
+                let address = Address::random(random);
+                let chain_id = U256::random(random);
+                let nonce = random.random();
 
                 self.push(Authorization { address, chain_id, nonce });
             },
@@ -211,23 +204,18 @@ impl Mutable for Vec<Authorization> {
                 // Replace a random entry
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
-                    let address = Address::from(random.random::<[u8; 20]>());
-                    let chain_id = U256::from(random.random::<u64>());
-                    let nonce = random.random::<u64>();
+                    let address = Address::random(random);
+                    let chain_id = U256::random(random);
+                    let nonce = random.random();
 
                     self[idx] = Authorization { address, chain_id, nonce };
                 }
             },
             6 => {
                 // Add authorization with interesting address
-                let address = Address::from_hex(
-                    random.choice(&INTERESTING_ADDRESSES),
-                )
-                .unwrap();
-                let chain_id = U256::from(
-                    *random.choice(&INTERESTING_CHAIN_IDS),
-                );
-                let nonce = random.random::<u64>();
+                let address = Address::from_hex(random.choice(&INTERESTING_ADDRESSES)).unwrap();
+                let chain_id = U256::from(*random.choice(&INTERESTING_CHAIN_IDS));
+                let nonce = random.random();
 
                 self.push(Authorization { address, chain_id, nonce });
             },

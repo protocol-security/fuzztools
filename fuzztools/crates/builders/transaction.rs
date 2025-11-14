@@ -1,5 +1,5 @@
-use super::{RpcCache, DEFAULT_GAS_LIMIT, DEFAULT_INPUT_SIZE};
-use crate::{mutations::STORAGE_KEYS, transactions::Transaction, utils::RandomChoice};
+use super::{RpcCache, DEFAULT_GAS_LIMIT};
+use crate::{mutations::{Random, STORAGE_KEYS}, transactions::Transaction, utils::RandomChoice};
 use alloy::{
     hex::FromHex,
     primitives::{Address, Bytes, FixedBytes, U256},
@@ -36,8 +36,8 @@ impl TransactionBuilder {
     /// Populates common fields to all transaction types. The randomness comes from
     /// the `to` and `input` fields
     fn base_request(&self, random: &mut impl Rng) -> Transaction {
-        let address = Address::from(random.random::<[u8; 20]>());
-        let input = Bytes::from(random.random::<[u8; DEFAULT_INPUT_SIZE]>());
+        let address = Address::random(random);
+        let input = Bytes::random(random);
 
         Transaction {
             to: Some(address),
@@ -131,7 +131,7 @@ impl TransactionBuilder {
             self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
         let (access_list, input) = self.generate_access_list_and_input(random);
 
-        let delegatee = Address::from(random.random::<[u8; 20]>());
+        let delegatee = Address::random(random);
         let chain_id = U256::from(self.chain_id);
         let authorization = Authorization { chain_id, address: delegatee, nonce: self.auth_nonce };
 

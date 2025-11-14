@@ -17,9 +17,6 @@ pub use contracts::{access_list_target::AccessListTarget, precompile_target::Pre
 use thiserror::Error;
 pub use transaction::TransactionBuilder;
 
-/// Calldata size to be used in base transactions
-pub(crate) const DEFAULT_INPUT_SIZE: usize = 256;
-
 /// Gas limit to be used in base transactions
 pub(crate) const DEFAULT_GAS_LIMIT: u64 = 100_000;
 

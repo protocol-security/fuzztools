@@ -4,8 +4,7 @@ use super::{
     constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
     traits::{ArrayMutations, Mutable},
 };
-use crate::mutations::traits::InterestingMutations;
-use crate::utils::RandomChoice;
+use crate::{mutations::traits::InterestingMutations, utils::RandomChoice};
 use rand::{seq::SliceRandom, Rng};
 
 macro_rules! check_not_empty {

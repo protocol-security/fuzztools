@@ -18,6 +18,7 @@ pub trait Random {
 pub(crate) trait Phantom {}
 
 pub(crate) trait UintMutations {
+    /// Flips a random bit.
     fn flip_bit(&mut self, random: &mut impl Rng);
     /// Adds a random value with saturation.
     fn add(&mut self, random: &mut impl Rng);
