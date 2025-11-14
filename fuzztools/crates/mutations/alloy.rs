@@ -98,8 +98,7 @@ impl Mutable for AccessList {
                 // Add a random entry
                 let address = Address::random(random);
                 let num_keys = random.random::<u8>(); // @audit max 255 keys
-                let storage_keys =
-                    (0..num_keys).map(|_| FixedBytes::random(random)).collect();
+                let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
                 self.0.push(AccessListItem { address, storage_keys });
             },
@@ -127,9 +126,7 @@ impl Mutable for AccessList {
                     let idx = random.random_range(0..self.0.len());
                     let address = Address::random(random);
                     let num_keys = random.random::<u8>(); // @audit max 255 keys
-                    let storage_keys = (0..num_keys)
-                        .map(|_| FixedBytes::random(random))
-                        .collect();
+                    let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
                     self.0[idx] = AccessListItem { address, storage_keys };
                 }

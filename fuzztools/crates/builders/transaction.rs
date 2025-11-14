@@ -1,5 +1,9 @@
 use super::{RpcCache, DEFAULT_GAS_LIMIT};
-use crate::{mutations::{Random, STORAGE_KEYS}, transactions::Transaction, utils::RandomChoice};
+use crate::{
+    mutations::{Random, STORAGE_KEYS},
+    transactions::Transaction,
+    utils::RandomChoice,
+};
 use alloy::{
     hex::FromHex,
     primitives::{Address, Bytes, FixedBytes, U256},
