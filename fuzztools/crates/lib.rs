@@ -32,4 +32,4 @@ pub mod net;
 pub mod rpc;
 pub mod transactions;
 pub mod utils;
-pub mod zk;
+pub mod math;
