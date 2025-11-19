@@ -27,14 +27,28 @@ impl Traveller {
     fn visit_expression(&mut self, expression: Expression) {
         match expression {
             Expression::Identifier(identifier) => self.visit_identifier(identifier),
-            Expression::BinaryExpression(binary_expression) => self.visit_binary_expression(binary_expression),
-            Expression::UnaryExpression(unary_expression) => self.visit_unary_expression(unary_expression),
-            Expression::CallExpression(call_expression) => self.visit_call_expression(call_expression),
-            Expression::IndexAccessExpression(index_access_expression) => self.visit_index_access_expression(index_access_expression),
-            Expression::FieldAccessExpression(field_access_expression) => self.visit_field_access_expression(field_access_expression),
+            Expression::BinaryExpression(binary_expression) => {
+                self.visit_binary_expression(binary_expression)
+            },
+            Expression::UnaryExpression(unary_expression) => {
+                self.visit_unary_expression(unary_expression)
+            },
+            Expression::CallExpression(call_expression) => {
+                self.visit_call_expression(call_expression)
+            },
+            Expression::IndexAccessExpression(index_access_expression) => {
+                self.visit_index_access_expression(index_access_expression)
+            },
+            Expression::FieldAccessExpression(field_access_expression) => {
+                self.visit_field_access_expression(field_access_expression)
+            },
             Expression::StringLiteral(string_literal) => self.visit_string_literal(string_literal),
-            Expression::BooleanLiteral(boolean_literal) => self.visit_boolean_literal(boolean_literal),
-            Expression::IntegerLiteral(integer_literal) => self.visit_integer_literal(integer_literal),
+            Expression::BooleanLiteral(boolean_literal) => {
+                self.visit_boolean_literal(boolean_literal)
+            },
+            Expression::IntegerLiteral(integer_literal) => {
+                self.visit_integer_literal(integer_literal)
+            },
             Expression::ListLiteral(list_literal) => self.visit_list_literal(list_literal),
             Expression::TupleLiteral(tuple_literal) => self.visit_tuple_literal(tuple_literal),
         }
@@ -46,17 +60,29 @@ impl Traveller {
             Statement::IfStatement(if_statement) => self.visit_if_statement(if_statement),
             Statement::ForStatement(for_statement) => self.visit_for_statement(for_statement),
             Statement::LetStatement(let_statement) => self.visit_let_statement(let_statement),
-            Statement::AssignStatement(assign_statement) => self.visit_assign_statement(assign_statement),
-            Statement::AssertStatement(assert_statement) => self.visit_assert_statement(assert_statement),
-            Statement::ExpressionStatement(expression_statement) => self.visit_expression_statement(expression_statement),
-            Statement::ReturnStatement(return_statement) => self.visit_return_statement(return_statement),
+            Statement::AssignStatement(assign_statement) => {
+                self.visit_assign_statement(assign_statement)
+            },
+            Statement::AssertStatement(assert_statement) => {
+                self.visit_assert_statement(assert_statement)
+            },
+            Statement::ExpressionStatement(expression_statement) => {
+                self.visit_expression_statement(expression_statement)
+            },
+            Statement::ReturnStatement(return_statement) => {
+                self.visit_return_statement(return_statement)
+            },
         }
     }
 
     fn visit_definition(&mut self, definition: Definition) {
         match definition {
-            Definition::VariableDefinition(variable_definition) => self.visit_variable_definition(variable_definition),
-            Definition::FunctionDefinition(function_definition) => self.visit_function_definition(function_definition),
+            Definition::VariableDefinition(variable_definition) => {
+                self.visit_variable_definition(variable_definition)
+            },
+            Definition::FunctionDefinition(function_definition) => {
+                self.visit_function_definition(function_definition)
+            },
             Definition::Document(document) => self.visit_document(document),
         }
     }
@@ -232,13 +258,13 @@ impl Traveller {
             Statement::BasicBlock(basic_block) => {
                 self.buffer.push_str(" ");
                 self.visit_basic_block(basic_block);
-            }
+            },
             _ => {
                 self.buffer.push_str("\n");
                 self.indent += 4;
                 self.visit(ASTNode::Statement(*node.body));
                 self.indent -= 4;
-            }
+            },
         }
     }
 
@@ -246,7 +272,7 @@ impl Traveller {
         self.visit(ASTNode::Expression(Expression::Identifier(node.name)));
         self.buffer.push_str(&format!(" : {}", node.type_));
     }
-        
+
     fn visit_document(&mut self, node: Document) {
         self.buffer.push_str("use dep::std;\n\n");
         self.visit(ASTNode::Definition(Definition::FunctionDefinition(node.main)));

@@ -35,7 +35,7 @@ pub(crate) enum Statement {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Definition {    
+pub(crate) enum Definition {
     VariableDefinition(VariableDefinition),
     FunctionDefinition(FunctionDefinition),
     Document(Document),
@@ -188,4 +188,3 @@ pub(crate) struct FunctionDefinition {
 pub(crate) struct Document {
     pub(crate) main: FunctionDefinition,
 }
-

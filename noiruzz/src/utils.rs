@@ -1,5 +1,18 @@
-use std::process::{Command, Output};
-use std::path::Path;
+use fuzztools::utils::RandomChoice;
+use rand::Rng;
+use std::{
+    path::Path,
+    process::{Command, Output},
+};
+
+const CHARS: [&str; 36] = [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
+    "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+];
+#[inline(always)]
+pub(crate) fn random_id<R: Rng>(rng: &mut R, size: usize) -> String {
+    (0..size).map(|_| *rng.choice(&CHARS)).collect()
+}
 
 // @audit instead of running processes, call the lib directly
 pub(crate) fn nargo_execute(name: &str, expression_width: u64) -> Result<Output, std::io::Error> {
@@ -10,7 +23,7 @@ pub(crate) fn nargo_execute(name: &str, expression_width: u64) -> Result<Output,
     command.arg(name);
     command.arg("--expression-width");
     command.arg(expression_width.to_string());
-    
+
     command.output()
 }
 
@@ -20,7 +33,12 @@ pub(crate) fn nargo_version() -> Result<Output, std::io::Error> {
     command.output()
 }
 
-pub(crate) fn bb_prove(noir_json: &Path, witness_gz: &Path, vk_file_path: &Path, proof: &Path) -> Result<Output, std::io::Error> {
+pub(crate) fn bb_prove(
+    noir_json: &Path,
+    witness_gz: &Path,
+    vk_file_path: &Path,
+    proof: &Path,
+) -> Result<Output, std::io::Error> {
     let mut command = Command::new("bb");
     command.arg("prove");
     command.arg("-b");

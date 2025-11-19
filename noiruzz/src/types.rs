@@ -11,7 +11,7 @@ pub(crate) enum NoirType {
     Tuple(Tuple),
     Struct(Struct),
     Reference(Reference),
-    //Function(Function), // @audit todo
+    // Function(Function), // @audit todo
 }
 
 impl Display for NoirType {
@@ -69,7 +69,8 @@ pub(crate) struct String {
     size: u64,
 }
 
-// @audit what about scape hatchs \r, \n, \t, \0, \", \\ and raw strings r"...", r#"...", r######"..."###### as well as f"..." writing { with {{"
+// @audit what about scape hatchs \r, \n, \t, \0, \", \\ and raw strings r"...", r#"...",
+// r######"..."###### as well as f"..." writing { with {{"
 impl Display for String {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "str<{}>", self.size)
@@ -77,13 +78,11 @@ impl Display for String {
 }
 
 // @audit you can call function in getters like
-/*
-let _ = array[f(x)];
-
-fn f(x: u32) -> u32 {
-    x * 2
-}
-*/
+// let _ = array[f(x)];
+//
+// fn f(x: u32) -> u32 {
+// x * 2
+// }
 #[derive(Debug, Clone)]
 pub(crate) struct Array {
     type_: Box<NoirType>,

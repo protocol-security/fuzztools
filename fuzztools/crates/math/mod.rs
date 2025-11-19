@@ -1,13 +1,11 @@
-use anyhow::Result;
+use crate::{mutations::Random, utils::RandomChoice};
 use alloy::primitives::U256;
+use anyhow::Result;
 use rand::{
     distr::{weighted::WeightedIndex, Distribution},
     Rng,
 };
-use std::{collections::HashMap, fmt::Display, hash::Hash};
-use std::str::FromStr;
-
-use crate::{mutations::Random, utils::RandomChoice};
+use std::{collections::HashMap, fmt::Display, hash::Hash, str::FromStr};
 
 /// Returns the prime value for the provided field curve.
 pub fn curve_prime(curve: &str) -> U256 {
@@ -137,8 +135,7 @@ pub fn random_field_element(
             return value;
         } else {
             // Choose from `[0, 1, Fp - 1, Fp]`
-            let value =
-                random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE, prime]).clone();
+            let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE, prime]).clone();
             return value;
         }
     } else {
