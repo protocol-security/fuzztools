@@ -7,6 +7,7 @@ use clap::Parser;
 use constants::{TransactionType, GREEN, HEADER, RED, RESET};
 use rand::{rngs::SmallRng, SeedableRng};
 
+// @audit move stuff to configs/rakoon.json to better usage
 #[derive(Parser)]
 #[command(
     name = "rakoon",

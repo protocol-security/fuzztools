@@ -1,12 +1,12 @@
 use crate::nodes::*;
 
-pub(crate) struct Traveller {
+pub struct Traveller {
     indent: u64,
     buffer: String,
 }
 
 impl Traveller {
-    pub(crate) fn emit(&mut self, node: ASTNode) -> String {
+    pub fn emit(&mut self, node: ASTNode) -> String {
         self.indent = 0;
         self.buffer = String::new();
         self.visit(node);

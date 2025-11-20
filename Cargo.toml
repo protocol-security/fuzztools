@@ -10,7 +10,7 @@ members = [
     "rakoon",
     "fuzztools",
     "mutable", 
-    "noiruzz"
+    "noiruzz", "fuzz"
 ]
 
 [workspace.dependencies]

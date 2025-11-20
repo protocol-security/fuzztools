@@ -1,14 +1,15 @@
-use crate::{operators::Operator, types::NoirType};
+use crate::types::{NoirType, Operator};
+use alloy::primitives::U256;
 
 #[derive(Debug, Clone)]
-pub(crate) enum ASTNode {
+pub enum ASTNode {
     Expression(Expression),
     Statement(Statement),
     Definition(Definition),
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Expression {
+pub enum Expression {
     Identifier(Identifier),
     BinaryExpression(BinaryExpression),
     UnaryExpression(UnaryExpression),
@@ -23,7 +24,7 @@ pub(crate) enum Expression {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Statement {
+pub enum Statement {
     BasicBlock(BasicBlock),
     IfStatement(IfStatement),
     ForStatement(ForStatement),
@@ -35,7 +36,7 @@ pub(crate) enum Statement {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Definition {
+pub enum Definition {
     VariableDefinition(VariableDefinition),
     FunctionDefinition(FunctionDefinition),
     Document(Document),
@@ -47,64 +48,64 @@ pub(crate) enum Definition {
 //
 // ------------------
 #[derive(Debug, Clone)]
-pub(crate) struct Identifier {
-    pub(crate) name: String,
+pub struct Identifier {
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct BinaryExpression {
-    pub(crate) operator: Operator,
-    pub(crate) lhs: Box<Expression>,
-    pub(crate) rhs: Box<Expression>,
+pub struct BinaryExpression {
+    pub operator: Operator,
+    pub lhs: Box<Expression>,
+    pub rhs: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct UnaryExpression {
-    pub(crate) operator: Operator,
-    pub(crate) value: Box<Expression>,
+pub struct UnaryExpression {
+    pub operator: Operator,
+    pub value: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CallExpression {
-    pub(crate) reference: Box<Expression>,
-    pub(crate) arguments: Vec<Box<Expression>>,
+pub struct CallExpression {
+    pub reference: Box<Expression>,
+    pub arguments: Vec<Box<Expression>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct IndexAccessExpression {
-    pub(crate) reference: Box<Expression>,
-    pub(crate) index: Box<Expression>,
+pub struct IndexAccessExpression {
+    pub reference: Box<Expression>,
+    pub index: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FieldAccessExpression {
-    pub(crate) reference: Box<Expression>,
-    pub(crate) field: Identifier,
+pub struct FieldAccessExpression {
+    pub reference: Box<Expression>,
+    pub field: Identifier,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct StringLiteral {
-    pub(crate) value: String,
+pub struct StringLiteral {
+    pub value: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct BooleanLiteral {
-    pub(crate) value: bool,
+pub struct BooleanLiteral {
+    pub value: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct IntegerLiteral {
-    pub(crate) value: i64,
+pub struct IntegerLiteral {
+    pub value: U256,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ListLiteral {
-    pub(crate) value: Vec<Box<Expression>>,
+pub struct ListLiteral {
+    pub value: Vec<Box<Expression>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TupleLiteral {
-    pub(crate) value: Vec<Box<Expression>>,
+pub struct TupleLiteral {
+    pub value: Vec<Box<Expression>>,
 }
 
 // ------------------
@@ -113,54 +114,54 @@ pub(crate) struct TupleLiteral {
 //
 // ------------------
 #[derive(Debug, Clone)]
-pub(crate) struct BasicBlock {
-    pub(crate) statements: Vec<Box<Statement>>,
+pub struct BasicBlock {
+    pub statements: Vec<Box<Statement>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct IfStatement {
-    pub(crate) condition: Box<Expression>,
-    pub(crate) true_stmt: Box<Statement>,
-    pub(crate) false_stmt: Option<Box<Statement>>,
+pub struct IfStatement {
+    pub condition: Box<Expression>,
+    pub true_stmt: Box<Statement>,
+    pub false_stmt: Option<Box<Statement>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ForStatement {
-    pub(crate) index: Identifier,
-    pub(crate) start: Box<Expression>,
-    pub(crate) end: Box<Expression>,
-    pub(crate) statements: Vec<Box<Statement>>,
+pub struct ForStatement {
+    pub index: Identifier,
+    pub start: Box<Expression>,
+    pub end: Box<Expression>,
+    pub statements: Vec<Box<Statement>>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LetStatement {
-    pub(crate) name: Identifier,
-    pub(crate) expr: Option<Box<Expression>>,
-    pub(crate) type_: Option<NoirType>,
-    pub(crate) is_mutable: bool,
+pub struct LetStatement {
+    pub name: Identifier,
+    pub expr: Option<Box<Expression>>,
+    pub type_: Option<NoirType>,
+    pub is_mutable: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct AssignStatement {
-    pub(crate) lhs: Box<Expression>,
-    pub(crate) rhs: Box<Expression>,
+pub struct AssignStatement {
+    pub lhs: Box<Expression>,
+    pub rhs: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct AssertStatement {
-    pub(crate) condition: Box<Expression>,
-    pub(crate) message: Option<StringLiteral>,
+pub struct AssertStatement {
+    pub condition: Box<Expression>,
+    pub message: Option<StringLiteral>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ExpressionStatement {
-    pub(crate) expr: Box<Expression>,
-    pub(crate) is_semicolon: bool,
+pub struct ExpressionStatement {
+    pub expr: Box<Expression>,
+    pub is_semicolon: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ReturnStatement {
-    pub(crate) value: Box<Expression>,
+pub struct ReturnStatement {
+    pub value: Box<Expression>,
 }
 
 // ------------------
@@ -169,22 +170,22 @@ pub(crate) struct ReturnStatement {
 //
 // ------------------
 #[derive(Debug, Clone)]
-pub(crate) struct VariableDefinition {
-    pub(crate) name: Identifier,
-    pub(crate) type_: NoirType,
+pub struct VariableDefinition {
+    pub name: Identifier,
+    pub type_: NoirType,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FunctionDefinition {
-    pub(crate) name: Identifier,
-    pub(crate) arguments: Vec<VariableDefinition>,
-    pub(crate) body: Box<Statement>,
-    pub(crate) is_public: bool,
-    pub(crate) is_public_return: bool,
-    pub(crate) type_: Option<NoirType>,
+pub struct FunctionDefinition {
+    pub name: Identifier,
+    pub arguments: Vec<VariableDefinition>,
+    pub body: Box<Statement>,
+    pub is_public: bool,
+    pub is_public_return: bool,
+    pub type_: Option<NoirType>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Document {
-    pub(crate) main: FunctionDefinition,
+pub struct Document {
+    pub main: FunctionDefinition,
 }

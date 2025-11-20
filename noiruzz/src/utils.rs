@@ -10,12 +10,12 @@ const CHARS: [&str; 36] = [
     "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
 ];
 #[inline(always)]
-pub(crate) fn random_id<R: Rng>(rng: &mut R, size: usize) -> String {
+pub fn random_id<R: Rng>(rng: &mut R, size: usize) -> String {
     (0..size).map(|_| *rng.choice(&CHARS)).collect()
 }
 
 // @audit instead of running processes, call the lib directly
-pub(crate) fn nargo_execute(name: &str, expression_width: u64) -> Result<Output, std::io::Error> {
+pub fn nargo_execute(name: &str, expression_width: u64) -> Result<Output, std::io::Error> {
     let mut command = Command::new("nargo");
     command.arg("execute");
     command.arg("--silence-warnings");
@@ -27,13 +27,13 @@ pub(crate) fn nargo_execute(name: &str, expression_width: u64) -> Result<Output,
     command.output()
 }
 
-pub(crate) fn nargo_version() -> Result<Output, std::io::Error> {
+pub fn nargo_version() -> Result<Output, std::io::Error> {
     let mut command = Command::new("nargo");
     command.arg("--version");
     command.output()
 }
 
-pub(crate) fn bb_prove(
+pub fn bb_prove(
     noir_json: &Path,
     witness_gz: &Path,
     vk_file_path: &Path,
@@ -52,7 +52,7 @@ pub(crate) fn bb_prove(
     command.output()
 }
 
-pub(crate) fn bb_write_vk(noir_json: &Path, vk: &Path) -> Result<Output, std::io::Error> {
+pub fn bb_write_vk(noir_json: &Path, vk: &Path) -> Result<Output, std::io::Error> {
     let mut command = Command::new("bb");
     command.arg("write_vk");
     command.arg("-b");
@@ -62,7 +62,7 @@ pub(crate) fn bb_write_vk(noir_json: &Path, vk: &Path) -> Result<Output, std::io
     command.output()
 }
 
-pub(crate) fn bb_verify(vk: &Path, proof: &Path, inputs: &Path) -> Result<Output, std::io::Error> {
+pub fn bb_verify(vk: &Path, proof: &Path, inputs: &Path) -> Result<Output, std::io::Error> {
     let mut command = Command::new("bb");
     command.arg("verify");
     command.arg("-k");

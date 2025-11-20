@@ -1,7 +1,68 @@
-use std::fmt::Display;
+use crate::config::Config;
+use std::fmt::{Display, Formatter};
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExpressionKind {
+    Constant,
+    Variable,
+    Relation,
+    Unary,
+    Binary,
+}
+
+impl ExpressionKind {
+    pub const ARITHMETIC_KINDS: &'static [Self] =
+        &[Self::Constant, Self::Variable, Self::Unary, Self::Binary, Self::Relation];
+    pub const BOOLEAN_KINDS: &'static [Self] =
+        &[Self::Constant, Self::Relation, Self::Unary, Self::Binary];
+
+    pub fn weight(&self, config: &Config) -> f64 {
+        match self {
+            Self::Constant => config.circuit.constant_probability_weight,
+            Self::Variable => config.circuit.variable_probability_weight,
+            Self::Relation => config.circuit.relation_probability_weight,
+            Self::Unary => config.circuit.unary_probability_weight,
+            Self::Binary => config.circuit.binary_probability_weight,
+        }
+    }
+}
+
+impl Display for ExpressionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Constant => "constant",
+            Self::Variable => "variable",
+            Self::Relation => "relation",
+            Self::Unary => "unary",
+            Self::Binary => "binary",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+pub enum MetamorphicKind {
+    Equal,
+    Weaker,
+}
+
+impl MetamorphicKind {
+    pub fn value(&self) -> &'static str {
+        match self {
+            Self::Equal => "equal",
+            Self::Weaker => "weaker",
+        }
+    }
+}
+
+// ------------------------------------------------------------
+//
+// Noir types
+//
+// ------------------------------------------------------------
+
 // @audit todo this all type_d on the string from the types
 #[derive(Debug, Clone)]
-pub(crate) enum NoirType {
+pub enum NoirType {
     Field(Field),
     Integer(Integer), // @audit signed and unsigned, error on overflow
     Boolean(Boolean),
@@ -31,7 +92,7 @@ impl Display for NoirType {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Field {}
+pub struct Field {}
 
 impl Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,7 +101,7 @@ impl Display for Field {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Integer {
+pub struct Integer {
     signed: bool,
     size: u64,
 }
@@ -56,7 +117,7 @@ impl Display for Integer {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Boolean {}
+pub struct Boolean {}
 
 impl Display for Boolean {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -65,13 +126,13 @@ impl Display for Boolean {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct String {
+pub struct StringLiteral {
     size: u64,
 }
 
 // @audit what about scape hatchs \r, \n, \t, \0, \", \\ and raw strings r"...", r#"...",
 // r######"..."###### as well as f"..." writing { with {{"
-impl Display for String {
+impl Display for StringLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "str<{}>", self.size)
     }
@@ -84,7 +145,7 @@ impl Display for String {
 // x * 2
 // }
 #[derive(Debug, Clone)]
-pub(crate) struct Array {
+pub struct Array {
     type_: Box<NoirType>,
     size: u64,
 }
@@ -97,7 +158,7 @@ impl Display for Array {
 
 // @audit must be initialized as = &[1, 2, 3, ...] or &[0; 3]
 #[derive(Debug, Clone)]
-pub(crate) struct Slice {
+pub struct Slice {
     type_: Box<NoirType>,
 }
 
@@ -109,7 +170,7 @@ impl Display for Slice {
 
 // @audit accedemos a los fields con .0, .1, .2...
 #[derive(Debug, Clone)]
-pub(crate) struct Tuple {
+pub struct Tuple {
     types: Vec<Box<NoirType>>,
 }
 
@@ -127,14 +188,14 @@ impl Display for Tuple {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct StructField {
+pub struct StructField {
     name: String,
     type_: Box<NoirType>,
     visibility: Visibility,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Visibility {
+pub enum Visibility {
     Public,
     Crate,
     Private,
@@ -142,7 +203,7 @@ pub(crate) enum Visibility {
 
 // @audit access fields via struct.field_name
 #[derive(Debug, Clone)]
-pub(crate) struct Struct {
+pub struct Struct {
     name: String,
     fields: Vec<Box<StructField>>,
 }
@@ -154,7 +215,7 @@ impl Display for Struct {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Reference {
+pub struct Reference {
     type_: Box<NoirType>,
     mutable: bool,
 }
@@ -166,5 +227,78 @@ impl Display for Reference {
         } else {
             write!(f, "&{}", self.type_)
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Xor,
+    And,
+    Or,
+    Shl,
+    Shr,
+    Not,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    Eq,
+    Neq,
+    Rem,
+    Comp,
+}
+
+impl From<&String> for Operator {
+    fn from(value: &String) -> Self {
+        match value.as_str() {
+            "+" => Operator::Add,
+            "-" => Operator::Sub,
+            "*" => Operator::Mul,
+            "/" => Operator::Div,
+            "%" => Operator::Rem,
+            "^" => Operator::Xor,
+            "&" => Operator::And,
+            "|" => Operator::Or,
+            "<<" => Operator::Shl,
+            ">>" => Operator::Shr,
+            "!" => Operator::Not,
+            "<" => Operator::Lt,
+            "<=" => Operator::Lte,
+            ">" => Operator::Gt,
+            ">=" => Operator::Gte,
+            "==" => Operator::Eq,
+            "!=" => Operator::Neq,
+            _ => Operator::Add, // default to add
+        }
+    }
+}
+
+impl Display for Operator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Operator::Add => "+",
+            Operator::Sub => "-",
+            Operator::Mul => "*",
+            Operator::Div => "/",
+            Operator::Xor => "^",
+            Operator::And => "&",
+            Operator::Or => "|",
+            Operator::Shl => "<<",
+            Operator::Shr => ">>",
+            Operator::Not => "!",
+            Operator::Lt => "<",
+            Operator::Lte => "<=",
+            Operator::Gt => ">",
+            Operator::Gte => ">=",
+            Operator::Eq => "==",
+            Operator::Neq => "!=",
+            Operator::Rem => "%",
+            Operator::Comp => "~",
+        };
+        write!(f, "{}", op)
     }
 }
