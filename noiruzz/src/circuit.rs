@@ -1,7 +1,8 @@
 use crate::{
     config::Config,
     nodes::*,
-    types::{ExpressionKind, Operator},
+    rewriter::{RewriteRule, RuleBasedRewriter},
+    types::{ExpressionKind, MetamorphicKind, Operator},
     utils::random_id,
 };
 use fuzztools::{
@@ -11,7 +12,7 @@ use fuzztools::{
 use rand::Rng;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Circuit {
     pub name: String,
     pub inputs: Vec<String>,
@@ -232,5 +233,221 @@ impl Circuit {
         let weights: HashMap<_, _> =
             allowed_kinds.iter().map(|kind| (*kind, kind.weight(config))).collect();
         weighted_select(allowed_kinds, &weights, random).expect("Failed to select expression kind")
+    }
+
+    pub fn apply_metamorphic_mutation(
+        &mut self,
+        random: &mut impl Rng,
+        config: &Config,
+        metamorphic_kind: MetamorphicKind,
+        _num_rewrites: Option<usize>,
+    ) -> Result<(), String> {
+        // Load the appropriate rewrite rules based on metamorphic kind
+        let rule_configs: Vec<_> = match metamorphic_kind {
+            MetamorphicKind::Equal => config.rewrite.rules.equivalence.clone(),
+            MetamorphicKind::Weaker => {
+                let mut configs = config.rewrite.rules.equivalence.clone();
+                configs.extend(config.rewrite.rules.weakening.iter().cloned());
+                configs
+            },
+        };
+
+        // Parse all rules
+        let rules: Vec<_> = rule_configs
+            .iter()
+            .filter_map(|rule_config| {
+                RewriteRule::from_config(rule_config)
+                    .map_err(|e| {
+                        eprintln!("Warning: Failed to parse rule '{}': {}", rule_config.name, e);
+                        e
+                    })
+                    .ok()
+            })
+            .collect();
+
+        if rules.is_empty() {
+            return Err("No valid rewrite rules available".to_string());
+        }
+
+        let mut rewriter = RuleBasedRewriter::new(config.clone(), rules);
+        Self::mutate_statements(&mut self.statements, 0, config, random, &mut rewriter)?;
+
+        Ok(())
+    }
+
+    fn mutate_statements(
+        statements: &mut [Statement],
+        depth: u64,
+        config: &Config,
+        random: &mut impl Rng,
+        rewriter: &mut RuleBasedRewriter,
+    ) -> Result<(), String> {
+        if depth >= config.circuit.max_expression_depth {
+            return Ok(());
+        }
+
+        for statement in statements {
+            match statement {
+                Statement::BasicBlock(basic_block) => {
+                    Self::mutate_boxed_statements(
+                        &mut basic_block.statements,
+                        depth + 1,
+                        config,
+                        random,
+                        rewriter,
+                    )?;
+                },
+                Statement::IfStatement(if_stmt) => {
+                    Self::mutate_boxed_statements(
+                        std::slice::from_mut(&mut if_stmt.true_stmt),
+                        depth + 1,
+                        config,
+                        random,
+                        rewriter,
+                    )?;
+                    if let Some(false_stmt) = &mut if_stmt.false_stmt {
+                        Self::mutate_boxed_statements(
+                            std::slice::from_mut(false_stmt),
+                            depth + 1,
+                            config,
+                            random,
+                            rewriter,
+                        )?;
+                    }
+                },
+                Statement::ForStatement(for_stmt) => {
+                    Self::mutate_boxed_statements(
+                        &mut for_stmt.statements,
+                        depth + 1,
+                        config,
+                        random,
+                        rewriter,
+                    )?;
+                },
+                Statement::AssignStatement(assign_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*assign_stmt.rhs).clone(), None, random);
+                    assign_stmt.rhs = Box::new(rewritten_expr);
+                },
+                Statement::AssertStatement(assert_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*assert_stmt.condition).clone(), None, random);
+                    assert_stmt.condition = Box::new(rewritten_expr);
+                },
+                Statement::LetStatement(let_stmt) => {
+                    if let Some(expr) = &mut let_stmt.expr {
+                        let (_applied_rules, rewritten_expr) =
+                            rewriter.run_on_expression((**expr).clone(), None, random);
+                        *expr = Box::new(rewritten_expr);
+                    }
+                },
+                Statement::ExpressionStatement(expr_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*expr_stmt.expr).clone(), None, random);
+                    expr_stmt.expr = Box::new(rewritten_expr);
+                },
+                Statement::ReturnStatement(return_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*return_stmt.value).clone(), None, random);
+                    return_stmt.value = Box::new(rewritten_expr);
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    fn mutate_boxed_statements(
+        statements: &mut [Box<Statement>],
+        depth: u64,
+        config: &Config,
+        random: &mut impl Rng,
+        rewriter: &mut RuleBasedRewriter,
+    ) -> Result<(), String> {
+        if depth >= config.circuit.max_expression_depth {
+            return Ok(());
+        }
+
+        for statement in statements {
+            match statement.as_mut() {
+                Statement::BasicBlock(basic_block) => {
+                    Self::mutate_boxed_statements(
+                        &mut basic_block.statements,
+                        depth + 1,
+                        config,
+                        random,
+                        rewriter,
+                    )?;
+                },
+                Statement::IfStatement(if_stmt) => {
+                    Self::mutate_boxed_statements(
+                        std::slice::from_mut(&mut if_stmt.true_stmt),
+                        depth + 1,
+                        config,
+                        random,
+                        rewriter,
+                    )?;
+                    if let Some(false_stmt) = &mut if_stmt.false_stmt {
+                        Self::mutate_boxed_statements(
+                            std::slice::from_mut(false_stmt),
+                            depth + 1,
+                            config,
+                            random,
+                            rewriter,
+                        )?;
+                    }
+                },
+                Statement::ForStatement(for_stmt) => {
+                    Self::mutate_boxed_statements(
+                        &mut for_stmt.statements,
+                        depth + 1,
+                        config,
+                        random,
+                        rewriter,
+                    )?;
+                },
+                Statement::AssignStatement(assign_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*assign_stmt.rhs).clone(), None, random);
+                    assign_stmt.rhs = Box::new(rewritten_expr);
+                },
+                Statement::AssertStatement(assert_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*assert_stmt.condition).clone(), None, random);
+                    assert_stmt.condition = Box::new(rewritten_expr);
+                },
+                Statement::LetStatement(let_stmt) => {
+                    if let Some(expr) = &mut let_stmt.expr {
+                        let (_applied_rules, rewritten_expr) =
+                            rewriter.run_on_expression((**expr).clone(), None, random);
+                        *expr = Box::new(rewritten_expr);
+                    }
+                },
+                Statement::ExpressionStatement(expr_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*expr_stmt.expr).clone(), None, random);
+                    expr_stmt.expr = Box::new(rewritten_expr);
+                },
+                Statement::ReturnStatement(return_stmt) => {
+                    let (_applied_rules, rewritten_expr) =
+                        rewriter.run_on_expression((*return_stmt.value).clone(), None, random);
+                    return_stmt.value = Box::new(rewritten_expr);
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn mutate(
+        &self,
+        random: &mut impl Rng,
+        config: &Config,
+        metamorphic_kind: MetamorphicKind,
+        _num_rewrites: Option<usize>,
+    ) -> Result<Self, String> {
+        let mut mutated = self.clone();
+        mutated.apply_metamorphic_mutation(random, config, metamorphic_kind, _num_rewrites)?;
+        Ok(mutated)
     }
 }

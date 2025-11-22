@@ -1,4 +1,4 @@
 /target
 Cargo.lock
-/tmp
 /circuzz
+.DS_Store

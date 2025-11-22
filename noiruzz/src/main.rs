@@ -52,10 +52,23 @@ fn main() -> Result<()> {
         let circuit = Circuit::new(&mut random, &config);
 
         let metamorphic_kind = if bernoulli(config.rewrite.weakening_probability, &mut random) {
-            MetamorphicKind::Equal
-        } else {
             MetamorphicKind::Weaker
+        } else {
+            MetamorphicKind::Equal
         };
+
+        // Apply metamorphic mutations to the circuit
+        let mutated_circuit = match circuit.mutate(&mut random, &config, metamorphic_kind, None) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error applying metamorphic mutation: {}", e);
+                continue;
+            },
+        };
+
+        // TODO: Test the mutated circuit
+        // This is where you would compile and test both the original and mutated circuits
+        // to check for divergence in behavior
     }
 
     Ok(())
