@@ -1,3 +1,2 @@
-mod ir;
-mod circuit;
-mod config;
+pub mod config;
+pub mod ir;

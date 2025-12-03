@@ -13,17 +13,20 @@
         "relation_probability_weight" : 1,
         "ternary_probability_weight"  : 1,
 
-        "max_expression_depth"           : 4,
-        "min_number_of_assertions"       : 1,
-        "max_number_of_assertions"       : 10,
-        "min_number_of_input_variables"  : 1,
-        "max_number_of_input_variables"  : 10,
-        "min_number_of_output_variables" : 1,
-        "max_number_of_output_variables" : 10,
+        "max_input_count" : 10,
+        "max_node_count" : 10,
+        "max_expression_depth" : 4,
+        "max_element_count" : 10,
+        "max_string_size" : 10,
+        "max_type_depth" : 10,
+        "max_for_size" : 10,
+        "max_globals_count" : 10,
+        "small_upper_bound" : 10,
 
-        "max_exponent_value" : 5,
+        "signed_probability" : 0.1,
         "boundary_value_probability" : 0.1,
-        "small_upper_bound_probability" : 0.1
+        "small_upper_bound_probability" : 0.1,
+        "prime_exclusion_probability" : 0.1
     },
     "rewrite" : {
         "weakening_probability" : 0.1,

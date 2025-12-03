@@ -76,43 +76,6 @@ pub fn weighted_select<T: Eq + Hash + Clone + Display>(
 }
 
 /// The `boundary_prob` value indicates the probability of choosing
-/// a boundary value, i.e. `Fp - 1` or `1`. The `small_upper_bound_prob` value
-/// indicates the probability of choosing a small integer, i.e. from
-/// the domain `[1..=small_upper_bound]`.
-pub fn random_non_zero_field_element(
-    curve: &str,
-    random: &mut impl Rng,
-    boundary_prob: f64,
-    small_upper_bound_prob: f64,
-    // default value is 10 @audit
-    small_upper_bound: u128,
-) -> U256 {
-    let prime = curve_prime(curve);
-
-    // Choose from boundary values `[1, Fp - 1]`
-    if bernoulli(boundary_prob, random) {
-        let value = random.choice(&[U256::ONE, prime - U256::ONE]).clone();
-        return value;
-    }
-
-    // Choose from `[1..=small_upper_bound]`
-    if bernoulli(small_upper_bound_prob, random) {
-        let value = random.random_range(1..=small_upper_bound);
-        return U256::from(value);
-    } else {
-        // Choose from `[1..=Fp - 1]`
-        let value = U256::random(random) % prime; // @audit induces bias but negligible and this is not crypto secure so whatever
-
-        // The odds of this is negligible but we check just in case
-        if value == U256::ZERO {
-            return U256::ONE;
-        }
-
-        return value;
-    }
-}
-
-/// The `boundary_prob` value indicates the probability of choosing
 /// a boundary value, i.e. `[0, 1, Fp - 1, Fp]` or `[0, 1, Fp - 1]` if
 /// `exclude_prime` is `True`. The `small_upper_bound_prob` value indicates the
 /// probability of choosing a small integer, i.e. from the domain `[0..=small_upper_bound]`.
@@ -122,37 +85,38 @@ pub fn random_field_element(
     exclude_prime: bool,
     boundary_prob: f64,
     small_upper_bound_prob: f64,
-    // default value is 10 @audit
     small_upper_bound: u128,
 ) -> U256 {
     let prime = curve_prime(curve);
 
     // Choose from boundary values
-    if bernoulli(boundary_prob, random) {
+    let value = if bernoulli(boundary_prob, random) {
         if exclude_prime {
             // Choose from `[0, 1, Fp - 1]`
             let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE]).clone();
-            return value;
+            value
         } else {
             // Choose from `[0, 1, Fp - 1, Fp]`
             let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE, prime]).clone();
-            return value;
+            value
         }
     } else {
         // Choose from `[0..=small_upper_bound]`
         if bernoulli(small_upper_bound_prob, random) {
             let value = random.random_range(0..=small_upper_bound);
-            return U256::from(value);
+            U256::from(value)
         } else {
             if exclude_prime {
                 // Choose from `[0..=Fp - 1]`
-                let value = U256::random(random) % (prime - U256::ONE); // @audit induces bias but negligible and this is not crypto secure so whatever
-                return value;
+                let value = U256::random(random) % (prime - U256::ONE);
+                value
             } else {
                 // Choose from `[0..=Fp]`
-                let value = U256::random(random) % prime; // @audit induces bias but negligible and this is not crypto secure so whatever
-                return value;
+                let value = U256::random(random) % prime;
+                value
             }
         }
-    }
+    };
+
+    value
 }
