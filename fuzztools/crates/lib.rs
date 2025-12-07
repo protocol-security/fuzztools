@@ -18,8 +18,7 @@
 //! - [`rpc`] - WIP.
 //! - [`transactions`] - Implements the `Transaction` and `SignedTransaction` types.
 //! - [`utils`] - Some stuff I do not know where to put like `FastPrivateKeySigner`.
-//! - [`zk`] - Implements common stuff for fuzzing ZK compilers/VMs. Right now, it only supports
-//!   Noir IR.
+//! - [`compilers`] - Implements stuff to fuzz compilers, currently only Noir.
 //!
 //! ## Example
 //!
@@ -34,4 +33,4 @@ pub mod rpc;
 pub mod transactions;
 pub mod utils;
 pub mod math;
-pub mod zk;
+pub mod compilers;

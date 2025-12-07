@@ -2,3 +2,4 @@
 Cargo.lock
 /circuzz
 .DS_Store
+/noir

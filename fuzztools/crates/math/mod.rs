@@ -76,8 +76,8 @@ pub fn weighted_select<T: Eq + Hash + Clone + Display>(
 }
 
 /// The `boundary_prob` value indicates the probability of choosing
-/// a boundary value, i.e. `[0, 1, Fp - 1, Fp]` or `[0, 1, Fp - 1]` if
-/// `exclude_prime` is `True`. The `small_upper_bound_prob` value indicates the
+/// a boundary value, i.e. `[0, 1]` or `[0, 1, Fp - 1]` if
+/// `exclude_prime` is `False`. The `small_upper_bound_prob` value indicates the
 /// probability of choosing a small integer, i.e. from the domain `[0..=small_upper_bound]`.
 pub fn random_field_element(
     curve: &str,
@@ -92,12 +92,12 @@ pub fn random_field_element(
     // Choose from boundary values
     let value = if bernoulli(boundary_prob, random) {
         if exclude_prime {
-            // Choose from `[0, 1, Fp - 1]`
-            let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE]).clone();
+            // Choose from `[0, 1]`
+            let value = random.choice(&[U256::ZERO, U256::ONE]).clone();
             value
         } else {
-            // Choose from `[0, 1, Fp - 1, Fp]`
-            let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE, prime]).clone();
+            // Choose from `[0, 1, Fp - 1]`
+            let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE]).clone();
             value
         }
     } else {
@@ -106,15 +106,9 @@ pub fn random_field_element(
             let value = random.random_range(0..=small_upper_bound);
             U256::from(value)
         } else {
-            if exclude_prime {
-                // Choose from `[0..=Fp - 1]`
-                let value = U256::random(random) % (prime - U256::ONE);
-                value
-            } else {
-                // Choose from `[0..=Fp]`
-                let value = U256::random(random) % prime;
-                value
-            }
+            // Choose from `[0..=Fp - 1]`
+            let value = U256::random(random) % prime;
+            value
         }
     };
 

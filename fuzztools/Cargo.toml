@@ -15,6 +15,8 @@ tokio.workspace = true
 secp256k1.workspace = true
 anyhow.workspace = true
 mutable.workspace = true
+serde = "1.0.228"
+serde_json = "1.0.145"
 
 [lib]
 path = "crates/lib.rs"

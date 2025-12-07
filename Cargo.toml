@@ -30,6 +30,10 @@ syn = "2.0.107"
 quote = "1.0.41"
 proc-macro2 = "1.0.101"
 
+noirc_driver = { git = "https://github.com/noir-lang/noir.git" }
+noirc_frontend = { git = "https://github.com/noir-lang/noir.git" }
+nargo = { git = "https://github.com/noir-lang/noir.git" }
+
 fuzztools = { path = "fuzztools" }
 mutable = { path = "mutable" }
 dff = { path = "dff/rust" }
