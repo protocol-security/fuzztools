@@ -15,18 +15,3 @@ impl<R: Rng + ?Sized> RandomChoice for R {
         &items[idx]
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::{rngs::SmallRng, SeedableRng};
-
-    #[test]
-    fn test_choice() {
-        let mut random = SmallRng::from_os_rng();
-
-        let items = vec![1, 2, 3, 4, 5];
-        let choice = random.choice(&items);
-        println!("choice: {}", choice);
-    }
-}

@@ -1,27 +1,44 @@
 {
     "max_inputs_count": 10,
+
+    "min_element_count": 1,
     "max_element_count": 10,
+
+    "min_string_size": 1,
     "max_string_size": 10,
-    "max_for_size": 10,
-    "max_type_depth": 4,
+
     "max_expression_depth": 4,
-    "max_alias_count": 10,
+    "max_type_depth": 4,
+
     "max_structs_count": 10,
+    "max_struct_fields_count": 5,
     "max_globals_count": 10,
-    "max_functions_count": 10,
-    "max_function_parameters_count": 10,
-    "max_function_return_types_count": 10,
-    "max_function_expressions_count": 10,
-    "max_main_expressions_count": 10,
-    "max_raw_string_hashes_count": 10,
-    "small_upper_bound": 10,
-    "name_size": 10,
-    "is_unconstrained_probability": 0.1,
-    "is_oracle_probability": 0.1,
+    "max_functions_count": 5,
+
+    "max_function_parameters_count": 5,
+    "max_function_return_types_count": 5,
+
+    "max_main_expressions_count": 20,
+    "max_block_expressions_count": 5,
+
+    "max_string_hashes_count": 5,
+    "max_name_characters_count": 5,
+
+    "max_small_upper_bound": 5,
+
     "integer_signed_probability": 0.1,
     "boundary_value_probability": 0.1,
     "small_upper_bound_probability": 0.1,
     "exclude_prime_probability": 0.1,
     "mutable_probability": 0.1,
-    "raw_string_probability": 0.1
+    "raw_string_probability": 0.1,
+
+    "allow_slices": true,
+    "allow_references": true,
+    "allow_structs": true,
+
+    "filter_entrypoint_structs": false,
+
+    "type_depth": 0,
+    "expression_depth": 0
 }

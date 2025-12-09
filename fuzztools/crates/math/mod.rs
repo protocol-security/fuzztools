@@ -83,14 +83,14 @@ pub fn random_field_element(
     curve: &str,
     random: &mut impl Rng,
     exclude_prime: bool,
-    boundary_prob: f64,
-    small_upper_bound_prob: f64,
-    small_upper_bound: u128,
+    boundary_value_probability: f64,
+    small_upper_bound_probability: f64,
+    max_small_upper_bound: u128,
 ) -> U256 {
     let prime = curve_prime(curve);
 
     // Choose from boundary values
-    let value = if bernoulli(boundary_prob, random) {
+    let value = if bernoulli(boundary_value_probability, random) {
         if exclude_prime {
             // Choose from `[0, 1]`
             let value = random.choice(&[U256::ZERO, U256::ONE]).clone();
@@ -102,8 +102,8 @@ pub fn random_field_element(
         }
     } else {
         // Choose from `[0..=small_upper_bound]`
-        if bernoulli(small_upper_bound_prob, random) {
-            let value = random.random_range(0..=small_upper_bound);
+        if bernoulli(small_upper_bound_probability, random) {
+            let value = random.random_range(0..=max_small_upper_bound);
             U256::from(value)
         } else {
             // Choose from `[0..=Fp - 1]`
