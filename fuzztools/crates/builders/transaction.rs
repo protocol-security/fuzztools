@@ -27,7 +27,13 @@ impl TransactionBuilder {
     pub async fn new(access_list_target: Address, node: &RootProvider) -> Result<Self> {
         let cache = RpcCache::fetch(node).await?;
         let chain_id = node.get_chain_id().await?;
-        Ok(Self { chain_id, access_list_target, signer_nonce: 0, auth_nonce: 0, cache })
+        Ok(Self {
+            chain_id,
+            access_list_target,
+            signer_nonce: 0,
+            auth_nonce: 0,
+            cache,
+        })
     }
 
     /// Refreshes the cache by fetching it from the given node
@@ -68,7 +74,10 @@ impl TransactionBuilder {
         // we just add a single entry
         let key_str = random.choice(&STORAGE_KEYS);
         let key = FixedBytes::from_hex(key_str).unwrap();
-        let item = AccessListItem { address: self.access_list_target, storage_keys: vec![key] };
+        let item = AccessListItem {
+            address: self.access_list_target,
+            storage_keys: vec![key],
+        };
 
         (AccessList(vec![item]), Bytes::from(key))
     }
@@ -91,7 +100,7 @@ impl TransactionBuilder {
     /// Generate an `Eip2930` transaction. The randomness comes from
     /// the `to`, as well as from `input` and `access_list` fields iff
     /// `self.contract_address` is provided, otherwise the only random field is `to`
-    pub fn build_access_list_tx(&mut self, random: &mut impl Rng) -> Transaction {
+    pub fn build_eip2930_tx(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_request(random);
         let (access_list, input) = self.generate_access_list_and_input(random);
 
@@ -137,7 +146,11 @@ impl TransactionBuilder {
 
         let delegatee = Address::random(random);
         let chain_id = U256::from(self.chain_id);
-        let authorization = Authorization { chain_id, address: delegatee, nonce: self.auth_nonce };
+        let authorization = Authorization {
+            chain_id,
+            address: delegatee,
+            nonce: self.auth_nonce,
+        };
 
         tx.tx_type = 4;
         tx.max_fee_per_gas = Some(max_fee_per_gas);

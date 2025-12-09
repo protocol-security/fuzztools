@@ -7,8 +7,8 @@
 //! Moreover, it also contains a set of pre-deployed contracts as well as some optimizations to
 //! speed up stuff like an `RpcCache` that updates itself every time a new block is received.
 
-mod contracts;
 mod cache;
+mod contracts;
 mod transaction;
 
 use alloy::transports::TransportError;
