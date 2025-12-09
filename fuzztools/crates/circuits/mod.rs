@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn test_random_circuit() {
-        let mut random = rand::thread_rng();
+        let mut random = rand::rng();
         let ctx = Context {
             max_inputs_count: 10,
             min_element_count: 0,
@@ -82,7 +82,7 @@ mod tests {
             min_string_size: 0,
             max_string_size: 10,
             max_expression_depth: 5,
-            max_type_depth: 5,
+            max_type_depth: 50,
             max_structs_count: 10,
             max_struct_fields_count: 5,
             max_globals_count: 10,

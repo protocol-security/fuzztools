@@ -4,6 +4,7 @@ use crate::{
     utils::{random_string, RandomChoice},
 };
 use rand::Rng;
+use std::collections::VecDeque;
 
 // ------------------------------------------------------------
 // Type Definitions
@@ -89,6 +90,41 @@ pub enum Visibility {
 #[derive(Clone)]
 pub struct Reference {
     pub ty: Box<Type>,
+}
+
+// ------------------------------------------------------------
+// Work Items
+// ------------------------------------------------------------
+
+pub enum WorkItem {
+    GenerateType {
+        slot_idx: usize,
+        depth: usize,
+    },
+
+    FinalizeArray {
+        slot_idx: usize,
+        inner_slot: usize,
+        size: usize,
+        mutable: bool,
+    },
+
+    FinalizeSlice {
+        slot_idx: usize,
+        inner_slot: usize,
+        mutable: bool,
+    },
+    
+    FinalizeTuple {
+        slot_idx: usize,
+        inner_slots: Vec<usize>,
+        mutable: bool,
+    },
+
+    FinalizeReference {
+        slot_idx: usize,
+        inner_slot: usize,
+    },
 }
 
 // ------------------------------------------------------------
@@ -184,41 +220,126 @@ const VISIBILITIES: [Visibility; 3] =
 
 impl Type {
     pub fn random(random: &mut impl Rng, ctx: &Context, structs: &[Struct]) -> Self {
-        if ctx.type_depth > ctx.max_type_depth {
-            return Type::Field(Field::random(random, ctx));
-        }
+        let mut slots: Vec<Option<Type>> = vec![None];
+        let mut work: VecDeque<WorkItem> = VecDeque::new();
+        work.push_back(WorkItem::GenerateType { slot_idx: 0, depth: 0 });
 
-        let valid_structs: Vec<&Struct> = if ctx.filter_entrypoint_structs {
-            structs.iter().filter(|s| s.fields.iter().all(|f| f.ty.is_valid_entrypoint())).collect()
-        } else {
-            structs.iter().collect()
-        };
+        while let Some(item) = work.pop_front() {
+            match item {
+                WorkItem::GenerateType { slot_idx, depth } => {
+                    if depth > ctx.max_type_depth {
+                        slots[slot_idx] = Some(Type::Field(Field::random(random, ctx)));
+                        continue;
+                    }
 
-        let mut available_types: Vec<&str> =
-            vec!["Field", "Integer", "Boolean", "String", "Array", "Tuple"];
+                    let valid_structs: Vec<&Struct> = if ctx.filter_entrypoint_structs {
+                        structs.iter().filter(|s| s.fields.iter().all(|f| f.ty.is_valid_entrypoint())).collect()
+                    } else {
+                        structs.iter().collect()
+                    };
 
-        if ctx.allow_slices {
-            available_types.push("Slice");
-        }
-        if ctx.allow_references {
-            available_types.push("Reference");
-        }
-        if ctx.allow_structs && !valid_structs.is_empty() {
-            available_types.push("Struct");
-        }
+                    let mut available: Vec<&str> = vec!["Field", "Integer", "Boolean", "String", "Array", "Tuple"];
+                    if ctx.allow_slices { available.push("Slice"); }
+                    if ctx.allow_references { available.push("Reference"); }
+                    if ctx.allow_structs && !valid_structs.is_empty() { available.push("Struct"); }
 
-        match *random.choice(&available_types) {
-            "Field" => Type::Field(Field::random(random, ctx)),
-            "Integer" => Type::Integer(Integer::random(random, ctx)),
-            "Boolean" => Type::Boolean(Boolean::random(random, ctx)),
-            "String" => Type::String(StringType::random(random, ctx)),
-            "Array" => Type::Array(Array::random(random, ctx, structs)),
-            "Slice" => Type::Slice(Slice::random(random, ctx, structs)),
-            "Tuple" => Type::Tuple(Tuple::random(random, ctx, structs)),
-            "Struct" => Type::Struct((*random.choice(&valid_structs)).clone()),
-            "Reference" => Type::Reference(Reference::random(random, ctx, structs)),
-            _ => unreachable!(),
+                    match *random.choice(&available) {
+                        // --- Primitives: no recursion needed, fill slot immediately ---
+                        "Field" => {
+                            slots[slot_idx] = Some(Type::Field(Field::random(random, ctx)));
+                        }
+                        "Integer" => {
+                            slots[slot_idx] = Some(Type::Integer(Integer::random(random, ctx)));
+                        }
+                        "Boolean" => {
+                            slots[slot_idx] = Some(Type::Boolean(Boolean::random(random, ctx)));
+                        }
+                        "String" => {
+                            slots[slot_idx] = Some(Type::String(StringType::random(random, ctx)));
+                        }
+                        "Array" => {
+                            let inner_slot = slots.len();
+                            slots.push(None);
+
+                            let size = random.random_range(ctx.min_element_count..ctx.max_element_count);
+                            let mutable = random.random_bool(ctx.mutable_probability);
+
+                            work.push_front(WorkItem::FinalizeArray { slot_idx, inner_slot, size, mutable });
+                            work.push_front(WorkItem::GenerateType { slot_idx: inner_slot, depth: depth + 1 });
+                        }
+                        "Slice" => {
+                            let inner_slot = slots.len();
+                            slots.push(None);
+
+                            let mutable = random.random_bool(ctx.mutable_probability);
+                            
+                            work.push_front(WorkItem::FinalizeSlice { slot_idx, inner_slot, mutable });
+                            work.push_front(WorkItem::GenerateType { slot_idx: inner_slot, depth: depth + 1 });
+                        }
+                        "Tuple" => {
+                            let count = random.random_range(ctx.min_element_count..ctx.max_element_count);
+                            let mutable = random.random_bool(ctx.mutable_probability);
+
+                            let first_inner = slots.len();
+                            let inner_slots: Vec<usize> = (0..count).map(|i| first_inner + i).collect();
+                            for _ in 0..count {
+                                slots.push(None);
+                            }
+
+                            work.push_front(WorkItem::FinalizeTuple { slot_idx, inner_slots: inner_slots.clone(), mutable });
+                            
+                            for &slot in &inner_slots {
+                                work.push_front(WorkItem::GenerateType { slot_idx: slot, depth: depth + 1 });
+                            }
+                        }
+                        "Struct" => {
+                            slots[slot_idx] = Some(Type::Struct((*random.choice(&valid_structs)).clone()));
+                        }
+                        "Reference" => {
+                            let inner_slot = slots.len();
+                            slots.push(None);
+
+                            work.push_front(WorkItem::FinalizeReference { slot_idx, inner_slot });
+                            work.push_front(WorkItem::GenerateType { slot_idx: inner_slot, depth: depth + 1 });
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                WorkItem::FinalizeArray { slot_idx, inner_slot, size, mutable } => {
+                    let inner = slots[inner_slot].take().expect("inner type should be ready");
+                    slots[slot_idx] = Some(Type::Array(Array {
+                        ty: Box::new(inner),
+                        size,
+                        mutable,
+                    }));
+                }
+                
+                WorkItem::FinalizeSlice { slot_idx, inner_slot, mutable } => {
+                    let inner = slots[inner_slot].take().expect("inner type should be ready");
+                    slots[slot_idx] = Some(Type::Slice(Slice {
+                        ty: Box::new(inner),
+                        mutable,
+                    }));
+                }
+                
+                WorkItem::FinalizeTuple { slot_idx, inner_slots, mutable } => {
+                    let inner: Vec<Type> = inner_slots
+                        .iter()
+                        .map(|&s| slots[s].take().expect("inner type should be ready"))
+                        .collect();
+                    slots[slot_idx] = Some(Type::Tuple(Tuple { inner, mutable }));
+                }
+                
+                WorkItem::FinalizeReference { slot_idx, inner_slot } => {
+                    let inner = slots[inner_slot].take().expect("inner type should be ready");
+                    slots[slot_idx] = Some(Type::Reference(Reference {
+                        ty: Box::new(inner),
+                    }));
+                }
+            }
         }
+    
+        slots[0].take().unwrap()
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
