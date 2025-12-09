@@ -1,6 +1,0 @@
-[package]
-name = "eing"
-type = "bin"
-authors = [""]
-
-[dependencies]
