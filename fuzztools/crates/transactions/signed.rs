@@ -26,8 +26,13 @@ impl SignedTransaction {
             // Encode the header
             let payload_length = self.transaction.fields_length()
                 + self.signature.rlp_rs_len()
-                + self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length();
-            let header = Header { list: true, payload_length };
+                + self
+                    .to_eip155_value(self.signature.v(), self.transaction.chain_id)
+                    .length();
+            let header = Header {
+                list: true,
+                payload_length,
+            };
             header.encode(&mut out);
 
             // Encode the transaction fields
@@ -46,7 +51,10 @@ impl SignedTransaction {
             let payload_length = self.transaction.fields_length()
                 + self.signature.rlp_rs_len()
                 + self.signature.v().length();
-            let header = Header { list: true, payload_length };
+            let header = Header {
+                list: true,
+                payload_length,
+            };
             header.encode(&mut out);
 
             // Encode the transaction fields
@@ -64,11 +72,15 @@ impl SignedTransaction {
         let payload_length = self.transaction.fields_length()
             + self.signature.rlp_rs_len()
             + if self.transaction.tx_type == 0 {
-                self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length()
+                self.to_eip155_value(self.signature.v(), self.transaction.chain_id)
+                    .length()
             } else {
                 self.signature.v().length()
             };
-        let header = Header { list: true, payload_length };
+        let header = Header {
+            list: true,
+            payload_length,
+        };
 
         header.length_with_payload()
     }

@@ -136,43 +136,43 @@ impl<const N: usize> InterestingMutations for [u8; N] {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 self[idx] = *random.choice(&INTERESTING_U8);
-            },
+            }
             1 => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 self[idx] = random.choice(&INTERESTING_U8).reverse_bits();
-            },
+            }
             2 => {
                 check_not_smaller!(self, 2);
                 let idx = random.random_range(0..=self.len() - 2);
                 let value = random.choice(&INTERESTING_U16).to_le_bytes();
                 self[idx..idx + 2].copy_from_slice(&value);
-            },
+            }
             3 => {
                 check_not_smaller!(self, 2);
                 let idx = random.random_range(0..=self.len() - 2);
                 let value = random.choice(&INTERESTING_U16).to_be_bytes();
                 self[idx..idx + 2].copy_from_slice(&value);
-            },
+            }
             4 => {
                 check_not_smaller!(self, 4);
                 let idx = random.random_range(0..=self.len() - 4);
                 let value = random.choice(&INTERESTING_U32).to_le_bytes();
                 self[idx..idx + 4].copy_from_slice(&value);
-            },
+            }
             5 => {
                 check_not_smaller!(self, 4);
                 let idx = random.random_range(0..=self.len() - 4);
                 let value = random.choice(&INTERESTING_U32).to_be_bytes();
                 self[idx..idx + 4].copy_from_slice(&value);
-            },
+            }
             6 => {
                 check_not_empty!(self);
                 let utf8 = random.choice(&INVALID_UTF8_SEQUENCES).to_vec();
                 check_not_smaller!(self, utf8.len());
                 let idx = random.random_range(0..=self.len() - utf8.len());
                 self[idx..idx + utf8.len()].copy_from_slice(&utf8);
-            },
+            }
             7 => return,
             _ => unreachable!(),
         }

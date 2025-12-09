@@ -1,5 +1,7 @@
 /target
 Cargo.lock
 .DS_Store
-/tests
+/crashes
 /ref
+/a
+/circuzz

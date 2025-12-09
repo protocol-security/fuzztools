@@ -92,7 +92,7 @@ impl Mutable for AccessList {
             0 => {
                 // Return true so that it is set for `None` if under an `Option`
                 return true;
-            },
+            }
             1 => self.0.clear(), // Reset the access list
             2 => {
                 // Add a random entry
@@ -100,15 +100,18 @@ impl Mutable for AccessList {
                 let num_keys = random.random::<u8>(); // @audit max 255 keys
                 let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
-                self.0.push(AccessListItem { address, storage_keys });
-            },
+                self.0.push(AccessListItem {
+                    address,
+                    storage_keys,
+                });
+            }
             3 => {
                 // Remove a random entry
                 if !self.0.is_empty() {
                     let idx = random.random_range(0..self.0.len());
                     self.0.remove(idx);
                 }
-            },
+            }
             4 => {
                 // Swap random entries
                 if self.0.len() >= 2 {
@@ -119,7 +122,7 @@ impl Mutable for AccessList {
                         self.0.swap(idx1, idx2);
                     }
                 }
-            },
+            }
             5 => {
                 // Replace a random entry
                 if !self.0.is_empty() {
@@ -128,9 +131,12 @@ impl Mutable for AccessList {
                     let num_keys = random.random::<u8>(); // @audit max 255 keys
                     let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
-                    self.0[idx] = AccessListItem { address, storage_keys };
+                    self.0[idx] = AccessListItem {
+                        address,
+                        storage_keys,
+                    };
                 }
-            },
+            }
             6 => {
                 // Add entry with storage keys from `STORAGE_KEYS`
                 let address = Address::random(random);
@@ -142,8 +148,11 @@ impl Mutable for AccessList {
                     })
                     .collect();
 
-                self.0.push(AccessListItem { address, storage_keys });
-            },
+                self.0.push(AccessListItem {
+                    address,
+                    storage_keys,
+                });
+            }
             7 => {
                 // Mutate an element of `self`
                 if !self.0.is_empty() {
@@ -155,7 +164,7 @@ impl Mutable for AccessList {
                         });
                     }
                 }
-            },
+            }
             _ => unreachable!(),
         }
 
@@ -169,7 +178,7 @@ impl Mutable for Vec<Authorization> {
             0 => {
                 // Return true so that it is set for `None` if under an `Option`
                 return true;
-            },
+            }
             1 => self.clear(), // Reset the authorization list
             2 => {
                 // Add a random authorization entry
@@ -177,15 +186,19 @@ impl Mutable for Vec<Authorization> {
                 let chain_id = U256::random(random);
                 let nonce = random.random();
 
-                self.push(Authorization { address, chain_id, nonce });
-            },
+                self.push(Authorization {
+                    address,
+                    chain_id,
+                    nonce,
+                });
+            }
             3 => {
                 // Remove a random entry
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
                     self.remove(idx);
                 }
-            },
+            }
             4 => {
                 // Swap random entries
                 if self.len() >= 2 {
@@ -196,7 +209,7 @@ impl Mutable for Vec<Authorization> {
                         self.swap(idx1, idx2);
                     }
                 }
-            },
+            }
             5 => {
                 // Replace a random entry
                 if !self.is_empty() {
@@ -205,45 +218,53 @@ impl Mutable for Vec<Authorization> {
                     let chain_id = U256::random(random);
                     let nonce = random.random();
 
-                    self[idx] = Authorization { address, chain_id, nonce };
+                    self[idx] = Authorization {
+                        address,
+                        chain_id,
+                        nonce,
+                    };
                 }
-            },
+            }
             6 => {
                 // Add authorization with interesting address
                 let address = Address::from_hex(random.choice(&INTERESTING_ADDRESSES)).unwrap();
                 let chain_id = U256::from(*random.choice(&INTERESTING_CHAIN_IDS));
                 let nonce = random.random();
 
-                self.push(Authorization { address, chain_id, nonce });
-            },
+                self.push(Authorization {
+                    address,
+                    chain_id,
+                    nonce,
+                });
+            }
             7 => {
                 // Mutate an authorization's address
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
                     self[idx].address.mutate(random);
                 }
-            },
+            }
             8 => {
                 // Mutate an authorization's chain_id
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
                     self[idx].chain_id.mutate(random);
                 }
-            },
+            }
             9 => {
                 // Mutate an authorization's nonce
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
                     self[idx].nonce.mutate(random);
                 }
-            },
+            }
             10 => {
                 // Mutate a whole authorization
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
                     self[idx].mutate(random);
                 }
-            },
+            }
             _ => unreachable!(),
         }
 

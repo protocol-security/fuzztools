@@ -18,7 +18,7 @@ where
                     let idx = random.random_range(0..self.len());
                     self.remove(idx);
                 }
-            },
+            }
             // Replace a random element from the vector with a new random value
             2 => {
                 if !self.is_empty() {
@@ -26,7 +26,7 @@ where
                     let new_value = T::random(random);
                     self[idx] = new_value;
                 }
-            },
+            }
             // Swap two random elements from the vector
             3 => {
                 if self.len() >= 2 {
@@ -36,7 +36,7 @@ where
                         self.swap(idx1, idx2);
                     }
                 }
-            },
+            }
             // Push a default value
             4 => self.push(T::default()),
             // Shuffle the vector
@@ -50,14 +50,14 @@ where
                     let duplicate = self[idx];
                     self.push(duplicate);
                 }
-            },
+            }
             // Mutate a random element from the vector
             8 => {
                 if !self.is_empty() {
                     let idx = random.random_range(0..self.len());
                     self[idx].mutate(random);
                 }
-            },
+            }
             // Mutate all elements of a random slice
             9 => {
                 if !self.is_empty() {
@@ -67,7 +67,7 @@ where
                         self[i].mutate(random);
                     }
                 }
-            },
+            }
             // Return true to mutate the parent instead
             10 => return true,
             _ => unreachable!(),

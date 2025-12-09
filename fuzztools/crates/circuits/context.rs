@@ -44,7 +44,7 @@ pub struct Context {
     pub allow_references: bool,
     pub allow_structs: bool,
 
-    pub filter_entrypoint_structs: bool,
+    pub filter_public_input_structs: bool,
 
     pub type_depth: usize,
     pub expression_depth: usize,
@@ -60,7 +60,7 @@ impl Context {
             allow_structs: true,
             min_element_count: 0,
             min_string_size: 0,
-            filter_entrypoint_structs: false,
+            filter_public_input_structs: false,
             type_depth: 0,
             ..*self
         }
@@ -74,7 +74,7 @@ impl Context {
             allow_structs: true,
             min_element_count: 1,
             min_string_size: 1,
-            filter_entrypoint_structs: true,
+            filter_public_input_structs: true,
             type_depth: 0,
             ..*self
         }
@@ -94,6 +94,9 @@ impl Context {
     /// Returns the context being used to create sub-expressions (binary operations, unary
     /// operations, etc.)
     pub fn inner_expression(&self) -> Self {
-        Self { expression_depth: self.expression_depth + 1, ..*self }
+        Self {
+            expression_depth: self.expression_depth + 1,
+            ..*self
+        }
     }
 }

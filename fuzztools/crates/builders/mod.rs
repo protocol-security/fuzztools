@@ -1,12 +1,3 @@
-//! # Builders
-//!
-//! This module contains the next builders:
-//!
-//! - `TransactionBuilder` - Handles the logic of creating **VALID** transactions per mempool rules.
-//!
-//! Moreover, it also contains a set of pre-deployed contracts as well as some optimizations to
-//! speed up stuff like an `RpcCache` that updates itself every time a new block is received.
-
 mod cache;
 mod contracts;
 mod transaction;

@@ -29,6 +29,10 @@ anyhow = "1.0.100"
 syn = "2.0.107"
 quote = "1.0.41"
 proc-macro2 = "1.0.101"
+crossbeam = "0.8"
+sha2 = "0.10"
+serde_json = "1.0.145"
+serde = "1.0.228"
 
 noirc_driver = { git = "https://github.com/noir-lang/noir.git" }
 noirc_frontend = { git = "https://github.com/noir-lang/noir.git" }

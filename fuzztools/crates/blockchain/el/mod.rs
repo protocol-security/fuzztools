@@ -1,3 +1,0 @@
-//! # EL blockchain
-//!
-//! WIP

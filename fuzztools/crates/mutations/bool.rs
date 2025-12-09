@@ -7,7 +7,7 @@ impl Mutable for bool {
             0 => {
                 *self = !*self;
                 false
-            },
+            }
             1 => true,
             _ => unreachable!(),
         }
