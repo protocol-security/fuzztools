@@ -23,7 +23,7 @@ use std::{
     io::{self, Write},
     pin::Pin,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::Semaphore;
 
@@ -59,10 +59,6 @@ pub struct App {
     total_txs_sent: u64,
     txs_since_last_update: u64,
     start_time: Instant,
-    build_time: Duration,
-    mutate_time: Duration,
-    signing_time: Duration,
-    wait_time: Duration,
     last_update: Instant,
 }
 
@@ -112,10 +108,6 @@ impl App {
             total_txs_sent: 0,
             txs_since_last_update: 0,
             start_time: Instant::now(),
-            build_time: Duration::from_secs(0),
-            mutate_time: Duration::from_secs(0),
-            signing_time: Duration::from_secs(0),
-            wait_time: Duration::from_secs(0),
             last_update: Instant::now(),
         })
     }
@@ -137,26 +129,21 @@ impl App {
                     }
 
                     // Build transactions
-                    let build_start = Instant::now();
                     let mut unsigned_txs: Vec<Transaction> = (0..DEFAULT_TXS_PER_CORE * num_cores as u64).map(|_| match self.tx_type {
                         TransactionType::Legacy => self.builder.build_legacy_tx(random),
                         TransactionType::Al => self.builder.build_access_list_tx(random),
                         TransactionType::Eip1559 => self.builder.build_eip1559_tx(random),
                         TransactionType::Eip7702 => self.builder.build_eip7702_tx(random),
                     }).collect::<Vec<_>>();
-                    self.build_time = build_start.elapsed();
 
                     // Mutate transactions if fuzzing is enabled
-                    let mutate_start = Instant::now();
                     if self.fuzzing {
                         unsigned_txs.iter_mut().for_each(|tx| {
                             tx.mutate(random);
                         });
                     }
-                    self.mutate_time = mutate_start.elapsed();
 
                     // Sign transactions (including authorization lists) and encode them
-                    let signing_start = Instant::now();
                     let signed_txs: Vec<String> = unsigned_txs.into_par_iter().map(|mut tx| {
                         let signed_tx = if let Some(authorizations) = &tx.authorization_list {
                             // Sign the authorizations in parallel
@@ -188,10 +175,8 @@ impl App {
                         encoded.push_str(&hex::encode(signed_tx.encode()));
                         encoded
                     }).collect::<Vec<_>>();
-                    self.signing_time = signing_start.elapsed();
 
                     // Send the RPC requests through fire-and-forget tasks
-                    let wait_start = Instant::now();
                     let signed_txs_len = signed_txs.len() as u64;
                     let futures = FuturesUnordered::new();
 
@@ -201,7 +186,6 @@ impl App {
 
                     let permit = self.semaphore.clone().acquire_owned().await.unwrap();
                     tokio::spawn(async move { join_all(futures).await; drop(permit); });
-                    self.wait_time = wait_start.elapsed();
 
                     self.total_txs_sent += signed_txs_len;
                     self.txs_since_last_update += signed_txs_len;
@@ -227,18 +211,12 @@ impl App {
         // Print stats
         print!(
             "[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: \
-             {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Build: \
-             {RED}{:>6.2}ms{RESET} | Mutate: {RED}{:>6.2}ms{RESET} | Sign: {RED}{:>6.2}ms{RESET} \
-             | Network wait time: {RED}{:>6.2}ms{RESET} | Semaphore permits: {RED}{}{RESET}",
+             {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Semaphore permits: {RED}{}{RESET}",
             self.total_txs_sent,
             self.txs_since_last_update,
             self.start_time.elapsed().as_secs() / 3600,
             (self.start_time.elapsed().as_secs() % 3600) / 60,
             self.start_time.elapsed().as_secs() % 60,
-            self.build_time.as_secs_f64() * 1000.0,
-            self.mutate_time.as_secs_f64() * 1000.0,
-            self.signing_time.as_secs_f64() * 1000.0,
-            self.wait_time.as_secs_f64() * 1000.0,
             self.semaphore.available_permits(),
         );
 
