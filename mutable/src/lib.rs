@@ -1,32 +1,3 @@
-//! # Mutable
-//!
-//! This crate implements the `Mutable` derive macro. In a nutshell, any struct that derives
-//! `Mutable` will expose a `mutate` method that will mutate randomly its fields with interesting
-//! mutations.
-//!
-//! ## Example
-//!
-//! ```rust
-//! #[derive(Mutable)]
-//! struct Whatever {
-//!     a: u64,
-//!     b: u64,
-//! }
-//!
-//! fn main() {
-//!     let mut whatever = Whatever { a: 0, b: 0 };
-//!     let mut random = SmallRng::seed_from_u64(0);
-//!
-//!     loop {
-//!         whatever.mutate(random);
-//!
-//!         if whatever.a + whatever.b == 5 {
-//!             panic!("POC");
-//!         }
-//!     }
-//! }
-//! ```
-
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
@@ -94,7 +65,7 @@ pub fn mutable_derive(item: TokenStream) -> TokenStream {
                     }
                 }
             }
-        },
+        }
         _ => panic!("Mutable can only be derived for structs"),
     }
     .into()
