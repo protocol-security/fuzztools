@@ -1,6 +1,4 @@
-use crate::circuits::types::Type;
-use rand::Rng;
-
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operator {
     Add,
     Sub,
@@ -31,10 +29,6 @@ pub enum Operator {
     XorAssign,
     ShlAssign,
     ShrAssign,
-}
-
-impl Operator {
-    // @todo
 }
 
 impl std::fmt::Display for Operator {
