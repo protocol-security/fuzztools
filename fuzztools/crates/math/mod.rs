@@ -57,12 +57,19 @@ pub fn weighted_select<T: Eq + Hash + Clone + Display>(
     for option in options {
         match weight_map.get(option) {
             Some(weight) => weights.push(*weight),
-            None => return Err(anyhow::anyhow!("Unable to find weight for option '{}'", option)),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Unable to find weight for option '{}'",
+                    option
+                ))
+            }
         }
     }
 
     if weights.len() != options.len() {
-        return Err(anyhow::anyhow!("Number of weights does not match number of options"));
+        return Err(anyhow::anyhow!(
+            "Number of weights does not match number of options"
+        ));
     }
 
     let dist = match WeightedIndex::new(weights) {
@@ -97,7 +104,9 @@ pub fn random_field_element(
             value
         } else {
             // Choose from `[0, 1, Fp - 1]`
-            let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE]).clone();
+            let value = random
+                .choice(&[U256::ZERO, U256::ONE, prime - U256::ONE])
+                .clone();
             value
         }
     } else {
