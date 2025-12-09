@@ -1,61 +1,18 @@
 # Fuzztools
 
-A fuzzing toolkit providing reusable components and utilities for building custom fuzzers.
+The main target of this repo is to have in one place a set of utilities to build fuzzers that are 1) fast 2) easy to maintain and 3) actually useful finding bugs.
 
-## Overview
-
-This repository contains a collection of fuzzing tools and utilities designed to simplify the development of custom fuzzers. The `fuzztools` library provides mutation primitives, random number generation, and other common fuzzing infrastructure.
-
-## Getting Started
-
-### 1. Clone the Repository
-
-```sh
-git clone git@github.com:protocol-security/fuzztools.git
-cd fuzztools
-```
-
-### 2. Create a New Fuzzer
-
-Create a new binary crate within the workspace and add `fuzztools` as a dependency:
-
-```sh
-cargo new --bin <NAME>
-cargo add fuzztools --package <NAME>
-cd <NAME>
-```
-
-### 3. Implement Your Fuzzer
-
-Add your fuzzing logic to `main.rs`. The typical pattern involves creating a base payload structure and mutating it within a loop:
-
-```rs
-#[derive(Mutable)]
-struct Payload {
-    a: u64,
-    b: u64
-}
-
-fn main() {
-    let mut base = Payload {
-        a: 3,
-        b: 5
-    };
-    let mut random = SmallRng::seed_from_u64(0);
-
-    loop {
-        base.mutate(random);
-
-        // Check your target condition or send the payload
-        if base.a + base.b == 5 {
-            panic!("POC");
-        }
-    }
-}
-```
-
-and that's it. For example, check the implementation of [rakoon](./rakoon/), where it makes use of it extensively. If you wanna load the Cargo documentation, run
-
-```sh
-cargo doc --no-deps --workspace --open
-```
+- [fuzztools](./fuzztools/): a set of crates implementing common stuff to be used among all fuzzers
+    - [blockchain](./fuzztools/crates/blockchain/): consensus and execution spec types and constants
+    - [builders](./fuzztools/crates/builders/): logic for creating **VALID** types according to protocol rules
+    - [circuits](./fuzztools/crates/circuits/): logic for creating **VALID** Noir circuits
+    - [evm](./fuzztools/crates/evm/): (WIP)
+    - [math](./fuzztools/crates/math/): math utilities (field elements, weighted selection, etc.)
+    - [mutations](./fuzztools/crates/mutations/): `Mutable` trait implementation for base types
+    - [net](./fuzztools/crates/net/): (WIP)
+    - [rpc](./fuzztools/crates/rpc/): (WIP)
+    - [transactions](./fuzztools/crates/transactions/): `Transaction` and `SignedTransaction` types
+    - [utils](./fuzztools/crates/utils/): miscellaneous utilities like `FastPrivateKeySigner` or `choice` function for array types
+- [mutable](./mutable/): macro that implements automatically the `Mutable` trait for arbitrary structs
+- [noiruzz](./noiruzz/): Noir fuzzer
+- [rakoon](./rakoon/): transaction fuzzer for the Ethereum protocol 
