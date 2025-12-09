@@ -21,6 +21,7 @@ pub enum Type {
     Tuple(Tuple),
     Struct(Struct),
     Reference(Reference),
+    // @todo lambdas, maybe use them in expressions instead?
 }
 
 #[derive(Clone)]
@@ -101,26 +102,22 @@ pub enum WorkItem {
         slot_idx: usize,
         depth: usize,
     },
-
     FinalizeArray {
         slot_idx: usize,
         inner_slot: usize,
         size: usize,
         mutable: bool,
     },
-
     FinalizeSlice {
         slot_idx: usize,
         inner_slot: usize,
         mutable: bool,
     },
-    
     FinalizeTuple {
         slot_idx: usize,
         inner_slots: Vec<usize>,
         mutable: bool,
     },
-
     FinalizeReference {
         slot_idx: usize,
         inner_slot: usize,
@@ -219,7 +216,31 @@ const VISIBILITIES: [Visibility; 3] =
 // ------------------------------------------------------------
 
 impl Type {
+    // My first approach was to use recursion like `Type::random() -> Array -> Type::random() -> ...`
+    // The problem is this made the stack implode when generating deeply nested types (e.g., `[[[Field; 3]; 2]; ...]`)
+    //
+    // ## The Solution
+    // Instead of recursion, we use a work queue on the heap, by storing the type of work to do in a `VecDeque<WorkItem>` and traversing it iteratively, like a to-do list. The generation flow is as follows:
+    // 
+    // - `GenerateType`: Decides what type to create. Primitives go directly
+    //      into their slot. Compound types reserve slots for children and push
+    //      both `GenerateType` (for children) and `Finalize*` (to assemble)
+    // - `Finalize*`: Takes completed children from their slots and assembles the parent type
+    // 
+    // Initial:  slots=[None], work=[Generate(0)]
+    // Step 1:   Generate(0) -> Array chosen -> slots=[None, None]
+    //           work=[Generate(1), FinalizeArray(0, inner=1)]
+    // Step 2:   Generate(1) -> Tuple chosen -> slots=[None, None, None, None]
+    //           work=[Generate(2), Generate(3), FinalizeTuple(1), FinalizeArray(0)]
+    // Step 3:   Generate(2) -> Field -> slots=[None, None, Some(Field), None]
+    // Step 4:   Generate(3) -> bool  -> slots=[None, None, Some(Field), Some(bool)]
+    // Step 5:   FinalizeTuple(1)     -> slots=[None, Some(Tuple), ...]
+    // Step 6:   FinalizeArray(0)     -> slots=[Some(Array<Tuple>), ...]
+    // Done!     Return slots[0]
+    //
+    // If you do not understand something, just ask claude :D
     pub fn random(random: &mut impl Rng, ctx: &Context, structs: &[Struct]) -> Self {
+        // Slot 0 will hold our final result; we grow as needed for nested types
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
         work.push_back(WorkItem::GenerateType { slot_idx: 0, depth: 0 });
@@ -227,13 +248,15 @@ impl Type {
         while let Some(item) = work.pop_front() {
             match item {
                 WorkItem::GenerateType { slot_idx, depth } => {
+                    // Base case: max depth reached -> generate primitive to stop nesting
                     if depth > ctx.max_type_depth {
                         slots[slot_idx] = Some(Type::Field(Field::random(random, ctx)));
                         continue;
                     }
 
-                    let valid_structs: Vec<&Struct> = if ctx.filter_entrypoint_structs {
-                        structs.iter().filter(|s| s.fields.iter().all(|f| f.ty.is_valid_entrypoint())).collect()
+                    // Not all structs can be used as public inputs, so we filter them
+                    let valid_structs: Vec<&Struct> = if ctx.filter_public_input_structs {
+                        structs.iter().filter(|s| s.fields.iter().all(|f| f.ty.is_valid_public_input())).collect()
                     } else {
                         structs.iter().collect()
                     };
@@ -244,7 +267,7 @@ impl Type {
                     if ctx.allow_structs && !valid_structs.is_empty() { available.push("Struct"); }
 
                     match *random.choice(&available) {
-                        // --- Primitives: no recursion needed, fill slot immediately ---
+                        // Primitives: no children, fill slot immediately
                         "Field" => {
                             slots[slot_idx] = Some(Type::Field(Field::random(random, ctx)));
                         }
@@ -257,16 +280,22 @@ impl Type {
                         "String" => {
                             slots[slot_idx] = Some(Type::String(StringType::random(random, ctx)));
                         }
+
+                        // Array: has ONE child type
+                        // Reserve a slot for inner type, schedule its generation, then finalize
                         "Array" => {
                             let inner_slot = slots.len();
-                            slots.push(None);
+                            slots.push(None); // Reserve slot for inner type
 
                             let size = random.random_range(ctx.min_element_count..ctx.max_element_count);
                             let mutable = random.random_bool(ctx.mutable_probability);
 
+                            // Generate runs FIRST, Finalize runs AFTER
                             work.push_front(WorkItem::FinalizeArray { slot_idx, inner_slot, size, mutable });
                             work.push_front(WorkItem::GenerateType { slot_idx: inner_slot, depth: depth + 1 });
                         }
+
+                        // Slice: same pattern as Array
                         "Slice" => {
                             let inner_slot = slots.len();
                             slots.push(None);
@@ -276,25 +305,33 @@ impl Type {
                             work.push_front(WorkItem::FinalizeSlice { slot_idx, inner_slot, mutable });
                             work.push_front(WorkItem::GenerateType { slot_idx: inner_slot, depth: depth + 1 });
                         }
+
+                        // Tuple: has N child types (variable count)
+                        // Reserve N slots, schedule N generations, then finalize
                         "Tuple" => {
                             let count = random.random_range(ctx.min_element_count..ctx.max_element_count);
                             let mutable = random.random_bool(ctx.mutable_probability);
 
+                            // Reserve contiguous slots for all inner types
                             let first_inner = slots.len();
                             let inner_slots: Vec<usize> = (0..count).map(|i| first_inner + i).collect();
                             for _ in 0..count {
                                 slots.push(None);
                             }
 
+                            // Schedule finalization (runs last) then all child generations
                             work.push_front(WorkItem::FinalizeTuple { slot_idx, inner_slots: inner_slots.clone(), mutable });
-                            
                             for &slot in &inner_slots {
                                 work.push_front(WorkItem::GenerateType { slot_idx: slot, depth: depth + 1 });
                             }
                         }
+
+                        // Struct: pick from existing structs
                         "Struct" => {
                             slots[slot_idx] = Some(Type::Struct((*random.choice(&valid_structs)).clone()));
                         }
+
+                        // Reference: has ONE child type
                         "Reference" => {
                             let inner_slot = slots.len();
                             slots.push(None);
@@ -338,7 +375,8 @@ impl Type {
                 }
             }
         }
-    
+
+        // Slot 0 contains our fully-constructed type
         slots[0].take().unwrap()
     }
 
@@ -370,16 +408,16 @@ impl Type {
         }
     }
 
-    pub fn is_valid_entrypoint(&self) -> bool {
+    pub fn is_valid_public_input(&self) -> bool {
         match self {
             Type::Field(_) | Type::Integer(_) | Type::Boolean(_) => true,
             Type::String(s) => s.size > 0,
-            Type::Array(a) => a.size > 0 && a.ty.is_valid_entrypoint(),
+            Type::Array(a) => a.size > 0 && a.ty.is_valid_public_input(),
             Type::Slice(_) | Type::Reference(_) => false,
             Type::Tuple(t) => {
-                !t.inner.is_empty() && t.inner.iter().all(|e| e.is_valid_entrypoint())
+                !t.inner.is_empty() && t.inner.iter().all(|e| e.is_valid_public_input())
             },
-            Type::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_entrypoint()),
+            Type::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
         }
     }
 }
@@ -518,7 +556,7 @@ impl Slice {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let size = random.random_range(0..ctx.max_element_count);
         let elems: Vec<_> = (0..size).map(|_| self.ty.random_value(random, ctx)).collect();
-        format!("[{}]", elems.join(", "))
+        format!("&[{}]", elems.join(", "))
     }
 }
 
