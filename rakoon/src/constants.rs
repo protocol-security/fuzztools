@@ -24,10 +24,11 @@ pub(crate) const AUTH_PRIVATE_KEY: &str =
 /// Used as a CLI flag to select the transaction type to fuzz
 pub(crate) enum TransactionType {
     Legacy,
-    Al,
+    Eip2930,
     Eip1559,
     Eip7702,
 }
 
 pub(crate) const DEFAULT_TXS_PER_CORE: u64 = 100;
-pub(crate) const DEFAULT_SEMAPHORE_PERMITS: usize = 500;
+pub(crate) const DEFAULT_CHANNEL_CAPACITY: usize = 500;
+pub(crate) const DEFAULT_RPC_TIMEOUT: u64 = 1; // seconds

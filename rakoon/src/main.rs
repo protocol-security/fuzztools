@@ -1,5 +1,5 @@
-mod constants;
 mod app;
+mod constants;
 
 use crate::app::App;
 use anyhow::Result;

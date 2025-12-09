@@ -1,6 +1,6 @@
 use crate::constants::{
-    TransactionType, AUTH_PRIVATE_KEY, DEFAULT_SEMAPHORE_PERMITS, DEFAULT_TXS_PER_CORE, GREEN, RED,
-    RESET,
+    TransactionType, AUTH_PRIVATE_KEY, DEFAULT_CHANNEL_CAPACITY, DEFAULT_RPC_TIMEOUT,
+    DEFAULT_TXS_PER_CORE, GREEN, RED, RESET,
 };
 use alloy::{
     eips::eip7702::SignedAuthorization,
@@ -8,9 +8,11 @@ use alloy::{
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::Header,
     signers::{local::PrivateKeySigner, SignerSync},
+    transports::TransportError,
 };
 use anyhow::Result;
-use futures::{future::join_all, stream::FuturesUnordered, Stream, StreamExt};
+use crossbeam::channel::{bounded, Receiver, Sender};
+use futures::Stream;
 use fuzztools::{
     builders::{AccessListTarget, TransactionBuilder},
     mutations::Mutable,
@@ -22,10 +24,11 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use std::{
     io::{self, Write},
     pin::Pin,
+    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
-use tokio::sync::Semaphore;
+use tokio::runtime::Handle;
 
 pub struct App {
     /// Rakoon prelude to display
@@ -52,8 +55,14 @@ pub struct App {
     /// Stream of block headers
     stream: Pin<Box<dyn Stream<Item = Header> + Send>>,
 
-    /// Semaphore that controls the fire-and-forget throughput
-    semaphore: Arc<Semaphore>,
+    /// Channel sender for dispatching signed transactions to the worker pool
+    tx_sender: Sender<Vec<String>>,
+
+    /// Channel receiver for completion notifications from workers
+    completion_receiver: Receiver<u64>,
+
+    /// Flag to signal connection loss (set by worker, read by main)
+    connection_lost: Arc<AtomicBool>,
 
     // Stats
     total_txs_sent: u64,
@@ -73,27 +82,92 @@ impl App {
         // First, deploy our custom contracts
         let key_bytes = hex::decode(key)?;
         let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
-        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
-
+        let deployer = ProviderBuilder::new()
+            .wallet(deployer_signer)
+            .connect(&url)
+            .await?;
         let access_list_target = AccessListTarget::deploy(&deployer).await?;
+        // @todo deploy the other one
 
-        // Then, create the main connection to the node
+        // Then, create the main connection to the node and some other stuff
         let node = ProviderBuilder::default().connect(&url).await?;
-
-        // Create `Builder` with the deployed contract address
         let builder = TransactionBuilder::new(*access_list_target.address(), &node).await?;
 
-        // Create our signer and auth signer
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
         let auth_signer = FastPrivateKeySigner::new(&auth_key_bytes)?;
         let signer = FastPrivateKeySigner::new(&key_bytes)?;
 
-        // Subscribe to block header stream
         let sub = node.subscribe_blocks().await?;
         let stream = Box::pin(sub.into_stream());
 
-        // Create the semaphore
-        let semaphore = Arc::new(Semaphore::new(DEFAULT_SEMAPHORE_PERMITS));
+        // Create channels and atomic values
+        let (tx_sender, tx_receiver) = bounded::<Vec<String>>(DEFAULT_CHANNEL_CAPACITY);
+        let (completion_sender, completion_receiver) = bounded::<u64>(DEFAULT_CHANNEL_CAPACITY);
+        let connection_lost = Arc::new(AtomicBool::new(false));
+        let connection_lost_worker = connection_lost.clone();
+
+        // Create a rayon threadpool
+        let num_cores = std::thread::available_parallelism().unwrap().get();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_cores)
+            .build()?;
+
+        // Spawn a background thread that processes transaction
+        let rpc_timeout = Duration::from_secs(DEFAULT_RPC_TIMEOUT);
+        let node_for_workers = node.clone();
+        let handle = Handle::current();
+
+        std::thread::spawn(move || {
+            for batch in tx_receiver {
+                let dispatched_count = std::sync::atomic::AtomicU64::new(0);
+
+                // Process each batch in parallel using rayon's threadpool
+                // Use try_for_each to short-circuit on connection errors
+                let batch_result = pool.install(|| {
+                    batch.into_par_iter().try_for_each(|tx| {
+                        // Check if connection was already lost (by another thread)
+                        if connection_lost_worker.load(Ordering::Relaxed) {
+                            return Err(());
+                        }
+
+                        // Wrap RPC call with timeout to detect unresponsive nodes quickly
+                        let result = handle.block_on(async {
+                            tokio::time::timeout(
+                                rpc_timeout,
+                                node_for_workers
+                                    .client()
+                                    .request::<_, ()>("eth_sendRawTransaction", (tx,)),
+                            )
+                            .await
+                        });
+
+                        match result {
+                            Err(_elapsed) => {
+                                // Node is unresponsive - we assume it crashed
+                                connection_lost_worker.store(true, Ordering::SeqCst);
+                                Err(())
+                            }
+                            Ok(rpc_result) => {
+                                if let Err(e) = &rpc_result {
+                                    // Transport error - node crashed for sure
+                                    if matches!(e, TransportError::Transport(_)) {
+                                        connection_lost_worker.store(true, Ordering::SeqCst);
+                                        return Err(());
+                                    }
+                                }
+                                dispatched_count.fetch_add(1, Ordering::Relaxed);
+                                Ok(())
+                            }
+                        }
+                    })
+                });
+
+                let _ = completion_sender.send(dispatched_count.load(Ordering::Relaxed));
+                if batch_result.is_err() || connection_lost_worker.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+        });
 
         Ok(Self {
             prelude,
@@ -104,7 +178,9 @@ impl App {
             signer,
             auth_signer,
             stream,
-            semaphore,
+            tx_sender,
+            completion_receiver,
+            connection_lost,
             total_txs_sent: 0,
             txs_since_last_update: 0,
             start_time: Instant::now(),
@@ -116,22 +192,29 @@ impl App {
         let num_cores = std::thread::available_parallelism().unwrap().get();
 
         loop {
+            // Check for connection loss (set by worker thread)
+            if self.connection_lost.load(Ordering::SeqCst) {
+                eprintln!("\n\n\x1b[1;31m[!] Connection lost (detected by worker), shutting down...\x1b[0m");
+                return Ok(());
+            }
+
+            // Drain all completion notifications (non-blocking)
+            while let Ok(sent_count) = self.completion_receiver.try_recv() {
+                self.total_txs_sent += sent_count;
+                self.txs_since_last_update += sent_count;
+            }
+
             tokio::select! {
                 // If there is a new block, refresh cache
-                Some(_) = self.stream.next() => {
+                Some(_) = futures::StreamExt::next(&mut self.stream) => {
                     self.builder.refresh_cache(&self.node).await?;
                 }
 
                 _ = tokio::task::yield_now() => {
-                    if self.node.get_chain_id().await.is_err() {
-                        eprintln!("\n\n\x1b[1;31m[!] Crash detected, shutting down...\x1b[0m");
-                        return Ok(());
-                    }
-
                     // Build transactions
                     let mut unsigned_txs: Vec<Transaction> = (0..DEFAULT_TXS_PER_CORE * num_cores as u64).map(|_| match self.tx_type {
                         TransactionType::Legacy => self.builder.build_legacy_tx(random),
-                        TransactionType::Al => self.builder.build_access_list_tx(random),
+                        TransactionType::Eip2930 => self.builder.build_eip2930_tx(random),
                         TransactionType::Eip1559 => self.builder.build_eip1559_tx(random),
                         TransactionType::Eip7702 => self.builder.build_eip7702_tx(random),
                     }).collect::<Vec<_>>();
@@ -176,19 +259,12 @@ impl App {
                         encoded
                     }).collect::<Vec<_>>();
 
-                    // Send the RPC requests through fire-and-forget tasks
-                    let signed_txs_len = signed_txs.len() as u64;
-                    let futures = FuturesUnordered::new();
-
-                    for tx in signed_txs {
-                        futures.push(self.node.client().request::<_, ()>("eth_sendRawTransaction", (tx,)));
+                    // Send to the worker pool via crossbeam channel
+                    // This will block if the channel is full (backpressure)
+                    if self.tx_sender.send(signed_txs).is_err() {
+                        eprintln!("\n\n\x1b[1;31m[!] Worker pool shut down, exiting...\x1b[0m");
+                        return Ok(());
                     }
-
-                    let permit = self.semaphore.clone().acquire_owned().await.unwrap();
-                    tokio::spawn(async move { join_all(futures).await; drop(permit); });
-
-                    self.total_txs_sent += signed_txs_len;
-                    self.txs_since_last_update += signed_txs_len;
 
                     // Update terminal logging
                     if self.last_update.elapsed().as_secs_f64() >= 1.0 {
@@ -211,13 +287,12 @@ impl App {
         // Print stats
         print!(
             "[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: \
-             {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET} | Semaphore permits: {RED}{}{RESET}",
+             {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET}",
             self.total_txs_sent,
             self.txs_since_last_update,
             self.start_time.elapsed().as_secs() / 3600,
             (self.start_time.elapsed().as_secs() % 3600) / 60,
             self.start_time.elapsed().as_secs() % 60,
-            self.semaphore.available_permits(),
         );
 
         io::stdout().flush()?;
