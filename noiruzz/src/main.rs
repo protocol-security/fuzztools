@@ -10,11 +10,7 @@ use crate::app::App;
 use constants::{GREEN, HEADER, RED, RESET};
 
 #[derive(Parser)]
-#[command(
-    name = "noiruzz",
-    about = "Metamorphic fuzzer for the Noir compiler",
-    author = "nethoxa"
-)]
+#[command(name = "noiruzz", about = "Metamorphic fuzzer for the Noir compiler", author = "nethoxa")]
 struct Cli {
     #[arg(long, default_value = "0", help = "Seed for the random generator")]
     seed: u64,
@@ -29,14 +25,10 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let crash_dir = cli
-        .crash_report_dir
-        .unwrap_or_else(|| "./crashes/noiruzz/".into());
+    let crash_dir = cli.crash_report_dir.unwrap_or_else(|| "./crashes/noiruzz/".into());
     fs::create_dir_all(&crash_dir)?;
 
-    let config_path = cli
-        .config
-        .unwrap_or_else(|| "./configs/noiruzz.json".into());
+    let config_path = cli.config.unwrap_or_else(|| "./configs/noiruzz.json".into());
     if !Path::new(&config_path).exists() {
         return Err(anyhow::anyhow!("Config file not found: {}", config_path));
     }

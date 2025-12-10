@@ -98,30 +98,11 @@ pub struct Reference {
 // ------------------------------------------------------------
 
 pub enum WorkItem {
-    GenerateType {
-        slot_idx: usize,
-        depth: usize,
-    },
-    FinalizeArray {
-        slot_idx: usize,
-        inner_slot: usize,
-        size: usize,
-        mutable: bool,
-    },
-    FinalizeSlice {
-        slot_idx: usize,
-        inner_slot: usize,
-        mutable: bool,
-    },
-    FinalizeTuple {
-        slot_idx: usize,
-        inner_slots: Vec<usize>,
-        mutable: bool,
-    },
-    FinalizeReference {
-        slot_idx: usize,
-        inner_slot: usize,
-    },
+    GenerateType { slot_idx: usize, depth: usize },
+    FinalizeArray { slot_idx: usize, inner_slot: usize, size: usize, mutable: bool },
+    FinalizeSlice { slot_idx: usize, inner_slot: usize, mutable: bool },
+    FinalizeTuple { slot_idx: usize, inner_slots: Vec<usize>, mutable: bool },
+    FinalizeReference { slot_idx: usize, inner_slot: usize },
 }
 
 // ------------------------------------------------------------
@@ -208,26 +189,26 @@ const INTEGER_PARAMS: [(u8, bool); 10] = [
     (64, true),
 ];
 
-const VISIBILITIES: [Visibility; 3] = [
-    Visibility::Private,
-    Visibility::PublicCrate,
-    Visibility::Public,
-];
+const VISIBILITIES: [Visibility; 3] =
+    [Visibility::Private, Visibility::PublicCrate, Visibility::Public];
 
 // ------------------------------------------------------------
 // Type Implementation
 // ------------------------------------------------------------
 
 impl Type {
-    // My first approach was to use recursion like `Type::random() -> Array -> Type::random() -> ...`
-    // The problem is this made the stack implode when generating deeply nested types (e.g., `[[[Field; 3]; 2]; ...]`)
+    // My first approach was to use recursion like `Type::random() -> Array -> Type::random() ->
+    // ...` The problem is this made the stack implode when generating deeply nested types
+    // (e.g., `[[[Field; 3]; 2]; ...]`)
     //
     // ## The Solution
-    // Instead of recursion, we use a work queue on the heap, by storing the type of work to do in a `VecDeque<WorkItem>` and traversing it iteratively, like a to-do list. The generation flow is as follows:
+    // Instead of recursion, we use a work queue on the heap, by storing the type of work to do in a
+    // `VecDeque<WorkItem>` and traversing it iteratively, like a to-do list. The generation flow is
+    // as follows:
     //
-    // - `GenerateType`: Decides what type to create. Primitives go directly
-    //      into their slot. Compound types reserve slots for children and push
-    //      both `GenerateType` (for children) and `Finalize*` (to assemble)
+    // - `GenerateType`: Decides what type to create. Primitives go directly into their slot.
+    //   Compound types reserve slots for children and push both `GenerateType` (for children) and
+    //   `Finalize*` (to assemble)
     // - `Finalize*`: Takes completed children from their slots and assembles the parent type
     //
     // Initial:  slots=[None], work=[Generate(0)]
@@ -246,10 +227,7 @@ impl Type {
         // Slot 0 will hold our final result; we grow as needed for nested types
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
-        work.push_back(WorkItem::GenerateType {
-            slot_idx: 0,
-            depth: 0,
-        });
+        work.push_back(WorkItem::GenerateType { slot_idx: 0, depth: 0 });
 
         while let Some(item) = work.pop_front() {
             match item {
@@ -378,10 +356,7 @@ impl Type {
                             let inner_slot = slots.len();
                             slots.push(None);
 
-                            work.push_front(WorkItem::FinalizeReference {
-                                slot_idx,
-                                inner_slot,
-                            });
+                            work.push_front(WorkItem::FinalizeReference { slot_idx, inner_slot });
                             work.push_front(WorkItem::GenerateType {
                                 slot_idx: inner_slot,
                                 depth: depth + 1,
@@ -390,41 +365,18 @@ impl Type {
                         _ => unreachable!(),
                     }
                 }
-                WorkItem::FinalizeArray {
-                    slot_idx,
-                    inner_slot,
-                    size,
-                    mutable,
-                } => {
-                    let inner = slots[inner_slot]
-                        .take()
-                        .expect("inner type should be ready");
-                    slots[slot_idx] = Some(Type::Array(Array {
-                        ty: Box::new(inner),
-                        size,
-                        mutable,
-                    }));
+                WorkItem::FinalizeArray { slot_idx, inner_slot, size, mutable } => {
+                    let inner = slots[inner_slot].take().expect("inner type should be ready");
+                    slots[slot_idx] =
+                        Some(Type::Array(Array { ty: Box::new(inner), size, mutable }));
                 }
 
-                WorkItem::FinalizeSlice {
-                    slot_idx,
-                    inner_slot,
-                    mutable,
-                } => {
-                    let inner = slots[inner_slot]
-                        .take()
-                        .expect("inner type should be ready");
-                    slots[slot_idx] = Some(Type::Slice(Slice {
-                        ty: Box::new(inner),
-                        mutable,
-                    }));
+                WorkItem::FinalizeSlice { slot_idx, inner_slot, mutable } => {
+                    let inner = slots[inner_slot].take().expect("inner type should be ready");
+                    slots[slot_idx] = Some(Type::Slice(Slice { ty: Box::new(inner), mutable }));
                 }
 
-                WorkItem::FinalizeTuple {
-                    slot_idx,
-                    inner_slots,
-                    mutable,
-                } => {
+                WorkItem::FinalizeTuple { slot_idx, inner_slots, mutable } => {
                     let inner: Vec<Type> = inner_slots
                         .iter()
                         .map(|&s| slots[s].take().expect("inner type should be ready"))
@@ -432,16 +384,9 @@ impl Type {
                     slots[slot_idx] = Some(Type::Tuple(Tuple { inner, mutable }));
                 }
 
-                WorkItem::FinalizeReference {
-                    slot_idx,
-                    inner_slot,
-                } => {
-                    let inner = slots[inner_slot]
-                        .take()
-                        .expect("inner type should be ready");
-                    slots[slot_idx] = Some(Type::Reference(Reference {
-                        ty: Box::new(inner),
-                    }));
+                WorkItem::FinalizeReference { slot_idx, inner_slot } => {
+                    let inner = slots[inner_slot].take().expect("inner type should be ready");
+                    slots[slot_idx] = Some(Type::Reference(Reference { ty: Box::new(inner) }));
                 }
             }
         }
@@ -499,9 +444,7 @@ impl Type {
 impl Field {
     #[inline]
     pub fn random(random: &mut impl Rng, ctx: &Context) -> Self {
-        Self {
-            mutable: random.random_bool(ctx.mutable_probability),
-        }
+        Self { mutable: random.random_bool(ctx.mutable_probability) }
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
@@ -522,11 +465,7 @@ impl Integer {
     #[inline]
     pub fn random(random: &mut impl Rng, ctx: &Context) -> Self {
         let (bits, signed) = *random.choice(&INTEGER_PARAMS);
-        Self {
-            bits,
-            signed,
-            mutable: random.random_bool(ctx.mutable_probability),
-        }
+        Self { bits, signed, mutable: random.random_bool(ctx.mutable_probability) }
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
@@ -550,11 +489,7 @@ impl Integer {
                 value.to_string()
             }
         } else {
-            let max = if self.bits == 128 {
-                u128::MAX
-            } else {
-                (1u128 << self.bits) - 1
-            };
+            let max = if self.bits == 128 { u128::MAX } else { (1u128 << self.bits) - 1 };
 
             let value = if bernoulli(ctx.boundary_value_probability, random) {
                 *random.choice(&[0, 1, max])
@@ -570,19 +505,12 @@ impl Integer {
 impl Boolean {
     #[inline]
     pub fn random(random: &mut impl Rng, ctx: &Context) -> Self {
-        Self {
-            mutable: random.random_bool(ctx.mutable_probability),
-        }
+        Self { mutable: random.random_bool(ctx.mutable_probability) }
     }
 
     #[inline]
     pub fn random_value(&self, random: &mut impl Rng) -> String {
-        if random.random_bool(0.5) {
-            "true"
-        } else {
-            "false"
-        }
-        .into()
+        if random.random_bool(0.5) { "true" } else { "false" }.into()
     }
 }
 
@@ -626,9 +554,7 @@ impl Array {
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let elems: Vec<_> = (0..self.size)
-            .map(|_| self.ty.random_value(random, ctx))
-            .collect();
+        let elems: Vec<_> = (0..self.size).map(|_| self.ty.random_value(random, ctx)).collect();
         format!("[{}]", elems.join(", "))
     }
 }
@@ -644,9 +570,7 @@ impl Slice {
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let size = random.random_range(0..ctx.max_element_count);
-        let elems: Vec<_> = (0..size)
-            .map(|_| self.ty.random_value(random, ctx))
-            .collect();
+        let elems: Vec<_> = (0..size).map(|_| self.ty.random_value(random, ctx)).collect();
         format!("&[{}]", elems.join(", "))
     }
 }
@@ -656,19 +580,13 @@ impl Tuple {
         let inner_ctx = ctx.inner_type();
         let size = random.random_range(ctx.min_element_count..ctx.max_element_count);
         Self {
-            inner: (0..size)
-                .map(|_| Type::random(random, &inner_ctx, structs))
-                .collect(),
+            inner: (0..size).map(|_| Type::random(random, &inner_ctx, structs)).collect(),
             mutable: random.random_bool(ctx.mutable_probability),
         }
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let elems: Vec<_> = self
-            .inner
-            .iter()
-            .map(|e| e.random_value(random, ctx))
-            .collect();
+        let elems: Vec<_> = self.inner.iter().map(|e| e.random_value(random, ctx)).collect();
         format!("({})", elems.join(", "))
     }
 }
@@ -708,9 +626,7 @@ impl StructField {
 impl Reference {
     pub fn random(random: &mut impl Rng, ctx: &Context, structs: &[Struct]) -> Self {
         let inner = ctx.inner_type();
-        Self {
-            ty: Box::new(Type::random(random, &inner, structs)),
-        }
+        Self { ty: Box::new(Type::random(random, &inner, structs)) }
     }
 
     #[inline]

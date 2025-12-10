@@ -1,10 +1,7 @@
 pub mod blockchain;
 pub mod builders;
 pub mod circuits;
-pub mod evm;
 pub mod math;
 pub mod mutations;
-pub mod net;
-pub mod rpc;
 pub mod transactions;
 pub mod utils;

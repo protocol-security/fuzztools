@@ -24,15 +24,10 @@ impl SignedTransaction {
         let mut out = Vec::with_capacity(length);
         if self.transaction.tx_type == 0 {
             // Encode the header
-            let payload_length = self.transaction.fields_length()
-                + self.signature.rlp_rs_len()
-                + self
-                    .to_eip155_value(self.signature.v(), self.transaction.chain_id)
-                    .length();
-            let header = Header {
-                list: true,
-                payload_length,
-            };
+            let payload_length = self.transaction.fields_length() +
+                self.signature.rlp_rs_len() +
+                self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length();
+            let header = Header { list: true, payload_length };
             header.encode(&mut out);
 
             // Encode the transaction fields
@@ -48,13 +43,10 @@ impl SignedTransaction {
             out.put_u8(self.transaction.tx_type);
 
             // Encode the header
-            let payload_length = self.transaction.fields_length()
-                + self.signature.rlp_rs_len()
-                + self.signature.v().length();
-            let header = Header {
-                list: true,
-                payload_length,
-            };
+            let payload_length = self.transaction.fields_length() +
+                self.signature.rlp_rs_len() +
+                self.signature.v().length();
+            let header = Header { list: true, payload_length };
             header.encode(&mut out);
 
             // Encode the transaction fields
@@ -69,18 +61,14 @@ impl SignedTransaction {
 
     // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html
     fn rlp_encoded_length_with_signature(&self) -> usize {
-        let payload_length = self.transaction.fields_length()
-            + self.signature.rlp_rs_len()
-            + if self.transaction.tx_type == 0 {
-                self.to_eip155_value(self.signature.v(), self.transaction.chain_id)
-                    .length()
+        let payload_length = self.transaction.fields_length() +
+            self.signature.rlp_rs_len() +
+            if self.transaction.tx_type == 0 {
+                self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length()
             } else {
                 self.signature.v().length()
             };
-        let header = Header {
-            list: true,
-            payload_length,
-        };
+        let header = Header { list: true, payload_length };
 
         header.length_with_payload()
     }

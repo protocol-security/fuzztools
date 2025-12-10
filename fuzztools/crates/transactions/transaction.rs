@@ -80,10 +80,7 @@ impl Transaction {
         }
 
         // Encode RLP header
-        let header = Header {
-            list: true,
-            payload_length: length,
-        };
+        let header = Header { list: true, payload_length: length };
         header.encode(&mut out);
 
         // Encode transaction fields
@@ -128,33 +125,25 @@ impl Transaction {
     pub fn fields_length(&self) -> usize {
         // For legacy transactions (type 0), chain_id is NOT included in the regular fields
         // It's included in the EIP-155 signing fields
-        let chain_id_len = if self.tx_type == 0 {
-            0
-        } else {
-            field_len!(self.chain_id)
-        };
+        let chain_id_len = if self.tx_type == 0 { 0 } else { field_len!(self.chain_id) };
 
         // CREATE txs have `to` set as `[]`, which is encoded as `0x80`
         // That's why the `1` in there
-        let to_len = if let Some(to) = &self.to {
-            to.length()
-        } else {
-            1
-        };
+        let to_len = if let Some(to) = &self.to { to.length() } else { 1 };
 
-        chain_id_len
-            + field_len!(self.nonce)
-            + field_len!(self.max_priority_fee_per_gas)
-            + field_len!(self.max_fee_per_gas)
-            + field_len!(self.gas_price)
-            + field_len!(self.gas_limit)
-            + to_len
-            + field_len!(self.value)
-            + field_len!(self.input)
-            + field_len!(self.access_list)
-            + field_len!(self.max_fee_per_blob_gas)
-            + field_len!(self.blob_versioned_hashes)
-            + field_len!(self.signed_authorization_list)
+        chain_id_len +
+            field_len!(self.nonce) +
+            field_len!(self.max_priority_fee_per_gas) +
+            field_len!(self.max_fee_per_gas) +
+            field_len!(self.gas_price) +
+            field_len!(self.gas_limit) +
+            to_len +
+            field_len!(self.value) +
+            field_len!(self.input) +
+            field_len!(self.access_list) +
+            field_len!(self.max_fee_per_blob_gas) +
+            field_len!(self.blob_versioned_hashes) +
+            field_len!(self.signed_authorization_list)
     }
 
     fn encode_eip155_fields(&self, out: &mut dyn BufMut) {

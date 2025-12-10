@@ -100,10 +100,7 @@ impl Mutable for AccessList {
                 let num_keys = random.random::<u8>(); // @audit max 255 keys
                 let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
-                self.0.push(AccessListItem {
-                    address,
-                    storage_keys,
-                });
+                self.0.push(AccessListItem { address, storage_keys });
             }
             3 => {
                 // Remove a random entry
@@ -131,10 +128,7 @@ impl Mutable for AccessList {
                     let num_keys = random.random::<u8>(); // @audit max 255 keys
                     let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
-                    self.0[idx] = AccessListItem {
-                        address,
-                        storage_keys,
-                    };
+                    self.0[idx] = AccessListItem { address, storage_keys };
                 }
             }
             6 => {
@@ -148,10 +142,7 @@ impl Mutable for AccessList {
                     })
                     .collect();
 
-                self.0.push(AccessListItem {
-                    address,
-                    storage_keys,
-                });
+                self.0.push(AccessListItem { address, storage_keys });
             }
             7 => {
                 // Mutate an element of `self`
@@ -186,11 +177,7 @@ impl Mutable for Vec<Authorization> {
                 let chain_id = U256::random(random);
                 let nonce = random.random();
 
-                self.push(Authorization {
-                    address,
-                    chain_id,
-                    nonce,
-                });
+                self.push(Authorization { address, chain_id, nonce });
             }
             3 => {
                 // Remove a random entry
@@ -218,11 +205,7 @@ impl Mutable for Vec<Authorization> {
                     let chain_id = U256::random(random);
                     let nonce = random.random();
 
-                    self[idx] = Authorization {
-                        address,
-                        chain_id,
-                        nonce,
-                    };
+                    self[idx] = Authorization { address, chain_id, nonce };
                 }
             }
             6 => {
@@ -231,11 +214,7 @@ impl Mutable for Vec<Authorization> {
                 let chain_id = U256::from(*random.choice(&INTERESTING_CHAIN_IDS));
                 let nonce = random.random();
 
-                self.push(Authorization {
-                    address,
-                    chain_id,
-                    nonce,
-                });
+                self.push(Authorization { address, chain_id, nonce });
             }
             7 => {
                 // Mutate an authorization's address

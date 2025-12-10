@@ -94,9 +94,6 @@ impl Context {
     /// Returns the context being used to create sub-expressions (binary operations, unary
     /// operations, etc.)
     pub fn inner_expression(&self) -> Self {
-        Self {
-            expression_depth: self.expression_depth + 1,
-            ..*self
-        }
+        Self { expression_depth: self.expression_depth + 1, ..*self }
     }
 }

@@ -1,13 +1,12 @@
 mod app;
 mod constants;
 
-use crate::app::App;
 use anyhow::Result;
+use app::App;
 use clap::Parser;
 use constants::{TransactionType, GREEN, HEADER, RED, RESET};
 use rand::{rngs::SmallRng, SeedableRng};
 
-// @audit move stuff to configs/rakoon.json to better usage
 #[derive(Parser)]
 #[command(
     name = "rakoon",
@@ -34,6 +33,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let mut random = SmallRng::seed_from_u64(cli.seed);
 
     let prelude = format!(
         "{HEADER}\n{GREEN}INFO{RESET}      URL:                    \
@@ -44,12 +44,10 @@ async fn main() -> Result<()> {
         cli.url, cli.key, cli.seed, cli.tx_type, cli.fuzzing,
     );
 
-    // Create the application
-    let mut app = App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, prelude).await?;
-
     // Run the application
-    let mut random = SmallRng::seed_from_u64(cli.seed);
+    let mut app = App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, prelude).await?;
     let result = app.run(&mut random).await;
+
     if let Err(e) = result {
         eprintln!("\n\n\x1b[1;31m[!] Error: {e}\x1b[0m");
     }

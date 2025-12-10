@@ -17,9 +17,6 @@ impl RpcCache {
         let (gas_price, max_priority_fee) =
             tokio::try_join!(node.get_gas_price(), node.get_max_priority_fee_per_gas())?;
 
-        Ok(Self {
-            gas_price,
-            max_priority_fee,
-        })
+        Ok(Self { gas_price, max_priority_fee })
     }
 }

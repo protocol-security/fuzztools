@@ -29,11 +29,7 @@ enum CompileResult {
     /// Compiler returned an error (syntax/type error, not a crash)
     CompileError { indexed_name: String },
     /// Compiler panicked (ICE - Internal Compiler Error)
-    Panic {
-        code: String,
-        indexed_name: String,
-        message: String,
-    },
+    Panic { code: String, indexed_name: String, message: String },
 }
 
 pub struct App {
@@ -63,9 +59,7 @@ pub struct App {
 
 impl App {
     pub fn new(ctx: Context, prelude: String, crash_report_dir: String) -> Result<Self> {
-        let num_workers = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
+        let num_workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
 
         // Bounded channels for backpressure
         let (job_sender, job_receiver) = bounded::<CompileJob>(num_workers * 2);
@@ -154,11 +148,7 @@ impl App {
                 CompileResult::CompileError { .. } => {
                     self.total_errors.fetch_add(1, Ordering::Relaxed);
                 }
-                CompileResult::Panic {
-                    code,
-                    indexed_name,
-                    message,
-                } => {
+                CompileResult::Panic { code, indexed_name, message } => {
                     self.total_panics.fetch_add(1, Ordering::Relaxed);
 
                     // Write panic crash to out folder
@@ -226,11 +216,7 @@ fn worker_loop(receiver: Receiver<CompileJob>, sender: Sender<CompileResult>) {
                     "Unknown panic".to_string()
                 };
 
-                CompileResult::Panic {
-                    code,
-                    indexed_name,
-                    message,
-                }
+                CompileResult::Panic { code, indexed_name, message }
             }
         };
 
@@ -253,7 +239,5 @@ fn compile_snippet(code: &str) -> Result<(), ()> {
     let root_crate_id = prepare_crate(&mut context, file_name);
     let options = CompileOptions::default();
 
-    compile_main(&mut context, root_crate_id, &options, None)
-        .map(|_| ())
-        .map_err(|_| ())
+    compile_main(&mut context, root_crate_id, &options, None).map(|_| ()).map_err(|_| ())
 }

@@ -24,8 +24,10 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use std::{
     io::{self, Write},
     pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio::runtime::Handle;
@@ -82,10 +84,7 @@ impl App {
         // First, deploy our custom contracts
         let key_bytes = hex::decode(key)?;
         let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
-        let deployer = ProviderBuilder::new()
-            .wallet(deployer_signer)
-            .connect(&url)
-            .await?;
+        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
         let access_list_target = AccessListTarget::deploy(&deployer).await?;
         // @todo deploy the other one
 
@@ -108,9 +107,7 @@ impl App {
 
         // Create a rayon threadpool
         let num_cores = std::thread::available_parallelism().unwrap().get();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_cores)
-            .build()?;
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(num_cores).build()?;
 
         // Spawn a background thread that processes transaction
         let rpc_timeout = Duration::from_secs(DEFAULT_RPC_TIMEOUT);

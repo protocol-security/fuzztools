@@ -1,6 +1,8 @@
-use super::context::Context;
-use super::operators::Operator;
-use super::types::{Boolean, Field, Integer, Type};
+use super::{
+    context::Context,
+    operators::Operator,
+    types::{Boolean, Field, Integer, Type},
+};
 use crate::{
     math::random_field_element,
     utils::{random_string, RandomChoice},
@@ -48,11 +50,9 @@ impl ExprType {
     pub fn to_full_type(&self, mutable: bool) -> Option<Type> {
         match self {
             ExprType::Field => Some(Type::Field(Field { mutable })),
-            ExprType::Integer { bits, signed } => Some(Type::Integer(Integer {
-                bits: *bits,
-                signed: *signed,
-                mutable,
-            })),
+            ExprType::Integer { bits, signed } => {
+                Some(Type::Integer(Integer { bits: *bits, signed: *signed, mutable }))
+            }
             ExprType::Boolean => Some(Type::Boolean(Boolean { mutable })),
             _ => None,
         }
@@ -97,9 +97,7 @@ pub struct Scope {
 
 impl Scope {
     pub fn new() -> Self {
-        Self {
-            scopes: vec![Vec::new()],
-        }
+        Self { scopes: vec![Vec::new()] }
     }
 
     /// Push a new scope (entering a block)
@@ -131,18 +129,12 @@ impl Scope {
 
     /// Find variables of a specific type
     pub fn variables_of_type(&self, ty: &ExprType) -> Vec<&Variable> {
-        self.all_variables()
-            .into_iter()
-            .filter(|v| types_compatible(&v.ty, ty))
-            .collect()
+        self.all_variables().into_iter().filter(|v| types_compatible(&v.ty, ty)).collect()
     }
 
     /// Find mutable variables of a specific type
     pub fn mutable_of_type(&self, ty: &ExprType) -> Vec<&Variable> {
-        self.mutable_variables()
-            .into_iter()
-            .filter(|v| types_compatible(&v.ty, ty))
-            .collect()
+        self.mutable_variables().into_iter().filter(|v| types_compatible(&v.ty, ty)).collect()
     }
 
     /// Check if a variable name exists
@@ -161,14 +153,8 @@ fn types_compatible(a: &ExprType, b: &ExprType) -> bool {
         (ExprType::Field, ExprType::Field) => true,
         (ExprType::Boolean, ExprType::Boolean) => true,
         (
-            ExprType::Integer {
-                bits: b1,
-                signed: s1,
-            },
-            ExprType::Integer {
-                bits: b2,
-                signed: s2,
-            },
+            ExprType::Integer { bits: b1, signed: s1 },
+            ExprType::Integer { bits: b2, signed: s2 },
         ) => b1 == b2 && s1 == s2,
         (ExprType::Unit, ExprType::Unit) => true,
         _ => false,
@@ -207,11 +193,7 @@ pub enum ExprKind {
     Variable(String),
 
     /// Binary operation: `a + b`
-    Binary {
-        op: Operator,
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
+    Binary { op: Operator, left: Box<Expr>, right: Box<Expr> },
 
     /// Unary operation: `!x`, `-y`
     Unary { op: Operator, operand: Box<Expr> },
@@ -233,49 +215,25 @@ pub enum ExprKind {
 #[derive(Clone)]
 pub enum Statement {
     /// Let binding: `let name: ty = expr;` or `let name = expr;`
-    Let {
-        name: String,
-        ty: Option<Type>,
-        value: Expr,
-        mutable: bool,
-    },
+    Let { name: String, ty: Option<Type>, value: Expr, mutable: bool },
 
     /// Assignment to existing mutable variable: `name = expr;`
     Assign { name: String, value: Expr },
 
     /// Compound assignment: `name += expr;`
-    CompoundAssign {
-        name: String,
-        op: Operator,
-        value: Expr,
-    },
+    CompoundAssign { name: String, op: Operator, value: Expr },
 
     /// Assertion: `assert(condition);` or `assert(condition, "message");`
-    Assert {
-        condition: Expr,
-        message: Option<String>,
-    },
+    Assert { condition: Expr, message: Option<String> },
 
     /// Lambda definition: `let name = |params| body;`
-    Lambda {
-        name: String,
-        params: Vec<(String, ExprType)>,
-        body: Expr,
-    },
+    Lambda { name: String, params: Vec<(String, ExprType)>, body: Expr },
 
     /// If statement: `if cond { ... } else if cond { ... } else { ... }`
-    If {
-        branches: Vec<(Expr, Block)>,
-        else_block: Option<Block>,
-    },
+    If { branches: Vec<(Expr, Block)>, else_block: Option<Block> },
 
     /// For loop: `for i in start..end { ... }`
-    For {
-        var: String,
-        start: Expr,
-        end: Expr,
-        body: Block,
-    },
+    For { var: String, start: Expr, end: Expr, body: Block },
 
     /// Expression statement (for side effects)
     Expr(Expr),
@@ -299,24 +257,12 @@ impl Operator {
 
     /// Arithmetic operators for integers (includes modulo)
     pub fn arithmetic_integer() -> &'static [Operator] {
-        &[
-            Operator::Add,
-            Operator::Sub,
-            Operator::Mul,
-            Operator::Div,
-            Operator::Mod,
-        ]
+        &[Operator::Add, Operator::Sub, Operator::Mul, Operator::Div, Operator::Mod]
     }
 
     /// Bitwise operators for integers only
     pub fn bitwise() -> &'static [Operator] {
-        &[
-            Operator::And,
-            Operator::Or,
-            Operator::Xor,
-            Operator::Shl,
-            Operator::Shr,
-        ]
+        &[Operator::And, Operator::Or, Operator::Xor, Operator::Shl, Operator::Shr]
     }
 
     /// Comparison operators for integers (full set)
@@ -353,12 +299,7 @@ impl Operator {
 
     /// Compound assignment operators for Field (no modulo)
     pub fn compound_assign_field() -> &'static [Operator] {
-        &[
-            Operator::AddAssign,
-            Operator::SubAssign,
-            Operator::MulAssign,
-            Operator::DivAssign,
-        ]
+        &[Operator::AddAssign, Operator::SubAssign, Operator::MulAssign, Operator::DivAssign]
     }
 
     /// Compound assignment operators for integers
@@ -390,11 +331,7 @@ impl Operator {
 
 enum ExprWorkItem {
     /// Generate an expression of given type at slot
-    Generate {
-        slot_idx: usize,
-        target_type: ExprType,
-        depth: usize,
-    },
+    Generate { slot_idx: usize, target_type: ExprType, depth: usize },
     /// Finalize a binary expression
     FinalizeBinary {
         slot_idx: usize,
@@ -404,21 +341,11 @@ enum ExprWorkItem {
         result_type: ExprType,
     },
     /// Finalize a unary expression
-    FinalizeUnary {
-        slot_idx: usize,
-        op: Operator,
-        operand_slot: usize,
-        result_type: ExprType,
-    },
+    FinalizeUnary { slot_idx: usize, op: Operator, operand_slot: usize, result_type: ExprType },
     /// Finalize parenthesized expression
     FinalizeParen { slot_idx: usize, inner_slot: usize },
     /// Finalize function call
-    FinalizeCall {
-        slot_idx: usize,
-        func: String,
-        arg_slots: Vec<usize>,
-        result_type: ExprType,
-    },
+    FinalizeCall { slot_idx: usize, func: String, arg_slots: Vec<usize>, result_type: ExprType },
     /// Finalize lambda call
     FinalizeLambdaCall {
         slot_idx: usize,
@@ -444,19 +371,11 @@ impl Expr {
         let mut slots: Vec<Option<Expr>> = vec![None];
         let mut work: VecDeque<ExprWorkItem> = VecDeque::new();
 
-        work.push_back(ExprWorkItem::Generate {
-            slot_idx: 0,
-            target_type,
-            depth: 0,
-        });
+        work.push_back(ExprWorkItem::Generate { slot_idx: 0, target_type, depth: 0 });
 
         while let Some(item) = work.pop_front() {
             match item {
-                ExprWorkItem::Generate {
-                    slot_idx,
-                    target_type,
-                    depth,
-                } => {
+                ExprWorkItem::Generate { slot_idx, target_type, depth } => {
                     // Base case: max depth reached
                     if depth >= ctx.max_expression_depth {
                         slots[slot_idx] = Some(Self::random_leaf(random, ctx, &target_type, scope));
@@ -579,10 +498,7 @@ impl Expr {
                                     ExprType::Integer { bits, signed },
                                 )
                             } else {
-                                (
-                                    *random.choice(Operator::comparison_field()),
-                                    ExprType::Field,
-                                )
+                                (*random.choice(Operator::comparison_field()), ExprType::Field)
                             };
 
                             let left_slot = slots.len();
@@ -676,10 +592,7 @@ impl Expr {
                             let inner_slot = slots.len();
                             slots.push(None);
 
-                            work.push_front(ExprWorkItem::FinalizeParen {
-                                slot_idx,
-                                inner_slot,
-                            });
+                            work.push_front(ExprWorkItem::FinalizeParen { slot_idx, inner_slot });
                             work.push_front(ExprWorkItem::Generate {
                                 slot_idx: inner_slot,
                                 target_type,
@@ -758,73 +671,37 @@ impl Expr {
                     let left = slots[left_slot].take().unwrap();
                     let right = slots[right_slot].take().unwrap();
                     slots[slot_idx] = Some(Expr {
-                        kind: ExprKind::Binary {
-                            op,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
+                        kind: ExprKind::Binary { op, left: Box::new(left), right: Box::new(right) },
                         ty: result_type,
                     });
                 }
 
-                ExprWorkItem::FinalizeUnary {
-                    slot_idx,
-                    op,
-                    operand_slot,
-                    result_type,
-                } => {
+                ExprWorkItem::FinalizeUnary { slot_idx, op, operand_slot, result_type } => {
                     let operand = slots[operand_slot].take().unwrap();
                     slots[slot_idx] = Some(Expr {
-                        kind: ExprKind::Unary {
-                            op,
-                            operand: Box::new(operand),
-                        },
+                        kind: ExprKind::Unary { op, operand: Box::new(operand) },
                         ty: result_type,
                     });
                 }
 
-                ExprWorkItem::FinalizeParen {
-                    slot_idx,
-                    inner_slot,
-                } => {
+                ExprWorkItem::FinalizeParen { slot_idx, inner_slot } => {
                     let inner = slots[inner_slot].take().unwrap();
                     let ty = inner.ty.clone();
-                    slots[slot_idx] = Some(Expr {
-                        kind: ExprKind::Paren(Box::new(inner)),
-                        ty,
-                    });
+                    slots[slot_idx] = Some(Expr { kind: ExprKind::Paren(Box::new(inner)), ty });
                 }
 
-                ExprWorkItem::FinalizeCall {
-                    slot_idx,
-                    func,
-                    arg_slots,
-                    result_type,
-                } => {
-                    let args: Vec<Expr> = arg_slots
-                        .iter()
-                        .map(|&s| slots[s].take().unwrap())
-                        .collect();
-                    slots[slot_idx] = Some(Expr {
-                        kind: ExprKind::Call { func, args },
-                        ty: result_type,
-                    });
+                ExprWorkItem::FinalizeCall { slot_idx, func, arg_slots, result_type } => {
+                    let args: Vec<Expr> =
+                        arg_slots.iter().map(|&s| slots[s].take().unwrap()).collect();
+                    slots[slot_idx] =
+                        Some(Expr { kind: ExprKind::Call { func, args }, ty: result_type });
                 }
 
-                ExprWorkItem::FinalizeLambdaCall {
-                    slot_idx,
-                    lambda,
-                    arg_slots,
-                    result_type,
-                } => {
-                    let args: Vec<Expr> = arg_slots
-                        .iter()
-                        .map(|&s| slots[s].take().unwrap())
-                        .collect();
-                    slots[slot_idx] = Some(Expr {
-                        kind: ExprKind::LambdaCall { lambda, args },
-                        ty: result_type,
-                    });
+                ExprWorkItem::FinalizeLambdaCall { slot_idx, lambda, arg_slots, result_type } => {
+                    let args: Vec<Expr> =
+                        arg_slots.iter().map(|&s| slots[s].take().unwrap()).collect();
+                    slots[slot_idx] =
+                        Some(Expr { kind: ExprKind::LambdaCall { lambda, args }, ty: result_type });
                 }
             }
         }
@@ -844,10 +721,7 @@ impl Expr {
             let matching = scope.variables_of_type(target_type);
             if !matching.is_empty() {
                 let var = *random.choice(&matching);
-                return Expr {
-                    kind: ExprKind::Variable(var.name.clone()),
-                    ty: target_type.clone(),
-                };
+                return Expr { kind: ExprKind::Variable(var.name.clone()), ty: target_type.clone() };
             }
         }
 
@@ -865,25 +739,14 @@ impl Expr {
                 )
                 .to_string()
             }
-            ExprType::Integer { bits, signed } => Integer {
-                bits: *bits,
-                signed: *signed,
-                mutable: false,
+            ExprType::Integer { bits, signed } => {
+                Integer { bits: *bits, signed: *signed, mutable: false }.random_value(random, ctx)
             }
-            .random_value(random, ctx),
-            ExprType::Boolean => if random.random_bool(0.5) {
-                "true"
-            } else {
-                "false"
-            }
-            .to_string(),
+            ExprType::Boolean => if random.random_bool(0.5) { "true" } else { "false" }.to_string(),
             _ => "()".to_string(),
         };
 
-        Expr {
-            kind: ExprKind::Literal(literal),
-            ty: target_type.clone(),
-        }
+        Expr { kind: ExprKind::Literal(literal), ty: target_type.clone() }
     }
 }
 
@@ -950,25 +813,12 @@ impl Statement {
         let value = Expr::random(random, ctx, expr_type.clone(), scope, functions);
 
         // Optionally include type annotation
-        let ty = if random.random_bool(0.5) {
-            expr_type.to_full_type(mutable)
-        } else {
-            None
-        };
+        let ty = if random.random_bool(0.5) { expr_type.to_full_type(mutable) } else { None };
 
         // Add to scope
-        scope.add(Variable {
-            name: name.clone(),
-            ty: expr_type,
-            mutable,
-        });
+        scope.add(Variable { name: name.clone(), ty: expr_type, mutable });
 
-        Statement::Let {
-            name,
-            ty,
-            value,
-            mutable,
-        }
+        Statement::Let { name, ty, value, mutable }
     }
 
     /// Generate an assignment to existing mutable variable: `name = expr;`
@@ -987,10 +837,7 @@ impl Statement {
         let var = *random.choice(&mutable_vars);
         let value = Expr::random(random, ctx, var.ty.clone(), scope, functions);
 
-        Statement::Assign {
-            name: var.name.clone(),
-            value,
-        }
+        Statement::Assign { name: var.name.clone(), value }
     }
 
     /// Generate a compound assignment: `name += expr;`
@@ -1000,11 +847,8 @@ impl Statement {
         scope: &Scope,
         functions: &[FunctionDef],
     ) -> Self {
-        let mutable_vars: Vec<_> = scope
-            .mutable_variables()
-            .into_iter()
-            .filter(|v| v.ty.is_numeric())
-            .collect();
+        let mutable_vars: Vec<_> =
+            scope.mutable_variables().into_iter().filter(|v| v.ty.is_numeric()).collect();
 
         if mutable_vars.is_empty() {
             return Self::random_let(random, ctx, &mut scope.clone(), functions);
@@ -1023,11 +867,7 @@ impl Statement {
 
         let value = Expr::random(random, ctx, var.ty.clone(), scope, functions);
 
-        Statement::CompoundAssign {
-            name: var.name.clone(),
-            op,
-            value,
-        }
+        Statement::CompoundAssign { name: var.name.clone(), op, value }
     }
 
     /// Generate an assert statement: `assert(condition);` or `assert(condition, "msg");`
@@ -1075,11 +915,7 @@ impl Statement {
         let mut lambda_scope = scope.clone();
         lambda_scope.push();
         for (pname, pty) in &params {
-            lambda_scope.add(Variable {
-                name: pname.clone(),
-                ty: pty.clone(),
-                mutable: false,
-            });
+            lambda_scope.add(Variable { name: pname.clone(), ty: pty.clone(), mutable: false });
         }
 
         // Generate return type and body
@@ -1095,11 +931,7 @@ impl Statement {
             params: params.iter().map(|(_, t)| t.clone()).collect(),
             ret: Box::new(ret_type),
         };
-        scope.add(Variable {
-            name: name.clone(),
-            ty: lambda_type,
-            mutable: false,
-        });
+        scope.add(Variable { name: name.clone(), ty: lambda_type, mutable: false });
 
         Statement::Lambda { name, params, body }
     }
@@ -1129,10 +961,7 @@ impl Statement {
             None
         };
 
-        Statement::If {
-            branches,
-            else_block,
-        }
+        Statement::If { branches, else_block }
     }
 
     /// Generate a for loop: `for i in start..end { ... }`
@@ -1151,17 +980,11 @@ impl Statement {
 
         let start = Expr {
             kind: ExprKind::Literal(start_val.to_string()),
-            ty: ExprType::Integer {
-                bits: 64,
-                signed: false,
-            },
+            ty: ExprType::Integer { bits: 64, signed: false },
         };
         let end = Expr {
             kind: ExprKind::Literal(end_val.to_string()),
-            ty: ExprType::Integer {
-                bits: 64,
-                signed: false,
-            },
+            ty: ExprType::Integer { bits: 64, signed: false },
         };
 
         // Create body scope with loop variable
@@ -1169,21 +992,13 @@ impl Statement {
         body_scope.push();
         body_scope.add(Variable {
             name: var.clone(),
-            ty: ExprType::Integer {
-                bits: 64,
-                signed: false,
-            },
+            ty: ExprType::Integer { bits: 64, signed: false },
             mutable: false,
         });
 
         let body = Block::random(random, ctx, &mut body_scope, functions, depth + 1);
 
-        Statement::For {
-            var,
-            start,
-            end,
-            body,
-        }
+        Statement::For { var, start, end, body }
     }
 }
 
@@ -1266,12 +1081,7 @@ impl Statement {
     /// Format statement with proper indentation for nested blocks
     pub fn format_indented(&self, indent: usize) -> String {
         match self {
-            Statement::Let {
-                name,
-                ty,
-                value,
-                mutable,
-            } => {
+            Statement::Let { name, ty, value, mutable } => {
                 let mut_kw = if *mutable { "mut " } else { "" };
                 match ty {
                     Some(t) => format!("let {}{}: {} = {};", mut_kw, name, t, value),
@@ -1289,16 +1099,11 @@ impl Statement {
                 None => format!("assert({});", condition),
             },
             Statement::Lambda { name, params, body } => {
-                let params_str: Vec<_> = params
-                    .iter()
-                    .map(|(n, t)| format!("{}: {}", n, t))
-                    .collect();
+                let params_str: Vec<_> =
+                    params.iter().map(|(n, t)| format!("{}: {}", n, t)).collect();
                 format!("let {} = |{}| {};", name, params_str.join(", "), body)
             }
-            Statement::If {
-                branches,
-                else_block,
-            } => {
+            Statement::If { branches, else_block } => {
                 let mut result = String::new();
 
                 for (i, (cond, block)) in branches.iter().enumerate() {
@@ -1319,19 +1124,8 @@ impl Statement {
 
                 result
             }
-            Statement::For {
-                var,
-                start,
-                end,
-                body,
-            } => {
-                format!(
-                    "for {} in {}..{} {}",
-                    var,
-                    start,
-                    end,
-                    body.format_indented(indent)
-                )
+            Statement::For { var, start, end, body } => {
+                format!("for {} in {}..{} {}", var, start, end, body.format_indented(indent))
             }
             Statement::Expr(expr) => format!("{};", expr),
         }

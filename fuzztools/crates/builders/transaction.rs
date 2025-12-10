@@ -27,13 +27,7 @@ impl TransactionBuilder {
     pub async fn new(access_list_target: Address, node: &RootProvider) -> Result<Self> {
         let cache = RpcCache::fetch(node).await?;
         let chain_id = node.get_chain_id().await?;
-        Ok(Self {
-            chain_id,
-            access_list_target,
-            signer_nonce: 0,
-            auth_nonce: 0,
-            cache,
-        })
+        Ok(Self { chain_id, access_list_target, signer_nonce: 0, auth_nonce: 0, cache })
     }
 
     /// Refreshes the cache by fetching it from the given node
@@ -74,10 +68,7 @@ impl TransactionBuilder {
         // we just add a single entry
         let key_str = random.choice(&STORAGE_KEYS);
         let key = FixedBytes::from_hex(key_str).unwrap();
-        let item = AccessListItem {
-            address: self.access_list_target,
-            storage_keys: vec![key],
-        };
+        let item = AccessListItem { address: self.access_list_target, storage_keys: vec![key] };
 
         (AccessList(vec![item]), Bytes::from(key))
     }
@@ -146,11 +137,7 @@ impl TransactionBuilder {
 
         let delegatee = Address::random(random);
         let chain_id = U256::from(self.chain_id);
-        let authorization = Authorization {
-            chain_id,
-            address: delegatee,
-            nonce: self.auth_nonce,
-        };
+        let authorization = Authorization { chain_id, address: delegatee, nonce: self.auth_nonce };
 
         tx.tx_type = 4;
         tx.max_fee_per_gas = Some(max_fee_per_gas);

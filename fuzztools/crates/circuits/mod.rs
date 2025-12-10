@@ -40,13 +40,8 @@ impl Circuit {
         for _ in 0..size {
             let g = Global::random(random, &ctx, &structs);
             code.push_str(
-                format!(
-                    "global {}: {} = {};\n\n",
-                    g.name,
-                    g.ty,
-                    g.ty.random_value(random, &ctx)
-                )
-                .as_str(),
+                format!("global {}: {} = {};\n\n", g.name, g.ty, g.ty.random_value(random, &ctx))
+                    .as_str(),
             );
             globals.push(g);
         }
@@ -97,11 +92,8 @@ impl Circuit {
         }
 
         // Assemble main function
-        let inputs_str = inputs
-            .iter()
-            .map(|i| format!("{}: {}", i.name, i.ty))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let inputs_str =
+            inputs.iter().map(|i| format!("{}: {}", i.name, i.ty)).collect::<Vec<_>>().join(", ");
         code.push_str(
             format!("fn main({}) {{\n{}\n}}", inputs_str, statements.join("\n")).as_str(),
         );
@@ -164,10 +156,7 @@ impl Circuit {
         statements.push(format!("    {}", ret_expr));
 
         // Format parameters
-        let params_str: Vec<_> = params
-            .iter()
-            .map(|(n, t)| format!("{}: {}", n, t))
-            .collect();
+        let params_str: Vec<_> = params.iter().map(|(n, t)| format!("{}: {}", n, t)).collect();
 
         // Assemble function code
         let func_code = format!(
@@ -199,10 +188,7 @@ impl Circuit {
     fn type_to_expr_type(ty: &Type) -> Option<ExprType> {
         match ty {
             Type::Field(_) => Some(ExprType::Field),
-            Type::Integer(i) => Some(ExprType::Integer {
-                bits: i.bits,
-                signed: i.signed,
-            }),
+            Type::Integer(i) => Some(ExprType::Integer { bits: i.bits, signed: i.signed }),
             Type::Boolean(_) => Some(ExprType::Boolean),
             // Complex types like arrays, tuples, structs, etc. don't map to simple ExprType
             _ => None,
