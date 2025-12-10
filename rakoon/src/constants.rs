@@ -15,6 +15,7 @@ pub(crate) const HEADER: &str = "
 pub(crate) const RED: &str = "\x1b[31m";
 pub(crate) const GREEN: &str = "\x1b[32m";
 pub(crate) const RESET: &str = "\x1b[0m";
+pub(crate) const CLEAR_SCREEN: &str = "\x1b[2J\x1b[H";
 
 /// Bob's private key constant, used for signing auths in EIP-7702 transactions
 pub(crate) const AUTH_PRIVATE_KEY: &str =
@@ -31,4 +32,4 @@ pub(crate) enum TransactionType {
 
 pub(crate) const DEFAULT_TXS_PER_CORE: u64 = 100;
 pub(crate) const DEFAULT_CHANNEL_CAPACITY: usize = 500;
-pub(crate) const DEFAULT_RPC_TIMEOUT: u64 = 1; // seconds
+pub(crate) const DEFAULT_RPC_TIMEOUT: u64 = 5; // seconds
