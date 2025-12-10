@@ -213,7 +213,8 @@ impl App {
                             return Err(());
                         }
 
-                        // Send the transaction to the node with a timeout to avoid waiting indefinitely in case of a crash
+                        // Send the transaction to the node with a timeout to avoid waiting
+                        // indefinitely in case of a crash
                         let rpc = handle.block_on(async {
                             tokio::time::timeout(
                                 timeout,
@@ -222,7 +223,8 @@ impl App {
                             .await
                         });
 
-                        // If the node is unresponsive or the connection is lost, set the `connection_lost` flag and exit
+                        // If the node is unresponsive or the connection is lost, set the
+                        // `connection_lost` flag and exit
                         match rpc {
                             Err(_) | Ok(Err(TransportError::Transport(_))) => {
                                 connection_lost.store(true, Ordering::SeqCst);
@@ -270,7 +272,12 @@ impl App {
                 .iter()
                 .map(|auth| {
                     let sig = auth_signer.sign_hash_sync(&auth.signature_hash()).unwrap();
-                    SignedAuthorization::new_unchecked(auth.clone(), sig.v() as u8, sig.r(), sig.s())
+                    SignedAuthorization::new_unchecked(
+                        auth.clone(),
+                        sig.v() as u8,
+                        sig.r(),
+                        sig.s(),
+                    )
                 })
                 .collect()
         });
