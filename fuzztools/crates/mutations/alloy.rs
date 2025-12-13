@@ -134,8 +134,7 @@ impl Mutable for AccessList {
                 let num_keys = random.random::<u8>(); // @audit max 255 keys
                 let storage_keys = (0..num_keys)
                     .map(|_| {
-                        let key_str = *STORAGE_KEYS.choose(random).unwrap();
-                        FixedBytes::from_hex(key_str).unwrap()
+                        *STORAGE_KEYS.choose(random).unwrap()
                     })
                     .collect();
 

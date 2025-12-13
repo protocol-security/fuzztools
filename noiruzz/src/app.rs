@@ -21,7 +21,7 @@ use std::{
 
 /// Job sent to worker threads
 struct CompileJob {
-    code: String,
+    circuit: Circuit,
     indexed_name: String,
 }
 
@@ -32,7 +32,7 @@ enum CompileResult {
     /// Compiler returned an error (syntax/type error, not a crash)
     CompileError { indexed_name: String },
     /// Compiler panicked (ICE - Internal Compiler Error)
-    Panic { code: String, indexed_name: String, message: String },
+    Panic { circuit: Circuit, indexed_name: String, message: String },
 }
 
 pub struct App {
@@ -110,22 +110,22 @@ impl App {
     pub fn run(&mut self, random: &mut impl Rng) -> Result<()> {
         let builder = CircuitBuilder {};
         loop {
-            // @todo self.drain_results();
+            self.drain_results();
             let circuit = builder.circuit(random, &self.ctx);
 
             // @todo mutate the code
 
-            /*
+            
             let indexed_name = format!("circuit_{}", self.total_programs);
             let debug_dir = format!("{}/debug/{}", self.crash_report_dir, indexed_name);
             let _ = Command::new("nargo").args(["new", &debug_dir]).output();
-            let _ = fs::write(format!("{}/src/main.nr", debug_dir), &code);
+            let _ = fs::write(format!("{}/src/main.nr", debug_dir), &circuit);
 
-            let job = CompileJob { code, indexed_name };
+            let job = CompileJob { circuit, indexed_name };
             if self.job_sender.send(job).is_err() {
                 break; // All workers died
             }
-            */
+            
 
             self.total_programs += 1;
             self.programs_since_last_update += 1;
@@ -151,13 +151,13 @@ impl App {
                 CompileResult::CompileError { .. } => {
                     self.total_errors.fetch_add(1, Ordering::Relaxed);
                 }
-                CompileResult::Panic { code, indexed_name, message } => {
+                CompileResult::Panic { circuit, indexed_name, message } => {
                     self.total_panics.fetch_add(1, Ordering::Relaxed);
 
                     // Write panic crash to out folder
                     let project_dir = format!("{}/out/{}", self.crash_report_dir, indexed_name);
                     let _ = Command::new("nargo").args(["new", &project_dir]).output();
-                    let _ = fs::write(format!("{}/src/main.nr", project_dir), &code);
+                    let _ = fs::write(format!("{}/src/main.nr", project_dir), &circuit);
 
                     // Also write panic message
                     let _ = fs::write(format!("{}/panic.txt", project_dir), &message);
@@ -194,11 +194,11 @@ impl App {
 /// Worker function that runs in each rayon thread
 fn worker_loop(receiver: Receiver<CompileJob>, sender: Sender<CompileResult>) {
     while let Ok(job) = receiver.recv() {
-        let code = job.code.clone();
+        let circuit = job.circuit.clone();
         let indexed_name = job.indexed_name.clone();
 
         // Use catch_unwind to catch panics (ICEs)
-        let result = panic::catch_unwind(AssertUnwindSafe(|| compile_snippet(&job.code)));
+        let result = panic::catch_unwind(AssertUnwindSafe(|| compile_snippet(&circuit)));
 
         let compile_result = match result {
             Ok(Ok(_)) => {
@@ -219,7 +219,7 @@ fn worker_loop(receiver: Receiver<CompileJob>, sender: Sender<CompileResult>) {
                     "Unknown panic".to_string()
                 };
 
-                CompileResult::Panic { code, indexed_name, message }
+                CompileResult::Panic { circuit, indexed_name, message }
             }
         };
 

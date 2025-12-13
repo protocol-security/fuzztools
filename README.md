@@ -6,7 +6,7 @@ The main target of this repo is to have in one place a set of utilities to build
     - [blockchain](./fuzztools/crates/blockchain/): consensus and execution spec types and constants
     - [builders](./fuzztools/crates/builders/): logic for creating **VALID** types according to protocol rules
     - [circuits](./fuzztools/crates/circuits/): logic for creating **VALID** Noir circuits
-    - [math](./fuzztools/crates/math/): math utilities (field elements, weighted selection, etc.)
+    - [math](./fuzztools/crates/math/): math utilities (random field element, bernoulli selection, etc.)
     - [mutations](./fuzztools/crates/mutations/): `Mutable` trait implementation for base types
     - [transactions](./fuzztools/crates/transactions/): `Transaction` and `SignedTransaction` types
     - [utils](./fuzztools/crates/utils/): miscellaneous utilities like `FastPrivateKeySigner` or `choice` function for array types

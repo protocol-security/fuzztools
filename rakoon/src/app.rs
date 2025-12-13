@@ -1,82 +1,49 @@
 use crate::constants::{
-    TransactionType, AUTH_PRIVATE_KEY, CLEAR_SCREEN, DEFAULT_CHANNEL_CAPACITY, DEFAULT_RPC_TIMEOUT,
-    DEFAULT_TXS_PER_CORE, GREEN, RED, RESET,
+    TransactionType, AUTH_PRIVATE_KEY, CLEAR_SCREEN, DEFAULT_CHANNEL_CAPACITY,
+    DEFAULT_RPC_TIMEOUT, DEFAULT_TXS_PER_CORE, GREEN, RED, RESET,
 };
-use alloy::{
-    eips::eip7702::SignedAuthorization,
-    hex,
-    providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::Header,
-    signers::local::PrivateKeySigner,
-    transports::TransportError,
-};
+use alloy::{eips::eip7702::SignedAuthorization, hex, primitives::Address};
 use anyhow::Result;
-use crossbeam::channel::{bounded, Receiver, Sender};
-use futures::Stream;
 use fuzztools::{
-    builders::{contracts::AccessListTarget, TransactionBuilder},
+    builders::TransactionBuilder,
     mutations::Mutable,
     transactions::{SignedTransaction, Transaction},
     utils::Signer,
 };
 use rand::Rng;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use serde_json::{json, Value};
 use std::{
     io::{self, Write},
-    pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub struct App {
-    /// Rakoon prelude to display in the terminal
     prelude: String,
-
-    /// Connection to the ethereum client
-    node: RootProvider,
-
-    /// Transaction type to fuzz
+    client: reqwest::Client,
+    rpc_url: String,
     tx_type: TransactionType,
-
-    /// Whether fuzzing is enabled or not
     fuzzing: bool,
-
-    /// Transaction builder
     builder: TransactionBuilder,
-
-    /// Transaction signer
     signer: Signer,
-
-    /// Auth signer for EIP-7702 transactions
     auth_signer: Signer,
 
-    /// Stream of incoming block headers
-    stream: Pin<Box<dyn Stream<Item = Header> + Send>>,
-
-    /// Channel sender for dispatching signed transactions to the worker pool
     tx_sender: Sender<Vec<String>>,
-
-    /// Channel receiver for incoming transaction batches (taken by dispatcher)
     tx_receiver: Option<Receiver<Vec<String>>>,
-
-    /// Channel sender for completion notifications (taken by dispatcher)
     completion_sender: Option<Sender<u64>>,
-
-    /// Channel receiver for completion notifications from workers
     completion_receiver: Receiver<u64>,
-
-    /// Flag to signal connection loss (set by worker, read by main)
     connection_lost: Arc<AtomicBool>,
 
-    // Stats
     total_txs_sent: u64,
     txs_since_last_update: u64,
     start_time: Instant,
     last_update: Instant,
+    current_block: u64,
 }
 
 impl App {
@@ -87,173 +54,293 @@ impl App {
         fuzzing: bool,
         prelude: String,
     ) -> Result<Self> {
-        // First, deploy our custom contracts
-        let key_bytes = hex::decode(key)?;
-        let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
-        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
-        let access_list_target = AccessListTarget::deploy(&deployer).await?;
-        // @todo deploy the other one: PrecompileTarget
+        let client = reqwest::Client::builder()
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(100)
+            .timeout(Duration::from_secs(DEFAULT_RPC_TIMEOUT))
+            .build()?;
 
-        // Connect to the node and create some other stuff
-        let node = ProviderBuilder::default().connect(&url).await?;
-        let builder = TransactionBuilder::new(*access_list_target.address(), &node).await?;
+        // Fetch initial chain state
+        let (chain_id, gas_price, priority_fee, block_number) =
+            Self::fetch_chain_state(&client, &url).await?;
 
+        // Deploy access list target contract
+        let key_bytes = hex::decode(&key)?;
+        let access_list_target = Self::deploy_contract(&client, &url, &key_bytes).await?;
+
+        // Build signers
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
         let auth_signer = Signer::new(&auth_key_bytes)?;
         let signer = Signer::new(&key_bytes)?;
 
-        let sub = node.subscribe_blocks().await?;
-        let stream = Box::pin(sub.into_stream());
+        let builder =
+            TransactionBuilder::from_values(access_list_target, chain_id, gas_price, priority_fee);
 
-        // Create channels and atomic values
-        let (tx_sender, tx_receiver) = bounded::<Vec<String>>(DEFAULT_CHANNEL_CAPACITY);
-        let (completion_sender, completion_receiver) = bounded::<u64>(DEFAULT_CHANNEL_CAPACITY);
-        let connection_lost = Arc::new(AtomicBool::new(false));
+        let (tx_sender, tx_receiver) = channel::<Vec<String>>(DEFAULT_CHANNEL_CAPACITY);
+        let (completion_sender, completion_receiver) = channel::<u64>(1000);
 
         Ok(Self {
             prelude,
-            node,
+            client,
+            rpc_url: url,
             tx_type,
             fuzzing,
             builder,
             signer,
             auth_signer,
-            stream,
             tx_sender,
             tx_receiver: Some(tx_receiver),
             completion_sender: Some(completion_sender),
             completion_receiver,
-            connection_lost,
+            connection_lost: Arc::new(AtomicBool::new(false)),
             total_txs_sent: 0,
             txs_since_last_update: 0,
             start_time: Instant::now(),
             last_update: Instant::now(),
+            current_block: block_number,
         })
     }
 
     pub async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
-        self.spawn_dispatcher()?;
+        self.spawn_dispatcher();
 
         let num_cores = std::thread::available_parallelism()?.get();
-        let batch_size = DEFAULT_TXS_PER_CORE * num_cores;
+        let batch_size = (DEFAULT_TXS_PER_CORE * num_cores).max(1000);
+
         let mut txs: Vec<Transaction> = (0..batch_size).map(|_| self.build_tx(random)).collect();
+        let mut block_poll_interval = tokio::time::interval(Duration::from_secs(1));
+        block_poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            // Check for connection loss (set by worker thread)
-            if self.connection_lost.load(Ordering::SeqCst) {
-                eprintln!("\n\n\x1b[1;31m[!] Connection lost (detected by worker), shutting down...\x1b[0m");
+            if self.connection_lost.load(Ordering::Relaxed) {
+                eprintln!("\n\n\x1b[1;31m[!] Critical connection failure. Exiting...\x1b[0m");
                 return Ok(());
             }
 
-            // Drain all completion notifications (non-blocking)
+            // Drain completion stats
             while let Ok(sent_count) = self.completion_receiver.try_recv() {
                 self.total_txs_sent += sent_count;
                 self.txs_since_last_update += sent_count;
             }
 
             tokio::select! {
-                // If there is a new block, refresh cache
-                Some(_) = futures::StreamExt::next(&mut self.stream) => {
-                    self.builder.refresh(&self.node).await?;
+                _ = block_poll_interval.tick() => {
+                    if let Ok(new_height) = self.rpc_block_number().await {
+                        if new_height > self.current_block {
+                            self.current_block = new_height;
+                            let _ = self.refresh_gas_prices().await;
+                        }
+                    }
                 }
 
                 _ = tokio::task::yield_now() => {
-                    // Optionally mutate transactions
-                    if self.fuzzing {
-                        txs.iter_mut().for_each(|tx| { tx.mutate(random); });
-                    }
-
-                    // Sign and encode in parallel, then rebuild txs for next iteration
-                    let (signer, auth_signer) = (&self.signer, &self.auth_signer);
-                    let signed_txs: Vec<_> = txs
-                        .par_iter_mut()
-                        .map(|tx| Self::sign_and_encode(std::mem::take(tx), signer, auth_signer))
-                        .collect();
-
-                    // Rebuild transactions for next iteration (reuses allocation)
-                    txs.iter_mut().for_each(|tx| { *tx = self.build_tx(random); });
-
-                    // Send to the worker pool via crossbeam channel (blocks if full for backpressure)
-                    if self.tx_sender.send(signed_txs).is_err() {
-                        eprintln!("\n\n\x1b[1;31m[!] Worker pool shut down, exiting...\x1b[0m");
-                        return Ok(());
-                    }
-
-                    // Update terminal logging
                     if self.last_update.elapsed().as_secs_f64() >= 1.0 {
                         self.screen()?;
                         self.txs_since_last_update = 0;
                         self.last_update = Instant::now();
+                    }
+
+                    if self.fuzzing {
+                        txs.iter_mut().for_each(|tx| { tx.mutate(random); });
+                    }
+
+                    let signer = self.signer.clone();
+                    let auth_signer = self.auth_signer.clone();
+                    let txs_to_process = std::mem::take(&mut txs);
+
+                    let (processed_txs, signed_batch) = tokio::task::spawn_blocking(move || {
+                        let signed: Vec<String> = txs_to_process
+                            .par_iter()
+                            .map(|tx| Self::sign_and_encode(tx.clone(), &signer, &auth_signer))
+                            .collect();
+                        (txs_to_process, signed)
+                    }).await?;
+
+                    txs = processed_txs;
+                    txs.iter_mut().for_each(|tx| { *tx = self.build_tx(random); });
+
+                    if self.tx_sender.send(signed_batch).await.is_err() {
+                        return Ok(());
                     }
                 }
             }
         }
     }
 
-    /// Spawns a background thread that dispatches transactions to the node
-    fn spawn_dispatcher(&mut self) -> Result<()> {
-        // Init some stuff that will be used in the thread pool
-        let tx_receiver = self.tx_receiver.take().unwrap();
-        let completion_sender = self.completion_sender.take().unwrap();
-        let connection_lost = self.connection_lost.clone();
-        let node = self.node.clone();
+    // ---------------------
+    // RPC helpers
+    // ---------------------
 
-        // Create a thread pool
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(std::thread::available_parallelism()?.get())
-            .build()?;
-        let timeout = Duration::from_secs(DEFAULT_RPC_TIMEOUT);
-        let handle = Handle::current();
-
-        std::thread::spawn(move || {
-            for batch in tx_receiver {
-                let count = AtomicU64::new(0);
-
-                let result = pool.install(|| {
-                    batch.into_par_iter().try_for_each(|tx| {
-                        // If another thread has set the `connection_lost` flag, exit
-                        if connection_lost.load(Ordering::Relaxed) {
-                            return Err(());
-                        }
-
-                        // Send the transaction to the node with a timeout to avoid waiting
-                        // indefinitely in case of a crash
-                        let rpc = handle.block_on(async {
-                            tokio::time::timeout(
-                                timeout,
-                                node.client().request::<_, ()>("eth_sendRawTransaction", (tx,)),
-                            )
-                            .await
-                        });
-
-                        // If the node is unresponsive or the connection is lost, set the
-                        // `connection_lost` flag and exit
-                        match rpc {
-                            Err(_) | Ok(Err(TransportError::Transport(_))) => {
-                                connection_lost.store(true, Ordering::SeqCst);
-                                Err(())
-                            }
-                            Ok(_) => {
-                                count.fetch_add(1, Ordering::Relaxed);
-                                Ok(())
-                            }
-                        }
-                    })
-                });
-
-                // Ping back the main thread with the number of transactions sent
-                let _ = completion_sender.send(count.load(Ordering::Relaxed));
-                if result.is_err() || connection_lost.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
+    async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": 1
         });
 
+        let resp: Value = self.client.post(&self.rpc_url).json(&payload).send().await?.json().await?;
+
+        resp.get("result")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("RPC error: {:?}", resp.get("error")))
+    }
+
+    async fn rpc_block_number(&self) -> Result<u64> {
+        let result = self.rpc_call("eth_blockNumber", json!([])).await?;
+        let hex = result.as_str().ok_or_else(|| anyhow::anyhow!("Invalid block number"))?;
+        Ok(u64::from_str_radix(hex.trim_start_matches("0x"), 16)?)
+    }
+
+    async fn rpc_gas_price(&self) -> Result<u128> {
+        let result = self.rpc_call("eth_gasPrice", json!([])).await?;
+        let hex = result.as_str().ok_or_else(|| anyhow::anyhow!("Invalid gas price"))?;
+        Ok(u128::from_str_radix(hex.trim_start_matches("0x"), 16)?)
+    }
+
+    async fn rpc_priority_fee(&self) -> Result<u128> {
+        let result = self.rpc_call("eth_maxPriorityFeePerGas", json!([])).await?;
+        let hex = result.as_str().ok_or_else(|| anyhow::anyhow!("Invalid priority fee"))?;
+        Ok(u128::from_str_radix(hex.trim_start_matches("0x"), 16)?)
+    }
+
+    async fn refresh_gas_prices(&mut self) -> Result<()> {
+        let (gas_price, priority_fee) =
+            tokio::try_join!(self.rpc_gas_price(), self.rpc_priority_fee())?;
+        self.builder.set_gas_prices(gas_price, priority_fee);
         Ok(())
     }
 
-    /// Builds a transaction based on the configured transaction type
-    #[inline]
+    async fn fetch_chain_state(
+        client: &reqwest::Client,
+        url: &str,
+    ) -> Result<(u64, u128, u128, u64)> {
+        let calls = vec![
+            ("eth_chainId", json!([])),
+            ("eth_gasPrice", json!([])),
+            ("eth_maxPriorityFeePerGas", json!([])),
+            ("eth_blockNumber", json!([])),
+        ];
+
+        let batch: Vec<Value> = calls
+            .iter()
+            .enumerate()
+            .map(|(id, (method, params))| {
+                json!({
+                    "jsonrpc": "2.0",
+                    "method": method,
+                    "params": params,
+                    "id": id
+                })
+            })
+            .collect();
+
+        let resp: Vec<Value> = client.post(url).json(&batch).send().await?.json().await?;
+
+        let parse_hex_u64 = |v: &Value| -> Result<u64> {
+            let s = v
+                .get("result")
+                .and_then(|r| r.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing result"))?;
+            Ok(u64::from_str_radix(s.trim_start_matches("0x"), 16)?)
+        };
+
+        let parse_hex_u128 = |v: &Value| -> Result<u128> {
+            let s = v
+                .get("result")
+                .and_then(|r| r.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing result"))?;
+            Ok(u128::from_str_radix(s.trim_start_matches("0x"), 16)?)
+        };
+
+        let chain_id = parse_hex_u64(&resp[0])?;
+        let gas_price = parse_hex_u128(&resp[1])?;
+        let priority_fee = parse_hex_u128(&resp[2])?;
+        let block_number = parse_hex_u64(&resp[3])?;
+
+        Ok((chain_id, gas_price, priority_fee, block_number))
+    }
+
+    async fn deploy_contract(
+        _client: &reqwest::Client,
+        url: &str,
+        deployer_key: &[u8],
+    ) -> Result<Address> {
+        use fuzztools::builders::contracts::AccessListTarget;
+
+        // Use alloy just for contract deployment (sol! macro requirement)
+        let deployer_signer = alloy::signers::local::PrivateKeySigner::from_slice(deployer_key)?;
+        let deployer = alloy::providers::ProviderBuilder::new()
+            .wallet(deployer_signer)
+            .connect(url)
+            .await?;
+        let contract = AccessListTarget::deploy(&deployer).await?;
+
+        Ok(*contract.address())
+    }
+
+    // ---------------------
+    // Dispatcher
+    // ---------------------
+
+    fn spawn_dispatcher(&mut self) {
+        let mut tx_receiver = self.tx_receiver.take().unwrap();
+        let completion_sender = self.completion_sender.take().unwrap();
+        let connection_lost = self.connection_lost.clone();
+        let rpc_url = self.rpc_url.clone();
+        let client = self.client.clone();
+
+        tokio::spawn(async move {
+            while let Some(batch) = tx_receiver.recv().await {
+                if connection_lost.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                for chunk in batch.chunks(100) {
+                    let client = client.clone();
+                    let url = rpc_url.clone();
+                    let sender = completion_sender.clone();
+                    let signal = connection_lost.clone();
+                    let chunk = chunk.to_vec();
+
+                    tokio::spawn(async move {
+                        let payload: Vec<Value> = chunk
+                            .iter()
+                            .enumerate()
+                            .map(|(id, tx_hex)| {
+                                json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "eth_sendRawTransaction",
+                                    "params": [tx_hex],
+                                    "id": id
+                                })
+                            })
+                            .collect();
+
+                        let count = payload.len() as u64;
+
+                        match client.post(&url).json(&payload).send().await {
+                            Ok(_) => {
+                                let _ = sender.send(count).await;
+                            }
+                            Err(e) if e.is_connect() => {
+                                signal.store(true, Ordering::Relaxed);
+                            }
+                            Err(_) => {
+                                let _ = sender.send(count).await;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    // ---------------------
+    // Tx building & signing
+    // ---------------------
+
+    #[inline(always)]
     fn build_tx(&mut self, random: &mut impl Rng) -> Transaction {
         match self.tx_type {
             TransactionType::Legacy => self.builder.legacy(random),
@@ -263,9 +350,7 @@ impl App {
         }
     }
 
-    /// Signs a transaction and returns it as a hex-encoded string
     fn sign_and_encode(mut tx: Transaction, signer: &Signer, auth_signer: &Signer) -> String {
-        // Sign authorization list if present (EIP-7702)
         tx.signed_authorization_list = tx.authorization_list.as_ref().map(|auths| {
             auths
                 .iter()
@@ -282,14 +367,16 @@ impl App {
         });
 
         let signature = signer.sign_hash(&tx.signing_hash()).unwrap();
-        format!("0x{}", hex::encode(SignedTransaction { transaction: tx, signature }.encode()))
+        format!(
+            "0x{}",
+            hex::encode(SignedTransaction { transaction: tx, signature }.encode())
+        )
     }
 
-    /// Prints the current stats to the screen
     fn screen(&self) -> Result<()> {
         let secs = self.start_time.elapsed().as_secs();
         print!(
-            "{CLEAR_SCREEN}{}[{GREEN}+{RESET}] Total Txs: {RED}{}{RESET} | Tick: {RED}{}{RESET} txs | Time: {RED}{:02}h{RESET} {RED}{:02}m{RESET} {RED}{:02}s{RESET}",
+            "{CLEAR_SCREEN}{}[{GREEN}+{RESET}] Total: {RED}{}{RESET} | Tick: {RED}{}{RESET} | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
             self.prelude,
             self.total_txs_sent,
             self.txs_since_last_update,

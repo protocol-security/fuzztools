@@ -3,9 +3,7 @@
 use crate::{mutations::Random, transactions::Transaction};
 use alloy::{
     primitives::{Address, Bytes, FixedBytes, U256},
-    providers::{Provider, RootProvider},
     rpc::types::{AccessList, AccessListItem, Authorization},
-    transports::{RpcError, TransportErrorKind},
 };
 use rand::Rng;
 
@@ -20,40 +18,32 @@ pub struct TransactionBuilder {
 }
 
 impl TransactionBuilder {
-    pub async fn new(
+    /// Creates a new TransactionBuilder from raw values (no provider needed)
+    pub fn from_values(
         access_list_target: Address,
-        node: &RootProvider,
-    ) -> Result<Self, RpcError<TransportErrorKind>> {
-        let (gas_price, priority_fee, chain_id) = tokio::try_join!(
-            node.get_gas_price(),
-            node.get_max_priority_fee_per_gas(),
-            node.get_chain_id()
-        )?;
-
-        Ok(Self {
+        chain_id: u64,
+        gas_price: u128,
+        priority_fee: u128,
+    ) -> Self {
+        Self {
             chain_id,
             access_list_target,
             signer_nonce: 0,
             auth_nonce: 0,
             gas_price,
             priority_fee,
-        })
+        }
     }
 
     // ------------------------------
     // Helper methods
     // ------------------------------
 
-    /// Refreshes gas prices from the node
+    /// Updates gas prices directly
     #[inline(always)]
-    pub async fn refresh(
-        &mut self,
-        node: &RootProvider,
-    ) -> Result<(), RpcError<TransportErrorKind>> {
-        (self.gas_price, self.priority_fee) =
-            tokio::try_join!(node.get_gas_price(), node.get_max_priority_fee_per_gas())?;
-
-        Ok(())
+    pub fn set_gas_prices(&mut self, gas_price: u128, priority_fee: u128) {
+        self.gas_price = gas_price;
+        self.priority_fee = priority_fee;
     }
 
     /// Handy method to compute `max_fee_per_gas`

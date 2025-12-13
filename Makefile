@@ -29,3 +29,7 @@ reth-testnet:
 # These are commands for building
 build:
 	MALLOC_CONF="thp:always,metadata_thp:always" cargo build --release
+
+optimize:
+	cargo pgo build
+	cargo pgo optimize

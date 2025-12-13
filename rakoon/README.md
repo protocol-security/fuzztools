@@ -14,21 +14,28 @@ This folder holds `rakoon`, a blazingly-fast transaction fuzzer for the Ethereum
 
 ## Benchmark
 
-Against a local geth node via IPC:
+Against a local geth node:
 
 ```bash
-geth --dev --dev.period 12 --ipcpath /tmp/geth.ipc
+geth --dev \
+  --dev.period 12 \
+  --datadir ./tmp/geth-db \
+  --http \
+  --http.addr "127.0.0.1" \
+  --http.port 8545 \
+  --http.api "eth,net,web3,debug"
 ```
 
-- Fuzzing enabled:
-    - Legacy: `28000`
-    - EIP-2930: `28000`
-    - EIP-1559: `30800`
-    - EIP-7702: `11200`
-- Fuzzing disabled:
-    - Legacy: `25200`
-    - EIP-2930: `23800`
-    - EIP-1559: `22400`
-    - EIP-7702: `8400`
+| Transaction Type | Fuzzing Enabled |    Total TXs Sent   | Time Spent  |  Average TPS  |
+|------------------|-----------------|---------------------|-------------|---------------|
+| Legacy           | Yes             | 4,530,824           | 30s         | 151,027       |
+| EIP-2930         | Yes             | 4,659,408           | 30s         | 155,313       |
+| EIP-1559         | Yes             | 5,111,835           | 30s         | 170,394       |
+| EIP-7702         | Yes             | 4,043,620           | 30s         | 143,787       |
+|                  |                 |                     |             |               |
+| Legacy           | No              | 4,746,413           | 30s         | 158,213       |
+| EIP-2930         | No              | 5,129,023           | 30s         | 170,967       |
+| EIP-1559         | No              | 4,633,435           | 30s         | 154,447       |
+| EIP-7702         | No              | 4,505,711           | 30s         | 150,190       |
 
-quantities in transactions per second running on a MacBook Pro 2023, M3 Max and 36 GB of RAM. About increasing this numbers, the bottleneck is RPC requests, so there is not much one can do other than increase the threading of the system to scale this shit up.
+running on a MacBook Pro 2023, M3 Max and 36 GB of RAM.

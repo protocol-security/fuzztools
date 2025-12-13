@@ -7,8 +7,6 @@ use clap::Parser;
 use constants::{TransactionType, GREEN, HEADER, RED, RESET};
 use rand::{rngs::SmallRng, SeedableRng};
 
-#[global_allocator]
-static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser)]
 #[command(
