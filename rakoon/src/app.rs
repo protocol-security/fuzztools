@@ -7,20 +7,20 @@ use alloy::{
     hex,
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::Header,
-    signers::{local::PrivateKeySigner, SignerSync},
+    signers::local::PrivateKeySigner,
     transports::TransportError,
 };
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use futures::Stream;
 use fuzztools::{
-    builders::{AccessListTarget, TransactionBuilder},
+    builders::{contracts::AccessListTarget, TransactionBuilder},
     mutations::Mutable,
     transactions::{SignedTransaction, Transaction},
-    utils::FastPrivateKeySigner,
+    utils::Signer,
 };
 use rand::Rng;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::{
     io::{self, Write},
     pin::Pin,
@@ -49,10 +49,10 @@ pub struct App {
     builder: TransactionBuilder,
 
     /// Transaction signer
-    signer: FastPrivateKeySigner,
+    signer: Signer,
 
     /// Auth signer for EIP-7702 transactions
-    auth_signer: FastPrivateKeySigner,
+    auth_signer: Signer,
 
     /// Stream of incoming block headers
     stream: Pin<Box<dyn Stream<Item = Header> + Send>>,
@@ -99,8 +99,8 @@ impl App {
         let builder = TransactionBuilder::new(*access_list_target.address(), &node).await?;
 
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
-        let auth_signer = FastPrivateKeySigner::new(&auth_key_bytes)?;
-        let signer = FastPrivateKeySigner::new(&key_bytes)?;
+        let auth_signer = Signer::new(&auth_key_bytes)?;
+        let signer = Signer::new(&key_bytes)?;
 
         let sub = node.subscribe_blocks().await?;
         let stream = Box::pin(sub.into_stream());
@@ -135,7 +135,8 @@ impl App {
         self.spawn_dispatcher()?;
 
         let num_cores = std::thread::available_parallelism()?.get();
-        let batch_size = DEFAULT_TXS_PER_CORE * num_cores as u64;
+        let batch_size = DEFAULT_TXS_PER_CORE * num_cores;
+        let mut txs: Vec<Transaction> = (0..batch_size).map(|_| self.build_tx(random)).collect();
 
         loop {
             // Check for connection loss (set by worker thread)
@@ -153,22 +154,24 @@ impl App {
             tokio::select! {
                 // If there is a new block, refresh cache
                 Some(_) = futures::StreamExt::next(&mut self.stream) => {
-                    self.builder.refresh_cache(&self.node).await?;
+                    self.builder.refresh(&self.node).await?;
                 }
 
                 _ = tokio::task::yield_now() => {
-                    // Build and optionally mutate transactions
-                    let mut txs: Vec<_> = (0..batch_size).map(|_| self.build_tx(random)).collect();
+                    // Optionally mutate transactions
                     if self.fuzzing {
                         txs.iter_mut().for_each(|tx| { tx.mutate(random); });
                     }
 
-                    // Sign and encode in parallel
+                    // Sign and encode in parallel, then rebuild txs for next iteration
                     let (signer, auth_signer) = (&self.signer, &self.auth_signer);
                     let signed_txs: Vec<_> = txs
-                        .into_par_iter()
-                        .map(|tx| Self::sign_and_encode(tx, signer, auth_signer))
+                        .par_iter_mut()
+                        .map(|tx| Self::sign_and_encode(std::mem::take(tx), signer, auth_signer))
                         .collect();
+
+                    // Rebuild transactions for next iteration (reuses allocation)
+                    txs.iter_mut().for_each(|tx| { *tx = self.build_tx(random); });
 
                     // Send to the worker pool via crossbeam channel (blocks if full for backpressure)
                     if self.tx_sender.send(signed_txs).is_err() {
@@ -253,25 +256,21 @@ impl App {
     #[inline]
     fn build_tx(&mut self, random: &mut impl Rng) -> Transaction {
         match self.tx_type {
-            TransactionType::Legacy => self.builder.build_legacy_tx(random),
-            TransactionType::Eip2930 => self.builder.build_eip2930_tx(random),
-            TransactionType::Eip1559 => self.builder.build_eip1559_tx(random),
-            TransactionType::Eip7702 => self.builder.build_eip7702_tx(random),
+            TransactionType::Legacy => self.builder.legacy(random),
+            TransactionType::Eip2930 => self.builder.eip2930(random),
+            TransactionType::Eip1559 => self.builder.eip1559(random),
+            TransactionType::Eip7702 => self.builder.eip7702(random),
         }
     }
 
     /// Signs a transaction and returns it as a hex-encoded string
-    fn sign_and_encode(
-        mut tx: Transaction,
-        signer: &FastPrivateKeySigner,
-        auth_signer: &FastPrivateKeySigner,
-    ) -> String {
+    fn sign_and_encode(mut tx: Transaction, signer: &Signer, auth_signer: &Signer) -> String {
         // Sign authorization list if present (EIP-7702)
         tx.signed_authorization_list = tx.authorization_list.as_ref().map(|auths| {
             auths
                 .iter()
                 .map(|auth| {
-                    let sig = auth_signer.sign_hash_sync(&auth.signature_hash()).unwrap();
+                    let sig = auth_signer.sign_hash(&auth.signature_hash()).unwrap();
                     SignedAuthorization::new_unchecked(
                         auth.clone(),
                         sig.v() as u8,
@@ -282,7 +281,7 @@ impl App {
                 .collect()
         });
 
-        let signature = signer.sign_hash_sync(&tx.signing_hash()).unwrap();
+        let signature = signer.sign_hash(&tx.signing_hash()).unwrap();
         format!("0x{}", hex::encode(SignedTransaction { transaction: tx, signature }.encode()))
     }
 

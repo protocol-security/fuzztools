@@ -1,3 +1,7 @@
+//! This module contains the `Transaction` type, which is a wrapper around all possible fields an
+//! Ethereum transaction can have (without taking into account EIP-4844 sidecars, which I don't
+//! think I will be using for now).
+
 use crate::mutations::Mutable;
 use alloy::{
     eips::eip7702::SignedAuthorization,
@@ -7,26 +11,6 @@ use alloy::{
 use alloy_rlp::{BufMut, Encodable, Header};
 use mutable::Mutable;
 use rand::Rng;
-
-/// RLP encodes an `Option` field.
-macro_rules! encode_field {
-    ($field:expr, $out:expr) => {
-        if let Some(value) = &$field {
-            value.encode($out);
-        }
-    };
-}
-
-/// Gets the RLP length of an `Option` field.
-macro_rules! field_len {
-    ($field:expr) => {
-        if let Some(value) = &$field {
-            value.length()
-        } else {
-            0
-        }
-    };
-}
 
 #[derive(Clone, Default, Mutable)]
 /// A wrapper around all possible fields an Ethereum transaction can have
@@ -65,6 +49,7 @@ pub struct Transaction {
 
 impl Transaction {
     /// Returns `hash(rlp(transaction))`
+    #[inline(always)]
     pub fn signing_hash(&self) -> B256 {
         keccak256(self.encode())
     }
@@ -146,6 +131,7 @@ impl Transaction {
             field_len!(self.signed_authorization_list)
     }
 
+    #[inline(always)]
     fn encode_eip155_fields(&self, out: &mut dyn BufMut) {
         if let Some(chain_id) = &self.chain_id {
             chain_id.encode(out);
@@ -154,6 +140,7 @@ impl Transaction {
         }
     }
 
+    #[inline(always)]
     fn eip155_fields_length(&self) -> usize {
         // Only legacy transactions (type 0) include EIP-155 signing fields
         if self.tx_type == 0 {

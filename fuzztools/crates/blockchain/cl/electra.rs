@@ -1,3 +1,5 @@
+//! Electra consensus layer types and constants.
+
 use super::{
     altair::*,
     bellatrix::ExecutionAddress,

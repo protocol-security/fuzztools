@@ -1,3 +1,5 @@
+//! Contract for testing EIP-2930 access lists.
+
 use alloy::sol;
 
 sol! {

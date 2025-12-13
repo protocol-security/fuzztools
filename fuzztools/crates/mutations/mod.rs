@@ -1,3 +1,8 @@
+//! Mutation implementations for fuzzing.
+
+#[macro_use]
+mod macros;
+
 mod alloy;
 mod array;
 mod bool;
@@ -7,4 +12,4 @@ mod traits;
 mod uint;
 mod vec;
 
-pub use crate::mutations::{constants::*, traits::*};
+pub use traits::{Mutable, Random};

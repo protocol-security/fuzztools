@@ -1,7 +1,10 @@
 use crate::constants::{GREEN, RED, RESET};
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
-use fuzztools::circuits::{context::Context, Circuit};
+use fuzztools::{
+    builders::CircuitBuilder,
+    circuits::{context::Context, Circuit},
+};
 use nargo::parse_all;
 use noirc_driver::{compile_main, file_manager_with_stdlib, prepare_crate, CompileOptions};
 use noirc_frontend::hir::Context as NoirContext;
@@ -105,10 +108,10 @@ impl App {
     }
 
     pub fn run(&mut self, random: &mut impl Rng) -> Result<()> {
+        let builder = CircuitBuilder {};
         loop {
             // @todo self.drain_results();
-
-            let code = Circuit::random(random, &self.ctx);
+            let circuit = builder.circuit(random, &self.ctx);
 
             // @todo mutate the code
 

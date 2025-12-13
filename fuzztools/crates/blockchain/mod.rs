@@ -1,4 +1,4 @@
-mod cl;
-mod el;
+//! Ethereum consensus and execution layer types and constants.
 
-pub use cl::forks::{electra::BeaconBlockBody, fulu::BeaconState};
+pub mod cl;
+pub mod el;

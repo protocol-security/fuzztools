@@ -12,29 +12,25 @@ where
         match random.random_range(0..=10) {
             // Push a random value
             0 => self.push(T::random(random)),
-            // Remove a random element from the vector
+            // Remove a random element
             1 => {
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self.remove(idx);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self.remove(idx);
             }
-            // Replace a random element from the vector with a new random value
+            // Replace a random element with a random value
             2 => {
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    let new_value = T::random(random);
-                    self[idx] = new_value;
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self[idx] = T::random(random);
             }
-            // Swap two random elements from the vector
+            // Swap two random elements
             3 => {
-                if self.len() >= 2 {
-                    let idx1 = random.random_range(0..self.len());
-                    let idx2 = random.random_range(0..self.len());
-                    if idx1 != idx2 {
-                        self.swap(idx1, idx2);
-                    }
+                check_not_smaller!(self, 2);
+                let idx1 = random.random_range(0..self.len());
+                let idx2 = random.random_range(0..self.len());
+                if idx1 != idx2 {
+                    self.swap(idx1, idx2);
                 }
             }
             // Push a default value
@@ -43,36 +39,30 @@ where
             5 => self.shuffle(random),
             // Reverse the vector
             6 => self.reverse(),
-            // Push a duplicate of a random element from the vector
+            // Duplicate a random element
             7 => {
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    let duplicate = self[idx];
-                    self.push(duplicate);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                let dup = self[idx];
+                self.push(dup);
             }
-            // Mutate a random element from the vector
+            // Mutate a random element
             8 => {
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self[idx].mutate(random);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self[idx].mutate(random);
             }
-            // Mutate all elements of a random slice
+            // Mutate all elements in a random slice
             9 => {
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    let len = random.random_range(0..self.len() - idx);
-                    for i in idx..idx + len {
-                        self[i].mutate(random);
-                    }
-                }
+                check_not_empty!(self);
+                let start = random.random_range(0..self.len());
+                let end = start + random.random_range(0..self.len() - start);
+                self[start..end].iter_mut().for_each(|x| {
+                    x.mutate(random);
+                });
             }
-            // Return true to mutate the parent instead
-            10 => return true,
-            _ => unreachable!(),
+            _ => return true,
         }
-
         false
     }
 }

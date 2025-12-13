@@ -1,3 +1,5 @@
+//! Phase0 consensus layer types and constants.
+
 use crate::mutations::Mutable;
 use alloy::primitives::FixedBytes;
 use mutable::Mutable;

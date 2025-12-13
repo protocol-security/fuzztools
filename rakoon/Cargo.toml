@@ -15,3 +15,4 @@ fuzztools.workspace = true
 rand.workspace = true
 rayon.workspace = true
 tokio.workspace = true
+tikv-jemallocator.workspace = true

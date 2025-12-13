@@ -1,12 +1,9 @@
 //! Mutation implementations for Alloy types used in Ethereum fuzzing.
 
 use super::traits::Mutable;
-use crate::{
-    mutations::{
-        constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
-        traits::{Phantom, Random},
-    },
-    utils::RandomChoice,
+use crate::mutations::{
+    constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
+    traits::{Phantom, Random},
 };
 use alloy::{
     eips::eip7702::SignedAuthorization,
@@ -14,7 +11,7 @@ use alloy::{
     primitives::{Address, Bytes, FixedBytes, U256},
     rpc::types::{AccessList, AccessListItem, Authorization},
 };
-use rand::Rng;
+use rand::{seq::IndexedRandom, Rng};
 
 impl Random for Address {
     fn random(random: &mut impl Rng) -> Self {
@@ -78,8 +75,11 @@ impl Random for U256 {
 impl Mutable for Authorization {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
         match random.random_range(0..=2) {
+            // mutate address
             0 => self.address.mutate(random),
+            // mutate chain_id
             1 => self.chain_id.mutate(random),
+            // mutate nonce
             2 => self.nonce.mutate(random),
             _ => unreachable!(),
         }
@@ -104,32 +104,29 @@ impl Mutable for AccessList {
             }
             3 => {
                 // Remove a random entry
-                if !self.0.is_empty() {
-                    let idx = random.random_range(0..self.0.len());
-                    self.0.remove(idx);
-                }
+                check_not_empty!(self.0);
+                let idx = random.random_range(0..self.0.len());
+                self.0.remove(idx);
             }
             4 => {
                 // Swap random entries
-                if self.0.len() >= 2 {
-                    let idx1 = random.random_range(0..self.0.len());
-                    let idx2 = random.random_range(0..self.0.len());
+                check_not_smaller!(self.0, 2);
+                let idx1 = random.random_range(0..self.0.len());
+                let idx2 = random.random_range(0..self.0.len());
 
-                    if idx1 != idx2 {
-                        self.0.swap(idx1, idx2);
-                    }
+                if idx1 != idx2 {
+                    self.0.swap(idx1, idx2);
                 }
             }
             5 => {
                 // Replace a random entry
-                if !self.0.is_empty() {
-                    let idx = random.random_range(0..self.0.len());
-                    let address = Address::random(random);
-                    let num_keys = random.random::<u8>(); // @audit max 255 keys
-                    let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
+                check_not_empty!(self.0);
+                let idx = random.random_range(0..self.0.len());
+                let address = Address::random(random);
+                let num_keys = random.random::<u8>(); // @audit max 255 keys
+                let storage_keys = (0..num_keys).map(|_| FixedBytes::random(random)).collect();
 
-                    self.0[idx] = AccessListItem { address, storage_keys };
-                }
+                self.0[idx] = AccessListItem { address, storage_keys };
             }
             6 => {
                 // Add entry with storage keys from `STORAGE_KEYS`
@@ -137,7 +134,7 @@ impl Mutable for AccessList {
                 let num_keys = random.random::<u8>(); // @audit max 255 keys
                 let storage_keys = (0..num_keys)
                     .map(|_| {
-                        let key_str = random.choice(&STORAGE_KEYS);
+                        let key_str = *STORAGE_KEYS.choose(random).unwrap();
                         FixedBytes::from_hex(key_str).unwrap()
                     })
                     .collect();
@@ -146,14 +143,13 @@ impl Mutable for AccessList {
             }
             7 => {
                 // Mutate an element of `self`
-                if !self.0.is_empty() {
-                    let mut item = random.choice(&self.0).clone();
-                    item.address.mutate(random);
-                    if !item.storage_keys.is_empty() {
-                        item.storage_keys.iter_mut().for_each(|key| {
-                            key.mutate(random);
-                        });
-                    }
+                check_not_empty!(self.0);
+                let mut item = self.0.choose(random).unwrap().clone();
+                item.address.mutate(random);
+                if !item.storage_keys.is_empty() {
+                    item.storage_keys.iter_mut().for_each(|key| {
+                        key.mutate(random);
+                    });
                 }
             }
             _ => unreachable!(),
@@ -181,68 +177,62 @@ impl Mutable for Vec<Authorization> {
             }
             3 => {
                 // Remove a random entry
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self.remove(idx);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self.remove(idx);
             }
             4 => {
                 // Swap random entries
-                if self.len() >= 2 {
-                    let idx1 = random.random_range(0..self.len());
-                    let idx2 = random.random_range(0..self.len());
+                check_not_smaller!(self, 2);
+                let idx1 = random.random_range(0..self.len());
+                let idx2 = random.random_range(0..self.len());
 
-                    if idx1 != idx2 {
-                        self.swap(idx1, idx2);
-                    }
+                if idx1 != idx2 {
+                    self.swap(idx1, idx2);
                 }
             }
             5 => {
                 // Replace a random entry
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    let address = Address::random(random);
-                    let chain_id = U256::random(random);
-                    let nonce = random.random();
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                let address = Address::random(random);
+                let chain_id = U256::random(random);
+                let nonce = random.random();
 
-                    self[idx] = Authorization { address, chain_id, nonce };
-                }
+                self[idx] = Authorization { address, chain_id, nonce };
             }
             6 => {
                 // Add authorization with interesting address
-                let address = Address::from_hex(random.choice(&INTERESTING_ADDRESSES)).unwrap();
-                let chain_id = U256::from(*random.choice(&INTERESTING_CHAIN_IDS));
+                let address =
+                    Address::from_hex(*INTERESTING_ADDRESSES.choose(random).unwrap()).unwrap();
+                let chain_id = U256::from(*INTERESTING_CHAIN_IDS.choose(random).unwrap());
                 let nonce = random.random();
 
                 self.push(Authorization { address, chain_id, nonce });
             }
             7 => {
                 // Mutate an authorization's address
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self[idx].address.mutate(random);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self[idx].address.mutate(random);
             }
             8 => {
                 // Mutate an authorization's chain_id
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self[idx].chain_id.mutate(random);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self[idx].chain_id.mutate(random);
             }
             9 => {
                 // Mutate an authorization's nonce
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self[idx].nonce.mutate(random);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self[idx].nonce.mutate(random);
             }
             10 => {
                 // Mutate a whole authorization
-                if !self.is_empty() {
-                    let idx = random.random_range(0..self.len());
-                    self[idx].mutate(random);
-                }
+                check_not_empty!(self);
+                let idx = random.random_range(0..self.len());
+                self[idx].mutate(random);
             }
             _ => unreachable!(),
         }

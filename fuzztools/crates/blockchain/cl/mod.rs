@@ -1,1 +1,9 @@
-pub(crate) mod forks;
+//! Consensus layer constants per fork.
+
+pub mod altair;
+pub mod bellatrix;
+pub mod capella;
+pub mod deneb;
+pub mod electra;
+pub mod fulu;
+pub mod phase0;

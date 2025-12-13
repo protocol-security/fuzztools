@@ -1,42 +1,37 @@
-use super::{altair::*, bellatrix::*, phase0::*};
+//! Deneb consensus layer types and constants.
+
+use super::{altair::*, bellatrix::*, capella::*, phase0::*};
 use crate::mutations::Mutable;
 use alloy::primitives::{FixedBytes, U256};
 use mutable::Mutable;
 use rand::Rng;
+pub type VersionedHash = FixedBytes<32>;
+pub type BlobIndex = u64;
+pub type KZGCommitment = FixedBytes<48>;
 
-pub type WithdrawalIndex = u64;
+pub const VERSIONED_HASH_VERSION_KZG: FixedBytes<1> = FixedBytes([0x01]);
 
-pub const DOMAIN_BLS_TO_EXECUTION_CHANGE: DomainType = FixedBytes([0x0A, 0x00, 0x00, 0x00]);
-
-pub const MAX_BLS_TO_EXECUTION_CHANGES: u64 = 16;
-pub const MAX_WITHDRAWALS_PER_PAYLOAD: u64 = 16;
-pub const MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP: u64 = 16_384;
-
-#[derive(Copy, Clone, Mutable)]
-pub struct Withdrawal {
-    pub index: WithdrawalIndex,
-    pub validator_index: ValidatorIndex,
-    pub address: ExecutionAddress,
-    pub amount: Gwei,
-}
+pub const MAX_BLOB_COMMITMENTS_PER_BLOCK: u64 = 4096;
+pub const MAX_BLOBS_PER_BLOCK: u64 = 6;
+pub const MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT: u64 = 8;
 
 #[derive(Copy, Clone, Mutable)]
-pub struct BLSToExecutionChange {
-    pub validator_index: ValidatorIndex,
-    pub from_bls_pubkey: BLSPubkey,
-    pub to_execution_address: ExecutionAddress,
-}
-
-#[derive(Copy, Clone, Mutable)]
-pub struct SignedBLSToExecutionChange {
-    pub message: BLSToExecutionChange,
-    pub signature: BLSSignature,
-}
-
-#[derive(Copy, Clone, Mutable)]
-pub struct HistoricalSummary {
-    pub block_summary_root: Root,
-    pub state_summary_root: Root,
+pub struct BeaconBlockBody {
+    pub randao_reveal: BLSSignature,
+    pub eth1_data: Eth1Data,
+    pub graffiti: FixedBytes<32>,
+    pub proposer_slashings: [ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize],
+    pub attester_slashings: [AttesterSlashing; MAX_ATTESTER_SLASHINGS as usize],
+    pub attestations: [Attestation; MAX_ATTESTATIONS as usize],
+    pub deposits: [Deposit; MAX_DEPOSITS as usize],
+    pub voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
+    pub sync_aggregate: SyncAggregate,
+    // [Modified in Deneb:EIP4844]
+    pub execution_payload: ExecutionPayload,
+    pub bls_to_execution_changes:
+        [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
+    // [New in Deneb:EIP4844]
+    pub blob_kzg_commitments: [KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize],
 }
 
 #[derive(Copy, Clone, Mutable)]
@@ -55,8 +50,11 @@ pub struct ExecutionPayload {
     pub base_fee_per_gas: U256,
     pub block_hash: Hash32,
     pub transactions: [Transaction; MAX_TRANSACTIONS_PER_PAYLOAD as usize],
-    // [New in Capella]
     pub withdrawals: [Withdrawal; MAX_WITHDRAWALS_PER_PAYLOAD as usize],
+    // [New in Deneb:EIP4844]
+    pub blob_gas_used: u64,
+    // [New in Deneb:EIP4844]
+    pub excess_blob_gas: u64,
 }
 
 #[derive(Copy, Clone, Mutable)]
@@ -75,25 +73,11 @@ pub struct ExecutionPayloadHeader {
     pub base_fee_per_gas: U256,
     pub block_hash: Hash32,
     pub transactions_root: Root,
-    // [New in Capella]
     pub withdrawals_root: Root,
-}
-
-#[derive(Copy, Clone, Mutable)]
-pub struct BeaconBlockBody {
-    pub randao_reveal: BLSSignature,
-    pub eth1_data: Eth1Data,
-    pub graffiti: FixedBytes<32>,
-    pub proposer_slashings: [ProposerSlashing; MAX_PROPOSER_SLASHINGS as usize],
-    pub attester_slashings: [AttesterSlashing; MAX_ATTESTER_SLASHINGS as usize],
-    pub attestations: [Attestation; MAX_ATTESTATIONS as usize],
-    pub deposits: [Deposit; MAX_DEPOSITS as usize],
-    pub voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
-    pub sync_aggregate: SyncAggregate,
-    pub execution_payload: ExecutionPayload,
-    // [New in Capella]
-    pub bls_to_execution_changes:
-        [SignedBLSToExecutionChange; MAX_BLS_TO_EXECUTION_CHANGES as usize],
+    // [New in Deneb:EIP4844]
+    pub blob_gas_used: u64,
+    // [New in Deneb:EIP4844]
+    pub excess_blob_gas: u64,
 }
 
 #[derive(Copy, Clone, Mutable)]
@@ -122,12 +106,9 @@ pub struct BeaconState {
     pub inactivity_scores: [u64; VALIDATOR_REGISTRY_LIMIT as usize],
     pub current_sync_committee: SyncCommittee,
     pub next_sync_committee: SyncCommittee,
-    // [Modified in Capella]
+    // [Modified in Deneb:EIP4844]
     pub latest_execution_payload_header: ExecutionPayloadHeader,
-    // [New in Capella]
     pub next_withdrawal_index: WithdrawalIndex,
-    // [New in Capella]
     pub next_withdrawal_validator_index: ValidatorIndex,
-    // [New in Capella]
     pub historical_summaries: [HistoricalSummary; HISTORICAL_ROOTS_LIMIT as usize],
 }

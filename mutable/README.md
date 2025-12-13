@@ -36,7 +36,7 @@ fn main() {
     let mut random = SmallRng::seed_from_u64(0);
 
     loop {
-        base.mutate(random);
+        base.mutate(&mut random);
 
         // Check your target condition or send the payload
         if base.a + base.b == 5 {

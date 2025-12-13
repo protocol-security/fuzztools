@@ -1,9 +1,11 @@
+//! Signed transaction type.
+
 use super::transaction::Transaction;
 use alloy::signers::Signature;
 use alloy_rlp::{BufMut, Encodable, Header};
 
-#[derive(Clone)]
 /// A `Transaction` with a `Signature` attached.
+#[derive(Clone)]
 pub struct SignedTransaction {
     pub transaction: Transaction,
     pub signature: Signature,
@@ -61,19 +63,20 @@ impl SignedTransaction {
 
     // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html
     fn rlp_encoded_length_with_signature(&self) -> usize {
-        let payload_length = self.transaction.fields_length() +
-            self.signature.rlp_rs_len() +
-            if self.transaction.tx_type == 0 {
-                self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length()
-            } else {
-                self.signature.v().length()
-            };
+        let v_length = if self.transaction.tx_type == 0 {
+            self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length()
+        } else {
+            self.signature.v().length()
+        };
+        let payload_length =
+            self.transaction.fields_length() + self.signature.rlp_rs_len() + v_length;
         let header = Header { list: true, payload_length };
 
         header.length_with_payload()
     }
 
     // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html
+    #[inline(always)]
     fn to_eip155_value(&self, y_parity: bool, chain_id: Option<u64>) -> u128 {
         match chain_id {
             Some(id) => 35 + id as u128 * 2 + y_parity as u128,

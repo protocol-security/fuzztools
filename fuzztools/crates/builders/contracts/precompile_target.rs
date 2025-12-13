@@ -1,3 +1,5 @@
+//! Contract for testing precompile interactions, `selfdestruct`ing to a precompile address... etc.
+
 use alloy::sol;
 
 sol! {

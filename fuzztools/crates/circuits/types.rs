@@ -1,9 +1,6 @@
-use super::context::Context;
-use crate::{
-    math::{bernoulli, random_field_element},
-    utils::{random_string, RandomChoice},
-};
-use rand::Rng;
+use super::{context::Context, misc::random_string};
+use crate::math::{bernoulli, random_field_element};
+use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
 
 // ------------------------------------------------------------
@@ -260,7 +257,7 @@ impl Type {
                         available.push("Struct");
                     }
 
-                    match *random.choice(&available) {
+                    match *available.choose(random).unwrap() {
                         // Primitives: no children, fill slot immediately
                         "Field" => {
                             slots[slot_idx] = Some(Type::Field(Field::random(random, ctx)));
@@ -347,8 +344,9 @@ impl Type {
 
                         // Struct: pick from existing structs
                         "Struct" => {
-                            slots[slot_idx] =
-                                Some(Type::Struct((*random.choice(&valid_structs)).clone()));
+                            slots[slot_idx] = Some(Type::Struct(
+                                (*valid_structs.choose(random).unwrap()).clone(),
+                            ));
                         }
 
                         // Reference: has ONE child type
@@ -411,14 +409,14 @@ impl Type {
 
     pub fn random_method(&self, random: &mut impl Rng) -> Option<&'static str> {
         match self {
-            Type::Field(_) => Some(*random.choice(FIELD_METHODS)),
-            Type::Integer(_) => Some(*random.choice(INTEGER_METHODS)),
+            Type::Field(_) => Some(*FIELD_METHODS.choose(random).unwrap()),
+            Type::Integer(_) => Some(*INTEGER_METHODS.choose(random).unwrap()),
             Type::Boolean(_) => None,
-            Type::String(_) => Some(*random.choice(STRING_METHODS)),
-            Type::Array(_) => Some(*random.choice(ARRAY_METHODS)),
-            Type::Slice(_) => Some(*random.choice(SLICE_METHODS)),
-            Type::Tuple(_) => Some(*random.choice(TUPLE_METHODS)),
-            Type::Struct(_) => Some(*random.choice(STRUCT_METHODS)),
+            Type::String(_) => Some(*STRING_METHODS.choose(random).unwrap()),
+            Type::Array(_) => Some(*ARRAY_METHODS.choose(random).unwrap()),
+            Type::Slice(_) => Some(*SLICE_METHODS.choose(random).unwrap()),
+            Type::Tuple(_) => Some(*TUPLE_METHODS.choose(random).unwrap()),
+            Type::Struct(_) => Some(*STRUCT_METHODS.choose(random).unwrap()),
             Type::Reference(_) => None,
         }
     }
@@ -464,7 +462,7 @@ impl Field {
 impl Integer {
     #[inline]
     pub fn random(random: &mut impl Rng, ctx: &Context) -> Self {
-        let (bits, signed) = *random.choice(&INTEGER_PARAMS);
+        let (bits, signed) = *INTEGER_PARAMS.choose(random).unwrap();
         Self { bits, signed, mutable: random.random_bool(ctx.mutable_probability) }
     }
 
@@ -478,7 +476,7 @@ impl Integer {
             let (min, max) = (-half, half - 1);
 
             let value = if bernoulli(ctx.boundary_value_probability, random) {
-                *random.choice(&[0, 1, -1, min, max])
+                *[0, 1, -1, min, max].choose(random).unwrap()
             } else {
                 random.random_range(min..=max)
             };
@@ -492,7 +490,7 @@ impl Integer {
             let max = if self.bits == 128 { u128::MAX } else { (1u128 << self.bits) - 1 };
 
             let value = if bernoulli(ctx.boundary_value_probability, random) {
-                *random.choice(&[0, 1, max])
+                *[0, 1, max].choose(random).unwrap()
             } else {
                 random.random_range(0..=max)
             };
@@ -618,7 +616,7 @@ impl StructField {
         Self {
             name: random_string(random, ctx.max_name_characters_count),
             ty: Box::new(Type::random(random, ctx, structs)),
-            visibility: *random.choice(&VISIBILITIES),
+            visibility: *VISIBILITIES.choose(random).unwrap(),
         }
     }
 }

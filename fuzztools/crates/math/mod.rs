@@ -1,36 +1,23 @@
-use crate::{mutations::Random, utils::RandomChoice};
-use alloy::primitives::U256;
-use anyhow::Result;
-use rand::{
-    distr::{weighted::WeightedIndex, Distribution},
-    Rng,
-};
-use std::{collections::HashMap, fmt::Display, hash::Hash, str::FromStr};
+//! Math utilities.
 
-/// Returns the prime value for the provided field curve.
+use crate::mutations::Random;
+use alloy::primitives::U256;
+use rand::{seq::IndexedRandom, Rng};
+use std::str::FromStr;
+
 pub fn curve_prime(curve: &str) -> U256 {
     let value = match curve {
-        "bn254" => U256::from_str(
-            "21888242871839275222246405745257275088548364400416034343698204186575808495617",
-        )
-        .unwrap(),
-        "goldilocks" => U256::from_str("18446744069414584321").unwrap(),
-        "bn128" => U256::from_str(
-            "21888242871839275222246405745257275088548364400416034343698204186575808495617",
-        )
-        .unwrap(),
-        "stark" => U256::from_str(
-            "3618502788666131213697322783095070105526743751716087489154079457884512865583",
-        )
-        .unwrap(),
-        "secp256k1" => U256::from_str(
-            "115792089237316195423570985008687907852837564279074904382605163141518161494337",
-        )
-        .unwrap(),
-        _ => unreachable!(),
+        "bn254" => "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+        "goldilocks" => "18446744069414584321",
+        "bn128" => "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+        "stark" => "3618502788666131213697322783095070105526743751716087489154079457884512865583",
+        "secp256k1" => {
+            "115792089237316195423570985008687907852837564279074904382605163141518161494337"
+        }
+        _ => panic!("Unsupported curve: {}", curve),
     };
 
-    value
+    U256::from_str(value).unwrap()
 }
 
 pub fn bernoulli(prob: f64, random: &mut impl Rng) -> bool {
@@ -44,40 +31,9 @@ pub fn bernoulli(prob: f64, random: &mut impl Rng) -> bool {
     random.random_range(0.0..1.0) < prob
 }
 
-pub fn weighted_select<T: Eq + Hash + Clone + Display>(
-    options: &[T],
-    weight_map: &HashMap<T, f64>,
-    random: &mut impl Rng,
-) -> Result<T> {
-    if options.is_empty() {
-        return Err(anyhow::anyhow!("Unable to select from empty options"));
-    }
-
-    let mut weights = Vec::new();
-    for option in options {
-        match weight_map.get(option) {
-            Some(weight) => weights.push(*weight),
-            None => return Err(anyhow::anyhow!("Unable to find weight for option '{}'", option)),
-        }
-    }
-
-    if weights.len() != options.len() {
-        return Err(anyhow::anyhow!("Number of weights does not match number of options"));
-    }
-
-    let dist = match WeightedIndex::new(weights) {
-        Ok(d) => d,
-        Err(e) => return Err(anyhow::anyhow!("Error creating WeightedIndex: {}", e)),
-    };
-
-    let index = dist.sample(random);
-
-    Ok(options[index].clone())
-}
-
-/// The `boundary_prob` value indicates the probability of choosing
+/// The `boundary_value_probability` value indicates the probability of choosing
 /// a boundary value, i.e. `[0, 1]` or `[0, 1, Fp - 1]` if
-/// `exclude_prime` is `False`. The `small_upper_bound_prob` value indicates the
+/// `exclude_prime` is `false`. The `small_upper_bound_probability` value indicates the
 /// probability of choosing a small integer, i.e. from the domain `[0..=small_upper_bound]`.
 pub fn random_field_element(
     curve: &str,
@@ -93,22 +49,18 @@ pub fn random_field_element(
     let value = if bernoulli(boundary_value_probability, random) {
         if exclude_prime {
             // Choose from `[0, 1]`
-            let value = random.choice(&[U256::ZERO, U256::ONE]).clone();
-            value
+            *[U256::ZERO, U256::ONE].choose(random).unwrap()
         } else {
             // Choose from `[0, 1, Fp - 1]`
-            let value = random.choice(&[U256::ZERO, U256::ONE, prime - U256::ONE]).clone();
-            value
+            *[U256::ZERO, U256::ONE, prime - U256::ONE].choose(random).unwrap()
         }
     } else {
         // Choose from `[0..=small_upper_bound]`
         if bernoulli(small_upper_bound_probability, random) {
-            let value = random.random_range(0..=max_small_upper_bound);
-            U256::from(value)
+            U256::from(random.random_range(0..=max_small_upper_bound))
         } else {
             // Choose from `[0..=Fp - 1]`
-            let value = U256::random(random) % prime;
-            value
+            U256::random(random) % prime
         }
     };
 

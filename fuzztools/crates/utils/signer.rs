@@ -1,13 +1,15 @@
+//! Fast secp256k1 signer implementation.
+
 use alloy::{
     primitives::FixedBytes,
-    signers::{Error, Signature, SignerSync},
+    signers::{Error, Signature},
 };
 use anyhow::Result;
 use secp256k1::{ecdsa::RecoveryId, Message, Secp256k1, SecretKey};
 
-#[derive(Clone)]
 /// Blazingly fast secp256k1 signer.
-pub struct FastPrivateKeySigner {
+#[derive(Clone)]
+pub struct Signer {
     /// The key used for signing transactions
     secret_key: SecretKey,
 
@@ -15,7 +17,7 @@ pub struct FastPrivateKeySigner {
     secp: Secp256k1<secp256k1::SignOnly>,
 }
 
-impl FastPrivateKeySigner {
+impl Signer {
     /// Creates a new `FastPrivateKeySigner` from a given private key
     pub fn new(key: &[u8]) -> Result<Self> {
         let secp = Secp256k1::signing_only();
@@ -25,11 +27,9 @@ impl FastPrivateKeySigner {
 
         Ok(Self { secret_key, secp })
     }
-}
 
-impl SignerSync for FastPrivateKeySigner {
     /// Signs a given hash with the private key
-    fn sign_hash_sync(&self, hash: &FixedBytes<32>) -> Result<Signature, Error> {
+    pub fn sign_hash(&self, hash: &FixedBytes<32>) -> Result<Signature, Error> {
         let msg = Message::from_digest(hash.0);
         let signature = self.secp.sign_ecdsa_recoverable(msg, &self.secret_key);
         let (rec_id, rs) = signature.serialize_compact();
@@ -38,11 +38,5 @@ impl SignerSync for FastPrivateKeySigner {
         let v = matches!(rec_id, RecoveryId::One);
 
         Ok(Signature::from_bytes_and_parity(&rs, v))
-    }
-
-    /// Returns `None` as we do not support chain ID signing
-    #[inline(always)]
-    fn chain_id_sync(&self) -> Option<u64> {
-        None
     }
 }

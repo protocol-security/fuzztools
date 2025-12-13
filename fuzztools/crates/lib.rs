@@ -1,3 +1,5 @@
+//! Shared utilities for building fuzzers.
+
 pub mod blockchain;
 pub mod builders;
 pub mod circuits;

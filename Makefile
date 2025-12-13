@@ -25,3 +25,7 @@ reth-testnet:
 		--dev.block-time 12s \
 		--datadir ./tmp/reth-db \
 		--ipcpath /tmp/reth.ipc \
+
+# These are commands for building
+build:
+	MALLOC_CONF="thp:always,metadata_thp:always" cargo build --release

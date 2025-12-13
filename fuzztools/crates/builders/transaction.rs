@@ -1,52 +1,112 @@
-use super::{RpcCache, DEFAULT_GAS_LIMIT};
-use crate::{
-    mutations::{Random, STORAGE_KEYS},
-    transactions::Transaction,
-    utils::RandomChoice,
-};
+//! Transaction builder for valid Ethereum transactions.
+
+use crate::{mutations::Random, transactions::Transaction};
 use alloy::{
-    hex::FromHex,
     primitives::{Address, Bytes, FixedBytes, U256},
     providers::{Provider, RootProvider},
     rpc::types::{AccessList, AccessListItem, Authorization},
+    transports::{RpcError, TransportErrorKind},
 };
-use anyhow::Result;
 use rand::Rng;
 
 /// Handles the logic of creating **VALID** transactions per mempool rules
 pub struct TransactionBuilder {
-    chain_id: u64,
-    access_list_target: Address,
-    signer_nonce: u64,
-    auth_nonce: u64,
-    cache: RpcCache,
+    pub chain_id: u64,
+    pub signer_nonce: u64,
+    pub auth_nonce: u64,
+    pub gas_price: u128,
+    pub priority_fee: u128,
+    pub access_list_target: Address,
 }
 
 impl TransactionBuilder {
-    #[inline]
-    pub async fn new(access_list_target: Address, node: &RootProvider) -> Result<Self> {
-        let cache = RpcCache::fetch(node).await?;
-        let chain_id = node.get_chain_id().await?;
-        Ok(Self { chain_id, access_list_target, signer_nonce: 0, auth_nonce: 0, cache })
+    pub async fn new(
+        access_list_target: Address,
+        node: &RootProvider,
+    ) -> Result<Self, RpcError<TransportErrorKind>> {
+        let (gas_price, priority_fee, chain_id) = tokio::try_join!(
+            node.get_gas_price(),
+            node.get_max_priority_fee_per_gas(),
+            node.get_chain_id()
+        )?;
+
+        Ok(Self {
+            chain_id,
+            access_list_target,
+            signer_nonce: 0,
+            auth_nonce: 0,
+            gas_price,
+            priority_fee,
+        })
     }
 
-    /// Refreshes the cache by fetching it from the given node
-    #[inline]
-    pub async fn refresh_cache(&mut self, node: &RootProvider) -> Result<()> {
-        self.cache = RpcCache::fetch(node).await?;
+    // ------------------------------
+    // Helper methods
+    // ------------------------------
+
+    /// Refreshes gas prices from the node
+    #[inline(always)]
+    pub async fn refresh(
+        &mut self,
+        node: &RootProvider,
+    ) -> Result<(), RpcError<TransportErrorKind>> {
+        (self.gas_price, self.priority_fee) =
+            tokio::try_join!(node.get_gas_price(), node.get_max_priority_fee_per_gas())?;
+
         Ok(())
     }
 
-    /// Populates common fields to all transaction types. The randomness comes from
-    /// the `to` and `input` fields
-    fn base_request(&self, random: &mut impl Rng) -> Transaction {
-        let address = Address::random(random);
+    /// Handy method to compute `max_fee_per_gas`
+    #[inline(always)]
+    fn max_fee_per_gas(&self) -> u128 {
+        self.gas_price.saturating_mul(2).saturating_add(self.priority_fee)
+    }
+
+    /// Bumps `self.signer_nonce` and returns the previous value
+    #[inline(always)]
+    fn next_signer_nonce(&mut self) -> u64 {
+        let nonce = self.signer_nonce;
+        self.signer_nonce += 1;
+        nonce
+    }
+
+    /// Bumps `self.auth_nonce` and returns the previous value
+    #[inline(always)]
+    fn next_auth_nonce(&mut self) -> u64 {
+        let nonce = self.auth_nonce;
+        self.auth_nonce += 1;
+        nonce
+    }
+
+    /// Generates an access list with a single storage key, using that key as the calldata. The idea
+    /// is to call a pre-deployed contract that at construction time populates its storage with
+    /// interesting stuff, and its fallback reads from the calldata 32-bytes chunks and SLOADs
+    /// them
+    #[inline]
+    fn access_list_and_input(&self, random: &mut impl Rng) -> (AccessList, Bytes) {
+        let key = FixedBytes::random(random);
+        let input = Bytes::from(key);
+        let access_list = AccessList(vec![AccessListItem {
+            address: self.access_list_target,
+            storage_keys: vec![key],
+        }]);
+
+        (access_list, input)
+    }
+
+    // ------------------------------
+    // Transaction builders
+    // ------------------------------
+
+    /// Common fields for all transaction types
+    fn base_tx(&self, random: &mut impl Rng) -> Transaction {
+        let to = Address::random(random);
         let input = Bytes::random(random);
 
         Transaction {
-            to: Some(address),
-            value: Some(U256::ONE),
-            gas_limit: Some(DEFAULT_GAS_LIMIT),
+            to: Some(to),
+            value: Some(U256::ONE),   // @audit make this configurable
+            gas_limit: Some(100_000), // @audit make this configurable
             chain_id: Some(self.chain_id),
             input: Some(input),
 
@@ -54,100 +114,71 @@ impl TransactionBuilder {
         }
     }
 
-    /// Handy method to compute `max_fee_per_gas`
-    #[inline]
-    fn max_fee_per_gas(&self, base_fee: u128, priority_fee: u128) -> u128 {
-        base_fee.saturating_mul(2).saturating_add(priority_fee)
-    }
-
-    /// The idea is to call a pre-deployed contract that at construction time
-    /// populates its storage with interesting stuff, and its fallback reads
-    /// from input 32-bytes chunks and SLOADs them
-    fn generate_access_list_and_input(&self, random: &mut impl Rng) -> (AccessList, Bytes) {
-        // As the randomness of valid txs come from `to`, to speed things up
-        // we just add a single entry
-        let key_str = random.choice(&STORAGE_KEYS);
-        let key = FixedBytes::from_hex(key_str).unwrap();
-        let item = AccessListItem { address: self.access_list_target, storage_keys: vec![key] };
-
-        (AccessList(vec![item]), Bytes::from(key))
-    }
-
-    // --- Public Transaction Builders ---
-
-    /// Generate a `LegacyTx` transaction. The randomness comes from
-    /// the `to` and `input` fields
-    pub fn build_legacy_tx(&mut self, random: &mut impl Rng) -> Transaction {
-        let mut tx = self.base_request(random);
+    /// Builds a legacy (type 0) transaction. The randomness comes from the `to` and `input` fields.
+    pub fn legacy(&mut self, random: &mut impl Rng) -> Transaction {
+        let mut tx = self.base_tx(random);
+        let nonce = self.next_signer_nonce();
 
         tx.tx_type = 0;
-        tx.gas_price = Some(self.cache.gas_price);
-        tx.nonce = Some(self.signer_nonce);
-        self.signer_nonce += 1;
+        tx.nonce = Some(nonce);
+        tx.gas_price = Some(self.gas_price);
 
         tx
     }
 
-    /// Generate an `Eip2930` transaction. The randomness comes from
-    /// the `to`, as well as from `input` and `access_list` fields iff
-    /// `self.contract_address` is provided, otherwise the only random field is `to`
-    pub fn build_eip2930_tx(&mut self, random: &mut impl Rng) -> Transaction {
-        let mut tx = self.base_request(random);
-        let (access_list, input) = self.generate_access_list_and_input(random);
+    /// Builds an EIP-2930 (type 1) transaction with access list. The randomness comes from the `to`
+    /// and `input` fields.
+    pub fn eip2930(&mut self, random: &mut impl Rng) -> Transaction {
+        let mut tx = self.base_tx(random);
+        let nonce = self.next_signer_nonce();
+        let (access_list, input) = self.access_list_and_input(random);
 
         tx.tx_type = 1;
-        tx.gas_price = Some(self.cache.gas_price);
+        tx.nonce = Some(nonce);
+        tx.gas_price = Some(self.gas_price);
         tx.input = Some(input);
-        tx.nonce = Some(self.signer_nonce);
-        self.signer_nonce += 1;
         tx.access_list = Some(access_list);
 
         tx
     }
 
-    /// Generate an `Eip1559` transaction. The randomness comes from
-    /// the `to`, as well as from `input` and `access_list` fields iff
-    /// `self.contract_address` is provided, otherwise the only random field is `to`
-    pub fn build_eip1559_tx(&mut self, random: &mut impl Rng) -> Transaction {
-        let mut tx = self.base_request(random);
-        let max_fee_per_gas =
-            self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
-        let (access_list, input) = self.generate_access_list_and_input(random);
+    /// Builds an EIP-1559 (type 2) transaction with access list
+    pub fn eip1559(&mut self, random: &mut impl Rng) -> Transaction {
+        let mut tx = self.base_tx(random);
+        let nonce = self.next_signer_nonce();
+        let (access_list, input) = self.access_list_and_input(random);
+        let max_fee_per_gas = self.max_fee_per_gas();
 
         tx.tx_type = 2;
+        tx.nonce = Some(nonce);
         tx.max_fee_per_gas = Some(max_fee_per_gas);
-        tx.max_priority_fee_per_gas = Some(self.cache.max_priority_fee);
+        tx.max_priority_fee_per_gas = Some(self.priority_fee);
         tx.input = Some(input);
-        tx.nonce = Some(self.signer_nonce);
-        self.signer_nonce += 1;
         tx.access_list = Some(access_list);
 
         tx
     }
 
-    /// Generate an `Eip7702` transaction. The randomness comes from
-    /// the `to` and `authorization_list`, as well as from `input` and `access_list` fields iff
-    /// `self.contract_address` is provided, otherwise the only random field is `to` and
-    /// `authorization_list`
-    pub fn build_eip7702_tx(&mut self, random: &mut impl Rng) -> Transaction {
-        let mut tx = self.base_request(random);
-        let max_fee_per_gas =
-            self.max_fee_per_gas(self.cache.gas_price, self.cache.max_priority_fee);
-        let (access_list, input) = self.generate_access_list_and_input(random);
+    /// Builds an EIP-7702 (type 4) transaction with authorization
+    pub fn eip7702(&mut self, random: &mut impl Rng) -> Transaction {
+        let mut tx = self.base_tx(random);
+        let nonce = self.next_signer_nonce();
+        let (access_list, input) = self.access_list_and_input(random);
+        let max_fee_per_gas = self.max_fee_per_gas();
 
-        let delegatee = Address::random(random);
-        let chain_id = U256::from(self.chain_id);
-        let authorization = Authorization { chain_id, address: delegatee, nonce: self.auth_nonce };
+        let authorization = Authorization {
+            chain_id: U256::from(self.chain_id),
+            address: Address::random(random),
+            nonce: self.next_auth_nonce(),
+        };
 
         tx.tx_type = 4;
+        tx.nonce = Some(nonce);
         tx.max_fee_per_gas = Some(max_fee_per_gas);
-        tx.max_priority_fee_per_gas = Some(self.cache.max_priority_fee);
+        tx.max_priority_fee_per_gas = Some(self.priority_fee);
         tx.input = Some(input);
-        tx.nonce = Some(self.signer_nonce);
-        self.signer_nonce += 1;
         tx.access_list = Some(access_list);
         tx.authorization_list = Some(vec![authorization]);
-        self.auth_nonce += 1;
 
         tx
     }

@@ -1,11 +1,7 @@
-use super::{altair::*, electra::*, phase0::*};
-use crate::{
-    blockchain::cl::forks::{
-        capella::{HistoricalSummary, WithdrawalIndex},
-        deneb::ExecutionPayloadHeader,
-    },
-    mutations::Mutable,
-};
+//! Fulu consensus layer types and constants.
+
+use super::{altair::*, capella::*, electra::*, phase0::*};
+use crate::mutations::Mutable;
 use alloy::primitives::FixedBytes;
 use mutable::Mutable;
 use rand::Rng;

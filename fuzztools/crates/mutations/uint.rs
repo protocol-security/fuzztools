@@ -2,271 +2,168 @@
 
 use super::{
     constants::{EVEN, INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, ODD},
-    traits::{InterestingMutations, Mutable, UintMutations},
+    traits::{InterestingMutations, Mutable},
 };
-use crate::utils::RandomChoice;
-use rand::Rng;
+use rand::{seq::IndexedRandom, Rng};
 use std::mem::size_of;
-
-macro_rules! impl_mutations {
-    ($type:ty) => {
-        impl UintMutations for $type {
-            #[inline(always)]
-            fn flip_bit(&mut self, random: &mut impl Rng) {
-                let bit = random.random_range(0..size_of::<$type>() * 8);
-                *self ^= 1 << bit;
-            }
-
-            #[inline(always)]
-            fn add(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                *self = self.saturating_add(value);
-            }
-
-            #[inline(always)]
-            fn add_one(&mut self) {
-                *self = self.saturating_add(1);
-            }
-
-            #[inline(always)]
-            fn add_mod(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                let modulus = random.random::<$type>();
-                if modulus != 0 {
-                    *self = self.saturating_add(value) % modulus;
-                }
-            }
-
-            #[inline(always)]
-            fn sub(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                *self = self.saturating_sub(value);
-            }
-
-            #[inline(always)]
-            fn sub_one(&mut self) {
-                *self = self.saturating_sub(1);
-            }
-
-            #[inline(always)]
-            fn sub_mod(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                let modulus = random.random::<$type>();
-                if modulus != 0 {
-                    *self = self.saturating_sub(value) % modulus;
-                }
-            }
-
-            #[inline(always)]
-            fn mul(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                *self = self.saturating_mul(value);
-            }
-
-            #[inline(always)]
-            fn mul_mod(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                let modulus = random.random::<$type>();
-                if modulus != 0 {
-                    *self = self.saturating_mul(value) % modulus;
-                }
-            }
-
-            #[inline(always)]
-            fn div(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                if value != 0 {
-                    *self = self.saturating_div(value);
-                }
-            }
-
-            #[inline(always)]
-            fn remainder(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                if value != 0 {
-                    *self = *self % value;
-                }
-            }
-
-            #[inline(always)]
-            fn set_zero(&mut self) {
-                *self = 0;
-            }
-
-            #[inline(always)]
-            fn set_one(&mut self) {
-                *self = 1;
-            }
-
-            #[inline(always)]
-            fn set_max(&mut self) {
-                *self = <$type>::MAX;
-            }
-
-            #[inline(always)]
-            fn set_random(&mut self, random: &mut impl Rng) {
-                *self = random.random::<$type>();
-            }
-
-            #[inline(always)]
-            fn xor(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                *self ^= value;
-            }
-
-            #[inline(always)]
-            fn and(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                *self &= value;
-            }
-
-            #[inline(always)]
-            fn or(&mut self, random: &mut impl Rng) {
-                let value = random.random::<$type>();
-                *self |= value;
-            }
-
-            #[inline(always)]
-            fn not(&mut self) {
-                *self = !*self;
-            }
-
-            #[inline(always)]
-            fn rotate_left(&mut self, random: &mut impl Rng) {
-                let positions = random.random_range(0..size_of::<$type>() * 8);
-                *self = (*self).rotate_left(positions as u32);
-            }
-
-            #[inline(always)]
-            fn rotate_right(&mut self, random: &mut impl Rng) {
-                let positions = random.random_range(0..size_of::<$type>() * 8);
-                *self = (*self).rotate_right(positions as u32);
-            }
-
-            #[inline(always)]
-            fn shift_left(&mut self, random: &mut impl Rng) {
-                let positions = random.random_range(0..size_of::<$type>() * 8);
-                *self = self.wrapping_shl(positions as u32);
-            }
-
-            #[inline(always)]
-            fn shift_right(&mut self, random: &mut impl Rng) {
-                let positions = random.random_range(0..size_of::<$type>() * 8);
-                *self = self.wrapping_shr(positions as u32);
-            }
-
-            #[inline(always)]
-            fn reverse_bits(&mut self) {
-                *self = (*self).reverse_bits();
-            }
-
-            #[inline(always)]
-            fn swap_adjacent_bits(&mut self) {
-                let v = *self as u128;
-                *self = (((v >> 1) & EVEN) | ((v << 1) & ODD)) as $type;
-            }
-
-            #[inline(always)]
-            fn fisher_yates_shuffle(&mut self, random: &mut impl Rng) {
-                let mut bytes = self.to_le_bytes();
-                for i in (1..bytes.len()).rev() {
-                    let j = random.random_range(0..=i);
-                    bytes.swap(i, j);
-                }
-                *self = <$type>::from_le_bytes(bytes);
-            }
-
-            #[inline(always)]
-            fn gray_code_encoding(&mut self) {
-                *self ^= *self >> 1;
-            }
-        }
-    };
-}
-
-impl InterestingMutations for u8 {
-    fn set_interesting(&mut self, random: &mut impl Rng) {
-        *self = *random.choice(&INTERESTING_U8);
-    }
-}
-
-impl InterestingMutations for u16 {
-    fn set_interesting(&mut self, random: &mut impl Rng) {
-        *self = *random.choice(&INTERESTING_U16);
-    }
-}
-
-impl InterestingMutations for u32 {
-    fn set_interesting(&mut self, random: &mut impl Rng) {
-        *self = *random.choice(&INTERESTING_U32);
-    }
-}
-
-impl InterestingMutations for u64 {
-    fn set_interesting(&mut self, random: &mut impl Rng) {
-        let hi = *random.choice(&INTERESTING_U32) as u64;
-        let lo = *random.choice(&INTERESTING_U32) as u64;
-        *self = (hi << 32) | lo;
-    }
-}
-
-impl InterestingMutations for u128 {
-    fn set_interesting(&mut self, random: &mut impl Rng) {
-        let hi_hi = *random.choice(&INTERESTING_U32) as u64;
-        let hi_lo = *random.choice(&INTERESTING_U32) as u64;
-        let lo_hi = *random.choice(&INTERESTING_U32) as u64;
-        let lo_lo = *random.choice(&INTERESTING_U32) as u64;
-
-        let hi = (hi_hi << 32) | hi_lo;
-        let lo = (lo_hi << 32) | lo_lo;
-
-        *self = ((hi as u128) << 64) | (lo as u128);
-    }
-}
-
-impl_mutations!(u8);
-impl_mutations!(u16);
-impl_mutations!(u32);
-impl_mutations!(u64);
-impl_mutations!(u128);
 
 macro_rules! impl_mutable {
     ($type:ty) => {
         impl Mutable for $type {
             fn mutate(&mut self, random: &mut impl Rng) -> bool {
                 match random.random_range(0..=28) {
-                    0 => self.flip_bit(random),
-                    1 => self.add(random),
-                    2 => self.add_one(),
-                    3 => self.add_mod(random),
-                    4 => self.sub(random),
-                    5 => self.sub_one(),
-                    6 => self.sub_mod(random),
-                    7 => self.mul(random),
-                    8 => self.mul_mod(random),
-                    9 => self.div(random),
-                    10 => self.remainder(random),
-                    11 => self.set_zero(),
-                    12 => self.set_one(),
-                    13 => self.set_max(),
-                    14 => self.set_random(random),
-                    15 => self.xor(random),
-                    16 => self.and(random),
-                    17 => self.or(random),
-                    18 => self.not(),
-                    19 => self.rotate_left(random),
-                    20 => self.rotate_right(random),
-                    21 => self.shift_left(random),
-                    22 => self.shift_right(random),
-                    23 => self.reverse_bits(),
-                    24 => self.set_interesting(random),
-                    25 => self.swap_adjacent_bits(),
-                    26 => self.fisher_yates_shuffle(random),
-                    27 => self.gray_code_encoding(),
+                    // flip_bit
+                    0 => {
+                        let bit = random.random_range(0..size_of::<$type>() * 8);
+                        *self ^= 1 << bit;
+                    }
+                    // add
+                    1 => {
+                        let value = random.random::<$type>();
+                        *self = self.saturating_add(value);
+                    }
+                    // add_one
+                    2 => {
+                        *self = self.saturating_add(1);
+                    }
+                    // add_mod
+                    3 => {
+                        let value = random.random::<$type>();
+                        let modulus = random.random::<$type>();
+                        if modulus != 0 {
+                            *self = self.saturating_add(value) % modulus;
+                        }
+                    }
+                    // sub
+                    4 => {
+                        let value = random.random::<$type>();
+                        *self = self.saturating_sub(value);
+                    }
+                    // sub_one
+                    5 => {
+                        *self = self.saturating_sub(1);
+                    }
+                    // sub_mod
+                    6 => {
+                        let value = random.random::<$type>();
+                        let modulus = random.random::<$type>();
+                        if modulus != 0 {
+                            *self = self.saturating_sub(value) % modulus;
+                        }
+                    }
+                    // mul
+                    7 => {
+                        let value = random.random::<$type>();
+                        *self = self.saturating_mul(value);
+                    }
+                    // mul_mod
+                    8 => {
+                        let value = random.random::<$type>();
+                        let modulus = random.random::<$type>();
+                        if modulus != 0 {
+                            *self = self.saturating_mul(value) % modulus;
+                        }
+                    }
+                    // div
+                    9 => {
+                        let value = random.random::<$type>();
+                        if value != 0 {
+                            *self = self.saturating_div(value);
+                        }
+                    }
+                    // remainder
+                    10 => {
+                        let value = random.random::<$type>();
+                        if value != 0 {
+                            *self = *self % value;
+                        }
+                    }
+                    // set_zero
+                    11 => {
+                        *self = 0;
+                    }
+                    // set_one
+                    12 => {
+                        *self = 1;
+                    }
+                    // set_max
+                    13 => {
+                        *self = <$type>::MAX;
+                    }
+                    // set_random
+                    14 => {
+                        *self = random.random::<$type>();
+                    }
+                    // xor
+                    15 => {
+                        let value = random.random::<$type>();
+                        *self ^= value;
+                    }
+                    // and
+                    16 => {
+                        let value = random.random::<$type>();
+                        *self &= value;
+                    }
+                    // or
+                    17 => {
+                        let value = random.random::<$type>();
+                        *self |= value;
+                    }
+                    // not
+                    18 => {
+                        *self = !*self;
+                    }
+                    // rotate_left
+                    19 => {
+                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                        *self = (*self).rotate_left(positions as u32);
+                    }
+                    // rotate_right
+                    20 => {
+                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                        *self = (*self).rotate_right(positions as u32);
+                    }
+                    // shift_left
+                    21 => {
+                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                        *self = self.wrapping_shl(positions as u32);
+                    }
+                    // shift_right
+                    22 => {
+                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                        *self = self.wrapping_shr(positions as u32);
+                    }
+                    // reverse_bits
+                    23 => {
+                        *self = (*self).reverse_bits();
+                    }
+                    // set_interesting
+                    24 => {
+                        self.set_interesting(random);
+                    }
+                    // swap_adjacent_bits
+                    25 => {
+                        let v = *self as u128;
+                        *self = (((v >> 1) & EVEN) | ((v << 1) & ODD)) as $type;
+                    }
+                    // fisher_yates_shuffle
+                    26 => {
+                        let mut bytes = self.to_le_bytes();
+                        for i in (1..bytes.len()).rev() {
+                            let j = random.random_range(0..=i);
+                            bytes.swap(i, j);
+                        }
+                        *self = <$type>::from_le_bytes(bytes);
+                    }
+                    // gray_code_encoding
+                    27 => {
+                        *self ^= *self >> 1;
+                    }
+                    // signal to set None
                     28 => return true,
                     _ => unreachable!(),
                 }
-                return false;
+                false
             }
         }
     };
@@ -277,3 +174,48 @@ impl_mutable!(u16);
 impl_mutable!(u32);
 impl_mutable!(u64);
 impl_mutable!(u128);
+
+impl InterestingMutations for u8 {
+    fn set_interesting(&mut self, random: &mut impl Rng) -> bool {
+        *self = *INTERESTING_U8.choose(random).unwrap();
+        false
+    }
+}
+
+impl InterestingMutations for u16 {
+    fn set_interesting(&mut self, random: &mut impl Rng) -> bool {
+        *self = *INTERESTING_U16.choose(random).unwrap();
+        false
+    }
+}
+
+impl InterestingMutations for u32 {
+    fn set_interesting(&mut self, random: &mut impl Rng) -> bool {
+        *self = *INTERESTING_U32.choose(random).unwrap();
+        false
+    }
+}
+
+impl InterestingMutations for u64 {
+    fn set_interesting(&mut self, random: &mut impl Rng) -> bool {
+        let hi = *INTERESTING_U32.choose(random).unwrap() as u64;
+        let lo = *INTERESTING_U32.choose(random).unwrap() as u64;
+        *self = (hi << 32) | lo;
+        false
+    }
+}
+
+impl InterestingMutations for u128 {
+    fn set_interesting(&mut self, random: &mut impl Rng) -> bool {
+        let hi_hi = *INTERESTING_U32.choose(random).unwrap() as u64;
+        let hi_lo = *INTERESTING_U32.choose(random).unwrap() as u64;
+        let lo_hi = *INTERESTING_U32.choose(random).unwrap() as u64;
+        let lo_lo = *INTERESTING_U32.choose(random).unwrap() as u64;
+
+        let hi = (hi_hi << 32) | hi_lo;
+        let lo = (lo_hi << 32) | lo_lo;
+
+        *self = ((hi as u128) << 64) | (lo as u128);
+        false
+    }
+}

@@ -80,6 +80,20 @@ impl Context {
         }
     }
 
+    /// Returns the context being used to create statements
+    pub fn statement(&self) -> Self {
+        Self {
+            allow_slices: true,
+            allow_references: true,
+            allow_structs: true,
+            min_element_count: 0,
+            min_string_size: 0,
+            filter_public_input_structs: false,
+            type_depth: 0,
+            ..*self
+        }
+    }
+
     /// Returns the context being used to create sub-types (arrays of arrays, tuples of arrays,
     /// arrays of structs, etc.)
     pub fn inner_type(&self) -> Self {

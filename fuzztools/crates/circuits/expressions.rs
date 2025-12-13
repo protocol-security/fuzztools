@@ -1,13 +1,11 @@
 use super::{
     context::Context,
+    misc::random_string,
     operators::Operator,
     types::{Boolean, Field, Integer, Type},
 };
-use crate::{
-    math::random_field_element,
-    utils::{random_string, RandomChoice},
-};
-use rand::Rng;
+use crate::math::random_field_element;
+use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
 
 // ============================================================
@@ -37,7 +35,7 @@ impl ExprType {
         if random.random_bool(0.5) {
             ExprType::Field
         } else {
-            let bits = *random.choice(&[8u8, 16, 32, 64]);
+            let bits = *[8u8, 16, 32, 64].choose(random).unwrap();
             let signed = random.random_bool(0.5);
             ExprType::Integer { bits, signed }
         }
@@ -169,8 +167,8 @@ fn types_compatible(a: &ExprType, b: &ExprType) -> bool {
 #[derive(Clone)]
 pub struct FunctionDef {
     pub name: String,
-    pub params: Vec<(String, ExprType)>,
-    pub return_type: ExprType,
+    pub inputs: Vec<(String, ExprType)>,
+    pub return_type: Option<ExprType>,
 }
 
 // ============================================================
@@ -393,7 +391,10 @@ impl Expr {
                     // Check for functions that return this type
                     let matching_funcs: Vec<_> = functions
                         .iter()
-                        .filter(|f| types_compatible(&f.return_type, &target_type))
+                        .filter(|f| {
+                            f.return_type.is_some() &&
+                                types_compatible(&f.return_type.as_ref().unwrap(), &target_type)
+                        })
                         .collect();
                     if !matching_funcs.is_empty() {
                         choices.push("call");
@@ -425,7 +426,7 @@ impl Expr {
                         _ => {}
                     }
 
-                    match *random.choice(&choices) {
+                    match *choices.choose(random).unwrap() {
                         "literal" => {
                             slots[slot_idx] =
                                 Some(Self::random_leaf(random, ctx, &target_type, scope));
@@ -437,7 +438,7 @@ impl Expr {
                                 slots[slot_idx] =
                                     Some(Self::random_leaf(random, ctx, &target_type, scope));
                             } else {
-                                let var = *random.choice(&vars);
+                                let var = *vars.choose(random).unwrap();
                                 slots[slot_idx] = Some(Expr {
                                     kind: ExprKind::Variable(var.name.clone()),
                                     ty: target_type,
@@ -450,11 +451,13 @@ impl Expr {
                             // - Field: no modulo allowed
                             // - Integer: all arithmetic operators allowed
                             let op = match &target_type {
-                                ExprType::Field => *random.choice(Operator::arithmetic_field()),
-                                ExprType::Integer { .. } => {
-                                    *random.choice(Operator::arithmetic_integer())
+                                ExprType::Field => {
+                                    *Operator::arithmetic_field().choose(random).unwrap()
                                 }
-                                _ => *random.choice(Operator::arithmetic_field()),
+                                ExprType::Integer { .. } => {
+                                    *Operator::arithmetic_integer().choose(random).unwrap()
+                                }
+                                _ => *Operator::arithmetic_field().choose(random).unwrap(),
                             };
 
                             let left_slot = slots.len();
@@ -491,14 +494,17 @@ impl Expr {
                             let use_integer = random.random_bool(0.7); // Prefer integers for more operators
 
                             let (op, operand_type) = if use_integer {
-                                let bits = *random.choice(&[8u8, 16, 32, 64]);
+                                let bits = *[8u8, 16, 32, 64].choose(random).unwrap();
                                 let signed = random.random_bool(0.5);
                                 (
-                                    *random.choice(Operator::comparison_integer()),
+                                    *Operator::comparison_integer().choose(random).unwrap(),
                                     ExprType::Integer { bits, signed },
                                 )
                             } else {
-                                (*random.choice(Operator::comparison_field()), ExprType::Field)
+                                (
+                                    *Operator::comparison_field().choose(random).unwrap(),
+                                    ExprType::Field,
+                                )
                             };
 
                             let left_slot = slots.len();
@@ -527,7 +533,7 @@ impl Expr {
                         }
 
                         "binary_bool" => {
-                            let op = *random.choice(Operator::boolean_binary());
+                            let op = *Operator::boolean_binary().choose(random).unwrap();
                             let left_slot = slots.len();
                             let right_slot = slots.len() + 1;
                             slots.push(None);
@@ -553,7 +559,7 @@ impl Expr {
                         }
 
                         "unary_neg" => {
-                            let op = *random.choice(Operator::unary_numeric());
+                            let op = *Operator::unary_numeric().choose(random).unwrap();
                             let operand_slot = slots.len();
                             slots.push(None);
 
@@ -571,7 +577,7 @@ impl Expr {
                         }
 
                         "unary_not" => {
-                            let op = *random.choice(Operator::unary_boolean());
+                            let op = *Operator::unary_boolean().choose(random).unwrap();
                             let operand_slot = slots.len();
                             slots.push(None);
 
@@ -601,10 +607,10 @@ impl Expr {
                         }
 
                         "call" => {
-                            let func = *random.choice(&matching_funcs);
+                            let func = *matching_funcs.choose(random).unwrap();
                             let arg_slots: Vec<usize> =
-                                (0..func.params.len()).map(|i| slots.len() + i).collect();
-                            for _ in 0..func.params.len() {
+                                (0..func.inputs.len()).map(|i| slots.len() + i).collect();
+                            for _ in 0..func.inputs.len() {
                                 slots.push(None);
                             }
 
@@ -615,7 +621,7 @@ impl Expr {
                                 result_type: target_type.clone(),
                             });
 
-                            for (i, (_, param_ty)) in func.params.iter().enumerate().rev() {
+                            for (i, (_, param_ty)) in func.inputs.iter().enumerate().rev() {
                                 work.push_front(ExprWorkItem::Generate {
                                     slot_idx: arg_slots[i],
                                     target_type: param_ty.clone(),
@@ -625,7 +631,7 @@ impl Expr {
                         }
 
                         "lambda_call" => {
-                            let lambda_var = *random.choice(&matching_lambdas);
+                            let lambda_var = *matching_lambdas.choose(random).unwrap();
                             if let ExprType::Lambda { params, ret } = &lambda_var.ty {
                                 let arg_slots: Vec<usize> =
                                     (0..params.len()).map(|i| slots.len() + i).collect();
@@ -720,7 +726,7 @@ impl Expr {
         if random.random_bool(0.5) {
             let matching = scope.variables_of_type(target_type);
             if !matching.is_empty() {
-                let var = *random.choice(&matching);
+                let var = *matching.choose(random).unwrap();
                 return Expr { kind: ExprKind::Variable(var.name.clone()), ty: target_type.clone() };
             }
         }
@@ -781,7 +787,7 @@ impl Statement {
             choices.push("for");
         }
 
-        match *random.choice(&choices) {
+        match *choices.choose(random).unwrap() {
             "let" => Self::random_let(random, ctx, scope, functions),
             "assign" => Self::random_assign(random, ctx, scope, functions),
             "compound_assign" => Self::random_compound_assign(random, ctx, scope, functions),
@@ -834,7 +840,7 @@ impl Statement {
             return Self::random_let(random, ctx, &mut scope.clone(), functions);
         }
 
-        let var = *random.choice(&mutable_vars);
+        let var = *mutable_vars.choose(random).unwrap();
         let value = Expr::random(random, ctx, var.ty.clone(), scope, functions);
 
         Statement::Assign { name: var.name.clone(), value }
@@ -854,15 +860,17 @@ impl Statement {
             return Self::random_let(random, ctx, &mut scope.clone(), functions);
         }
 
-        let var = *random.choice(&mutable_vars);
+        let var = *mutable_vars.choose(random).unwrap();
 
         // Choose operator based on variable type:
         // - Field: no modulo allowed
         // - Integer: all compound operators allowed
         let op = match &var.ty {
-            ExprType::Field => *random.choice(Operator::compound_assign_field()),
-            ExprType::Integer { .. } => *random.choice(Operator::compound_assign_integer()),
-            _ => *random.choice(Operator::compound_assign_field()),
+            ExprType::Field => *Operator::compound_assign_field().choose(random).unwrap(),
+            ExprType::Integer { .. } => {
+                *Operator::compound_assign_integer().choose(random).unwrap()
+            }
+            _ => *Operator::compound_assign_field().choose(random).unwrap(),
         };
 
         let value = Expr::random(random, ctx, var.ty.clone(), scope, functions);

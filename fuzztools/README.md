@@ -5,26 +5,23 @@ This crate implements many types as well as stuff I will be using in my fuzzers.
 ## Modules
 
 - [`blockchain`](#blockchain) - Implements the consensus and execution spec types and constants
-- [`builders`](#builders) - Handles the logic of creating **VALID** types according to protocol rules
-- [`circuits`](#circuits) - Handles the logic of creating **VALID** Noir circuits
+- [`builders`](#builders) - Handles the logic of creating **VALID** instances of *to-be-fuzzed* types
+- [`circuits`](#circuits) - Implements the Noir IR
 - [`math`](#math) - Math utilities for fuzzing (field elements, weighted selection, etc.)
 - [`mutations`](#mutations) - Implements the `Mutable` trait for various types
 - [`transactions`](#transactions) - Implements the `Transaction` and `SignedTransaction` types
-- [`utils`](#utils) - Some stuff I do not know where to put like `FastPrivateKeySigner`
+- [`utils`](#utils) - Some stuff I do not know where to put like `Signer`
 
 ## Builders
 
 - `TransactionBuilder` - Handles the logic of creating **VALID** transactions per mempool rules.
+- `CircuitBuilder` - Handles the logic of creating **VALID** Noir circuits.
 
-Moreover, it also contains a set of pre-deployed contracts as well as some optimizations to speed up stuff like an `RpcCache` that updates itself every time a new block is received.
+It also contains a set of Solidity contracts to test on-chain, like sending transactions that `selfdestruct` contracts mid-construction and some other stuff.
 
 ## Circuits
 
-Implements random circuit generation for fuzzing Noir circuits. Generates valid Noir programs with:
-- Random structs and globals
-- Helper functions with proper scoping (no circular dependencies)
-- Main function with public inputs
-- Type-safe expression generation
+Implements the Noir IR to generate random circuits.
 
 ## Mutations
 
@@ -33,7 +30,7 @@ Provides the `Mutable` trait for the next types:
 - Alloy's `Address`, `Bytes`, `FixedBytes<N>`, `U256`, `Authorization`, `AccessList`, `Vec<Authorization>` and `Vec<SignedAuthorization>`
 - `[T; N]` and `[u8; N]` arrays
 - `Vec<T>` and `Vec<u8>`
-- `u8`, `u16`, `u32`, `u64`, `u128`
+- `bool`, `u8`, `u16`, `u32`, `u64`, `u128`
 
 ## Transactions
 
@@ -43,6 +40,4 @@ This is mainly used in `rakoon` for fuzzing transactions, as the idea is to send
 
 ## Utils
 
-- `fast_signer` - Implements a secp256k1 signer that is faster than alloy's one by 20-30%
-- `random` - Implements the `choice` function for any `Rng` type, allowing to pick a random element from a non-empty slice
-
+- `signer` - Implements a secp256k1 signer that is faster than alloy's one by 20-30% (check [this](https://github.com/tarcieri/rust-secp256k1-ecdsa-bench)).
