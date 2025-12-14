@@ -132,11 +132,8 @@ impl Mutable for AccessList {
                 // Add entry with storage keys from `STORAGE_KEYS`
                 let address = Address::random(random);
                 let num_keys = random.random::<u8>(); // @audit max 255 keys
-                let storage_keys = (0..num_keys)
-                    .map(|_| {
-                        *STORAGE_KEYS.choose(random).unwrap()
-                    })
-                    .collect();
+                let storage_keys =
+                    (0..num_keys).map(|_| *STORAGE_KEYS.choose(random).unwrap()).collect();
 
                 self.0.push(AccessListItem { address, storage_keys });
             }

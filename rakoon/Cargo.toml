@@ -18,3 +18,4 @@ tokio.workspace = true
 tikv-jemallocator.workspace = true
 reqwest = "0.12.25"
 serde_json.workspace = true
+serde.workspace = true

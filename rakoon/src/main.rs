@@ -1,12 +1,13 @@
 mod app;
 mod constants;
 
+use std::{fs, path::Path};
+
 use anyhow::Result;
-use app::App;
+use app::{App, Context};
 use clap::Parser;
 use constants::{TransactionType, GREEN, HEADER, RED, RESET};
 use rand::{rngs::SmallRng, SeedableRng};
-
 
 #[derive(Parser)]
 #[command(
@@ -29,6 +30,9 @@ struct Cli {
 
     #[arg(long, help = "If false, it spams VALID transactions")]
     fuzzing: bool,
+
+    #[arg(long, help = "Path to the config file")]
+    config: Option<String>,
 }
 
 #[tokio::main]
@@ -36,17 +40,24 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
+    let config_path = cli.config.unwrap_or_else(|| "./configs/rakoon.json".into());
+    if !Path::new(&config_path).exists() {
+        return Err(anyhow::anyhow!("Config file not found: {}", config_path));
+    }
+
+    let config: Context = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
     let prelude = format!(
         "{HEADER}\n{GREEN}INFO{RESET}      URL:                    \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Key:                    \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Seed:                   \
+         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Config:                 \
          {RED}{}{RESET}\n{GREEN}INFO{RESET}      Type:                   \
          {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        {RED}{}{RESET}\n\n",
-        cli.url, cli.key, cli.seed, cli.tx_type, cli.fuzzing,
+        cli.url, cli.key, cli.seed, config_path, cli.tx_type, cli.fuzzing,
     );
 
     // Run the application
-    let mut app = App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, prelude).await?;
+    let mut app = App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, prelude, config).await?;
     let result = app.run(&mut random).await;
 
     if let Err(e) = result {

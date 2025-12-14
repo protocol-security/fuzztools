@@ -29,7 +29,3 @@ pub(crate) enum TransactionType {
     Eip1559,
     Eip7702,
 }
-
-pub(crate) const DEFAULT_TXS_PER_CORE: usize = 100;
-pub(crate) const DEFAULT_CHANNEL_CAPACITY: usize = 500;
-pub(crate) const DEFAULT_RPC_TIMEOUT: u64 = 5; // seconds

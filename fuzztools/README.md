@@ -9,6 +9,7 @@ This crate implements many types as well as stuff I will be using in my fuzzers.
 - [`circuits`](#circuits) - Implements the Noir IR
 - [`math`](#math) - Math utilities for fuzzing (field elements, weighted selection, etc.)
 - [`mutations`](#mutations) - Implements the `Mutable` trait for various types
+- [`rpc`](#rpc) - Implements a blazingly fast `RpcClient` to send JSON-RPC requests
 - [`transactions`](#transactions) - Implements the `Transaction` and `SignedTransaction` types
 - [`utils`](#utils) - Some stuff I do not know where to put like `Signer`
 
@@ -31,6 +32,10 @@ Provides the `Mutable` trait for the next types:
 - `[T; N]` and `[u8; N]` arrays
 - `Vec<T>` and `Vec<u8>`
 - `bool`, `u8`, `u16`, `u32`, `u64`, `u128`
+
+## Rpc
+
+Implements the `RpcClient` to make single RPC calls as well as batched ones, much faster than Alloy's ones.
 
 ## Transactions
 

@@ -115,7 +115,6 @@ impl App {
 
             // @todo mutate the code
 
-            
             let indexed_name = format!("circuit_{}", self.total_programs);
             let debug_dir = format!("{}/debug/{}", self.crash_report_dir, indexed_name);
             let _ = Command::new("nargo").args(["new", &debug_dir]).output();
@@ -125,7 +124,6 @@ impl App {
             if self.job_sender.send(job).is_err() {
                 break; // All workers died
             }
-            
 
             self.total_programs += 1;
             self.programs_since_last_update += 1;

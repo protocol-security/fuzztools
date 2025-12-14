@@ -1,18 +1,20 @@
-use crate::constants::{
-    TransactionType, AUTH_PRIVATE_KEY, CLEAR_SCREEN, DEFAULT_CHANNEL_CAPACITY,
-    DEFAULT_RPC_TIMEOUT, DEFAULT_TXS_PER_CORE, GREEN, RED, RESET,
+use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, CLEAR_SCREEN, GREEN, RED, RESET};
+use alloy::{
+    eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder,
+    signers::local::PrivateKeySigner,
 };
-use alloy::{eips::eip7702::SignedAuthorization, hex, primitives::Address};
 use anyhow::Result;
 use fuzztools::{
-    builders::TransactionBuilder,
+    builders::{contracts::AccessListTarget, TransactionBuilder},
     mutations::Mutable,
+    rpc::RpcClient,
     transactions::{SignedTransaction, Transaction},
     utils::Signer,
 };
 use rand::Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
     io::{self, Write},
     sync::{
@@ -23,27 +25,46 @@ use std::{
 };
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+#[derive(Serialize, Deserialize)]
+pub struct Context {
+    pub rpc_timeout: u64,
+    pub tx_channel_capacity: usize,
+    pub completion_channel_capacity: usize,
+    pub block_poll_interval: u64,
+    pub txs_per_core: usize,
+    pub chunk_size: usize,
+    pub screen_update_interval: u128,
+}
+
 pub struct App {
+    /// Header being displayed on the screen
     prelude: String,
-    client: reqwest::Client,
-    rpc_url: String,
+    /// Context of the application
+    ctx: Context,
+    /// RPC client connection
+    client: Arc<RpcClient>,
+    /// Transaction type to fuzz
     tx_type: TransactionType,
+    /// If true, the transactions will be mutated
     fuzzing: bool,
+    /// Transaction builder
     builder: TransactionBuilder,
-    signer: Signer,
-    auth_signer: Signer,
+    /// Transaction signer
+    signer: Arc<Signer>,
+    /// Authorization signer
+    auth_signer: Arc<Signer>,
 
+    /// Channel to send transactions to the dispatcher
     tx_sender: Sender<Vec<String>>,
+    /// Channel where the dispatcher is listening
     tx_receiver: Option<Receiver<Vec<String>>>,
+    /// Channel to send completion counts to the main thread
     completion_sender: Option<Sender<u64>>,
+    /// Channel where the main thread is listening
     completion_receiver: Receiver<u64>,
+    /// Atomic boolean to signal the main thread and other threads that the connection to the RPC
+    /// client has been lost
     connection_lost: Arc<AtomicBool>,
-
-    total_txs_sent: u64,
-    txs_since_last_update: u64,
-    start_time: Instant,
-    last_update: Instant,
-    current_block: u64,
 }
 
 impl App {
@@ -53,230 +74,135 @@ impl App {
         url: String,
         fuzzing: bool,
         prelude: String,
+        ctx: Context,
     ) -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .tcp_nodelay(true)
-            .pool_max_idle_per_host(100)
-            .timeout(Duration::from_secs(DEFAULT_RPC_TIMEOUT))
-            .build()?;
+        let client = RpcClient::new(url.clone(), Duration::from_secs(ctx.rpc_timeout));
 
-        // Fetch initial chain state
-        let (chain_id, gas_price, priority_fee, block_number) =
-            Self::fetch_chain_state(&client, &url).await?;
+        // First, query the node for basic info about the chain
+        let methods = &["eth_chainId", "eth_gasPrice", "eth_maxPriorityFeePerGas"];
+        let [chain_id, gas_price, priority_fee] =
+            client.batch_call_no_params(methods).await?.try_into().unwrap();
 
-        // Deploy access list target contract
+        // Then, create the needed signers
         let key_bytes = hex::decode(&key)?;
-        let access_list_target = Self::deploy_contract(&client, &url, &key_bytes).await?;
-
-        // Build signers
+        let signer = Signer::new(&key_bytes)?;
+        let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
         let auth_signer = Signer::new(&auth_key_bytes)?;
-        let signer = Signer::new(&key_bytes)?;
 
-        let builder =
-            TransactionBuilder::from_values(access_list_target, chain_id, gas_price, priority_fee);
+        // Then, deploy the target contracts
+        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(url.as_str()).await?;
+        let access_list_target = AccessListTarget::deploy(&deployer).await?;
+        let access_list_target_address = *access_list_target.address();
 
-        let (tx_sender, tx_receiver) = channel::<Vec<String>>(DEFAULT_CHANNEL_CAPACITY);
-        let (completion_sender, completion_receiver) = channel::<u64>(1000);
+        // Finally, create the transaction builder
+        let builder = TransactionBuilder::from_values(
+            access_list_target_address,
+            chain_id as u64,
+            gas_price,
+            priority_fee,
+        );
+
+        // And the communication channels
+        let (tx_sender, tx_receiver) = channel::<Vec<String>>(ctx.tx_channel_capacity);
+        let (completion_sender, completion_receiver) =
+            channel::<u64>(ctx.completion_channel_capacity);
 
         Ok(Self {
             prelude,
-            client,
-            rpc_url: url,
+            ctx,
+            client: Arc::new(client),
             tx_type,
             fuzzing,
             builder,
-            signer,
-            auth_signer,
+            signer: Arc::new(signer),
+            auth_signer: Arc::new(auth_signer),
             tx_sender,
             tx_receiver: Some(tx_receiver),
             completion_sender: Some(completion_sender),
             completion_receiver,
             connection_lost: Arc::new(AtomicBool::new(false)),
-            total_txs_sent: 0,
-            txs_since_last_update: 0,
-            start_time: Instant::now(),
-            last_update: Instant::now(),
-            current_block: block_number,
         })
     }
 
     pub async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
+        // This will spawn a thread that will be listening for incoming transactions and will
+        // broadcast them in chunks to the RPC client
         self.spawn_dispatcher();
 
         let num_cores = std::thread::available_parallelism()?.get();
-        let batch_size = (DEFAULT_TXS_PER_CORE * num_cores).max(1000);
-
+        let batch_size = (self.ctx.txs_per_core * num_cores).max(1000);
         let mut txs: Vec<Transaction> = (0..batch_size).map(|_| self.build_tx(random)).collect();
-        let mut block_poll_interval = tokio::time::interval(Duration::from_secs(1));
-        block_poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        let mut total_txs_sent = 0;
+        let mut txs_since_last_update = 0;
+        let mut last_update = Instant::now();
+        let start_time = Instant::now();
+        let mut last_block_tick = Instant::now();
+        let mut current_block = 0;
 
         loop {
             if self.connection_lost.load(Ordering::Relaxed) {
-                eprintln!("\n\n\x1b[1;31m[!] Critical connection failure. Exiting...\x1b[0m");
+                eprintln!("\n\n\x1b[1;31m[!] Node crashed, exiting...\x1b[0m");
                 return Ok(());
             }
 
-            // Drain completion stats
-            while let Ok(sent_count) = self.completion_receiver.try_recv() {
-                self.total_txs_sent += sent_count;
-                self.txs_since_last_update += sent_count;
+            // Drain stats from the dispatcher
+            while let Ok(count) = self.completion_receiver.try_recv() {
+                total_txs_sent += count;
+                txs_since_last_update += count;
             }
 
-            tokio::select! {
-                _ = block_poll_interval.tick() => {
-                    if let Ok(new_height) = self.rpc_block_number().await {
-                        if new_height > self.current_block {
-                            self.current_block = new_height;
-                            let _ = self.refresh_gas_prices().await;
-                        }
+            // Poll for new blocks every second so that we create transactions with up to date gas
+            // prices
+            if last_block_tick.elapsed() >= Duration::from_secs(self.ctx.block_poll_interval) {
+                last_block_tick = Instant::now();
+                if let Ok(height) = self.client.call("eth_blockNumber", json!([])).await {
+                    if height > current_block {
+                        current_block = height;
+                        let _ = self.refresh_gas_prices().await;
                     }
                 }
+            }
 
-                _ = tokio::task::yield_now() => {
-                    if self.last_update.elapsed().as_secs_f64() >= 1.0 {
-                        self.screen()?;
-                        self.txs_since_last_update = 0;
-                        self.last_update = Instant::now();
-                    }
+            // Update screen
+            if last_update.elapsed().as_millis() >= self.ctx.screen_update_interval {
+                self.screen(total_txs_sent, txs_since_last_update, start_time)?;
+                txs_since_last_update = 0;
+                last_update = Instant::now();
+            }
 
-                    if self.fuzzing {
-                        txs.iter_mut().for_each(|tx| { tx.mutate(random); });
-                    }
+            // Mutate if fuzzing is enabled
+            if self.fuzzing {
+                txs.iter_mut().for_each(|tx| {
+                    tx.mutate(random);
+                });
+            }
 
-                    let signer = self.signer.clone();
-                    let auth_signer = self.auth_signer.clone();
-                    let txs_to_process = std::mem::take(&mut txs);
+            // Sign in parallel
+            let signer = self.signer.clone();
+            let auth_signer = self.auth_signer.clone();
+            let txs_to_sign = txs.clone();
 
-                    let (processed_txs, signed_batch) = tokio::task::spawn_blocking(move || {
-                        let signed: Vec<String> = txs_to_process
-                            .par_iter()
-                            .map(|tx| Self::sign_and_encode(tx.clone(), &signer, &auth_signer))
-                            .collect();
-                        (txs_to_process, signed)
-                    }).await?;
+            let signed = tokio::task::spawn_blocking(move || {
+                let signed: Vec<String> = txs_to_sign
+                    .par_iter()
+                    .map(|tx| Self::sign_and_encode(tx.clone(), &signer, &auth_signer))
+                    .collect();
+                signed
+            })
+            .await?;
 
-                    txs = processed_txs;
-                    txs.iter_mut().for_each(|tx| { *tx = self.build_tx(random); });
+            // Send the signed transactions to the dispatcher
+            if self.tx_sender.send(signed).await.is_err() {
+                return Ok(());
+            }
 
-                    if self.tx_sender.send(signed_batch).await.is_err() {
-                        return Ok(());
-                    }
-                }
+            // Create new transactions in place to avoid allocations
+            for tx in &mut txs {
+                *tx = self.build_tx(random);
             }
         }
-    }
-
-    // ---------------------
-    // RPC helpers
-    // ---------------------
-
-    async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-            "id": 1
-        });
-
-        let resp: Value = self.client.post(&self.rpc_url).json(&payload).send().await?.json().await?;
-
-        resp.get("result")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("RPC error: {:?}", resp.get("error")))
-    }
-
-    async fn rpc_block_number(&self) -> Result<u64> {
-        let result = self.rpc_call("eth_blockNumber", json!([])).await?;
-        let hex = result.as_str().ok_or_else(|| anyhow::anyhow!("Invalid block number"))?;
-        Ok(u64::from_str_radix(hex.trim_start_matches("0x"), 16)?)
-    }
-
-    async fn rpc_gas_price(&self) -> Result<u128> {
-        let result = self.rpc_call("eth_gasPrice", json!([])).await?;
-        let hex = result.as_str().ok_or_else(|| anyhow::anyhow!("Invalid gas price"))?;
-        Ok(u128::from_str_radix(hex.trim_start_matches("0x"), 16)?)
-    }
-
-    async fn rpc_priority_fee(&self) -> Result<u128> {
-        let result = self.rpc_call("eth_maxPriorityFeePerGas", json!([])).await?;
-        let hex = result.as_str().ok_or_else(|| anyhow::anyhow!("Invalid priority fee"))?;
-        Ok(u128::from_str_radix(hex.trim_start_matches("0x"), 16)?)
-    }
-
-    async fn refresh_gas_prices(&mut self) -> Result<()> {
-        let (gas_price, priority_fee) =
-            tokio::try_join!(self.rpc_gas_price(), self.rpc_priority_fee())?;
-        self.builder.set_gas_prices(gas_price, priority_fee);
-        Ok(())
-    }
-
-    async fn fetch_chain_state(
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<(u64, u128, u128, u64)> {
-        let calls = vec![
-            ("eth_chainId", json!([])),
-            ("eth_gasPrice", json!([])),
-            ("eth_maxPriorityFeePerGas", json!([])),
-            ("eth_blockNumber", json!([])),
-        ];
-
-        let batch: Vec<Value> = calls
-            .iter()
-            .enumerate()
-            .map(|(id, (method, params))| {
-                json!({
-                    "jsonrpc": "2.0",
-                    "method": method,
-                    "params": params,
-                    "id": id
-                })
-            })
-            .collect();
-
-        let resp: Vec<Value> = client.post(url).json(&batch).send().await?.json().await?;
-
-        let parse_hex_u64 = |v: &Value| -> Result<u64> {
-            let s = v
-                .get("result")
-                .and_then(|r| r.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing result"))?;
-            Ok(u64::from_str_radix(s.trim_start_matches("0x"), 16)?)
-        };
-
-        let parse_hex_u128 = |v: &Value| -> Result<u128> {
-            let s = v
-                .get("result")
-                .and_then(|r| r.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing result"))?;
-            Ok(u128::from_str_radix(s.trim_start_matches("0x"), 16)?)
-        };
-
-        let chain_id = parse_hex_u64(&resp[0])?;
-        let gas_price = parse_hex_u128(&resp[1])?;
-        let priority_fee = parse_hex_u128(&resp[2])?;
-        let block_number = parse_hex_u64(&resp[3])?;
-
-        Ok((chain_id, gas_price, priority_fee, block_number))
-    }
-
-    async fn deploy_contract(
-        _client: &reqwest::Client,
-        url: &str,
-        deployer_key: &[u8],
-    ) -> Result<Address> {
-        use fuzztools::builders::contracts::AccessListTarget;
-
-        // Use alloy just for contract deployment (sol! macro requirement)
-        let deployer_signer = alloy::signers::local::PrivateKeySigner::from_slice(deployer_key)?;
-        let deployer = alloy::providers::ProviderBuilder::new()
-            .wallet(deployer_signer)
-            .connect(url)
-            .await?;
-        let contract = AccessListTarget::deploy(&deployer).await?;
-
-        Ok(*contract.address())
     }
 
     // ---------------------
@@ -284,50 +210,32 @@ impl App {
     // ---------------------
 
     fn spawn_dispatcher(&mut self) {
-        let mut tx_receiver = self.tx_receiver.take().unwrap();
-        let completion_sender = self.completion_sender.take().unwrap();
-        let connection_lost = self.connection_lost.clone();
-        let rpc_url = self.rpc_url.clone();
+        let mut rx = self.tx_receiver.take().unwrap();
+        let tx = self.completion_sender.take().unwrap();
+        let signal = self.connection_lost.clone();
         let client = self.client.clone();
+        let chunk_size = self.ctx.chunk_size;
 
         tokio::spawn(async move {
-            while let Some(batch) = tx_receiver.recv().await {
-                if connection_lost.load(Ordering::Relaxed) {
+            while let Some(batch) = rx.recv().await {
+                if signal.load(Ordering::Relaxed) {
                     break;
                 }
 
-                for chunk in batch.chunks(100) {
+                for chunk in batch.chunks(chunk_size) {
                     let client = client.clone();
-                    let url = rpc_url.clone();
-                    let sender = completion_sender.clone();
-                    let signal = connection_lost.clone();
-                    let chunk = chunk.to_vec();
+                    let signal = signal.clone();
+                    let tx = tx.clone();
+                    let chunk: Vec<_> = chunk.to_vec();
+                    let count = chunk.len() as u64;
 
                     tokio::spawn(async move {
-                        let payload: Vec<Value> = chunk
-                            .iter()
-                            .enumerate()
-                            .map(|(id, tx_hex)| {
-                                json!({
-                                    "jsonrpc": "2.0",
-                                    "method": "eth_sendRawTransaction",
-                                    "params": [tx_hex],
-                                    "id": id
-                                })
-                            })
-                            .collect();
-
-                        let count = payload.len() as u64;
-
-                        match client.post(&url).json(&payload).send().await {
-                            Ok(_) => {
-                                let _ = sender.send(count).await;
-                            }
+                        match client.send_raw_transactions(chunk).await {
                             Err(e) if e.is_connect() => {
                                 signal.store(true, Ordering::Relaxed);
                             }
-                            Err(_) => {
-                                let _ = sender.send(count).await;
+                            _ => {
+                                let _ = tx.send(count).await;
                             }
                         }
                     });
@@ -366,23 +274,39 @@ impl App {
                 .collect()
         });
 
-        let signature = signer.sign_hash(&tx.signing_hash()).unwrap();
-        format!(
-            "0x{}",
-            hex::encode(SignedTransaction { transaction: tx, signature }.encode())
-        )
+        let sig = signer.sign_hash(&tx.signing_hash()).unwrap();
+        format!("0x{}", hex::encode(SignedTransaction { transaction: tx, signature: sig }.encode()))
     }
 
-    fn screen(&self) -> Result<()> {
-        let secs = self.start_time.elapsed().as_secs();
+    // ---------------------
+    // Helpers
+    // ---------------------
+
+    /// Refreshes the gas prices from the RPC client
+    async fn refresh_gas_prices(&mut self) -> Result<()> {
+        let [gas_price, priority_fee] = self
+            .client
+            .batch_call_no_params(&["eth_gasPrice", "eth_maxPriorityFeePerGas"])
+            .await?
+            .try_into()
+            .unwrap();
+        self.builder.set_gas_prices(gas_price, priority_fee);
+        Ok(())
+    }
+
+    /// Updates the screen with the current stats
+    #[inline(always)]
+    fn screen(
+        &self,
+        total_txs_sent: u64,
+        txs_since_last_update: u64,
+        start_time: Instant,
+    ) -> Result<()> {
+        let secs = start_time.elapsed().as_secs();
         print!(
             "{CLEAR_SCREEN}{}[{GREEN}+{RESET}] Total: {RED}{}{RESET} | Tick: {RED}{}{RESET} | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
-            self.prelude,
-            self.total_txs_sent,
-            self.txs_since_last_update,
-            secs / 3600,
-            (secs % 3600) / 60,
-            secs % 60,
+            self.prelude, total_txs_sent, txs_since_last_update,
+            secs / 3600, (secs % 3600) / 60, secs % 60,
         );
         io::stdout().flush()?;
         Ok(())
