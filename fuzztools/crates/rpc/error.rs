@@ -1,4 +1,5 @@
-//! Implements some helper errors to correctly handle when the node crashed and when it did not, but only the request failed.
+//! Implements some helper errors to correctly handle when the node crashed and when it did not, but
+//! only the request failed.
 
 #[derive(Debug)]
 pub enum RpcError {

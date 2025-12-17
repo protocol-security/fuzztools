@@ -1,10 +1,7 @@
 //! Noir IR.
 
+pub mod ast;
 pub mod context;
-pub mod expressions;
-pub mod misc;
-pub mod operators;
-pub mod rules;
-pub mod types;
+pub mod rewriter;
 
 pub type Circuit = String;

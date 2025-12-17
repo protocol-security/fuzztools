@@ -29,6 +29,8 @@ pub struct Context {
     pub max_string_hashes_count: usize,
     pub max_name_characters_count: usize,
 
+    pub max_if_else_branch_count: usize,
+
     pub max_small_upper_bound: u128,
 
     // ------------------------------------------------------------
@@ -38,76 +40,9 @@ pub struct Context {
     pub exclude_prime_probability: f64,
     pub mutable_probability: f64,
     pub raw_string_probability: f64,
+    pub new_variable_probability: f64,
 
     // ------------------------------------------------------------
-    pub allow_slices: bool,
-    pub allow_references: bool,
-    pub allow_structs: bool,
-
-    pub filter_public_input_structs: bool,
-
     pub type_depth: usize,
     pub expression_depth: usize,
-}
-
-impl Context {
-    /// Returns the context being used to create struct, globals and functions definitions (not its
-    /// body)
-    pub fn top(&self) -> Self {
-        Self {
-            allow_slices: true,
-            allow_references: false,
-            allow_structs: true,
-            min_element_count: 0,
-            min_string_size: 0,
-            filter_public_input_structs: false,
-            type_depth: 0,
-            ..*self
-        }
-    }
-
-    /// Returns the context being used to create the main function definition (not its body)
-    pub fn entrypoint(&self) -> Self {
-        Self {
-            allow_slices: false,
-            allow_references: false,
-            allow_structs: true,
-            min_element_count: 1,
-            min_string_size: 1,
-            filter_public_input_structs: true,
-            type_depth: 0,
-            ..*self
-        }
-    }
-
-    /// Returns the context being used to create statements
-    pub fn statement(&self) -> Self {
-        Self {
-            allow_slices: true,
-            allow_references: true,
-            allow_structs: true,
-            min_element_count: 0,
-            min_string_size: 0,
-            filter_public_input_structs: false,
-            type_depth: 0,
-            ..*self
-        }
-    }
-
-    /// Returns the context being used to create sub-types (arrays of arrays, tuples of arrays,
-    /// arrays of structs, etc.)
-    pub fn inner_type(&self) -> Self {
-        Self {
-            allow_slices: false,
-            // @audit recursion ?? -> allow_structs: false
-            type_depth: self.type_depth + 1,
-            ..*self
-        }
-    }
-
-    /// Returns the context being used to create sub-expressions (binary operations, unary
-    /// operations, etc.)
-    pub fn inner_expression(&self) -> Self {
-        Self { expression_depth: self.expression_depth + 1, ..*self }
-    }
 }

@@ -20,6 +20,9 @@ struct Cli {
 
     #[arg(long, help = "Path to the crash report directory")]
     crash_report_dir: Option<String>,
+
+    #[arg(long, help = "Path to the debug directory for compile errors")]
+    debug_dir: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -27,6 +30,9 @@ fn main() -> Result<()> {
 
     let crash_dir = cli.crash_report_dir.unwrap_or_else(|| "./crashes/noiruzz/".into());
     fs::create_dir_all(&crash_dir)?;
+
+    let debug_dir = cli.debug_dir.unwrap_or_else(|| "./crashes/noiruzz/debug".into());
+    fs::create_dir_all(&debug_dir)?;
 
     let config_path = cli.config.unwrap_or_else(|| "./configs/noiruzz.json".into());
     if !Path::new(&config_path).exists() {
@@ -37,12 +43,13 @@ fn main() -> Result<()> {
     let prelude = format!(
         "{HEADER}\n{GREEN}INFO{RESET}      Seed:              {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Config:            {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Crash report dir:  {RED}{}{RESET}\n\n",
-        cli.seed, config_path, crash_dir
+         {GREEN}INFO{RESET}      Crash report dir:  {RED}{}{RESET}\n\
+         {GREEN}INFO{RESET}      Debug dir:         {RED}{}{RESET}\n\n",
+        cli.seed, config_path, crash_dir, debug_dir
     );
 
     // Create the application
-    let mut app = App::new(config, prelude, crash_dir)?;
+    let mut app = App::new(config, prelude, crash_dir, debug_dir)?;
 
     // Run the application
     let mut random = SmallRng::seed_from_u64(cli.seed);

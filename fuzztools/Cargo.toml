@@ -18,6 +18,7 @@ mutable.workspace = true
 serde = "1.0.228"
 serde_json = "1.0.145"
 reqwest = "0.12.25"
+petgraph = { version = "0.8.3", features = ["rayon", "generate"] }
 
 [lib]
 path = "crates/lib.rs"

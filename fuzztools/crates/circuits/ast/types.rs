@@ -1,9 +1,16 @@
-use crate::{circuits::generators::scope::Scope, circuits::misc::random_string, circuits::context::Context, math::{bernoulli, random_field_element}};
+//! Implements the Noir IR types
+
+use crate::{
+    circuits::{
+        ast::{random_string, scope::Scope},
+        context::Context,
+    },
+    math::{bernoulli, random_field_element},
+};
 use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
 
-#[derive(Clone, Debug)]
-/// This enum holds all the possible values a variable can have
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Field(Field),
     Integer(Integer),
@@ -14,90 +21,118 @@ pub enum Type {
     Tuple(Tuple),
     Struct(Struct),
     Lambda(Lambda),
-    Null
+    Null,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Field {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Integer {
     pub bits: u8,
     pub signed: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Boolean {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StringType {
     pub size: usize,
     pub hash_number: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Array {
     pub ty: Box<Type>,
     pub size: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Slice {
     pub ty: Box<Type>,
     pub size: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Tuple {
     pub inner: Vec<Type>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Struct {
     pub name: String,
     pub fields: Vec<StructField>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StructField {
     pub name: String,
     pub ty: Box<Type>,
     pub visibility: Visibility,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Visibility {
     Public,
     PublicCrate,
     Private,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Lambda {
     pub name: String,
     pub params: Vec<(String, Type)>,
     pub ret: Box<Type>,
 }
 
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 // Type Implementation
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 
 const INTEGER_PARAMS: [(u8, bool); 10] = [
-    (1, false), (8, false), (16, false), (32, false), (64, false), (128, false),
-    (8, true), (16, true), (32, true), (64, true),
+    (1, false),
+    (8, false),
+    (16, false),
+    (32, false),
+    (64, false),
+    (128, false),
+    (8, true),
+    (16, true),
+    (32, true),
+    (64, true),
 ];
 
 enum WorkItem {
-    Generate { slot: usize, depth: usize, allow_slice: bool, is_entrypoint: bool },
-    FinalizeArray { slot: usize, inner: usize, size: usize },
-    FinalizeSlice { slot: usize, inner: usize, size: usize },
-    FinalizeTuple { slot: usize, inners: Vec<usize> },
-    FinalizeLambda { slot: usize, inners: Vec<usize>, ret: usize },
+    Generate {
+        slot: usize,
+        depth: usize,
+        allow_slice: bool,
+        is_entrypoint: bool,
+        allow_lambda: bool,
+    },
+    FinalizeArray {
+        slot: usize,
+        inner: usize,
+        size: usize,
+    },
+    FinalizeSlice {
+        slot: usize,
+        inner: usize,
+        size: usize,
+    },
+    FinalizeTuple {
+        slot: usize,
+        inners: Vec<usize>,
+    },
+    FinalizeLambda {
+        slot: usize,
+        inners: Vec<usize>,
+        ret: usize,
+    },
 }
 
 impl Type {
-
     // My first approach was to use recursion like `Type::random() -> Array -> Type::random() ->
     // ...` The problem is this made the stack implode when generating deeply nested types
     // (e.g., `[[[Field; 3]; 2]; ...]`)
@@ -124,15 +159,50 @@ impl Type {
     // Done!     Return slots[0]
     //
     // If you do not understand something, just ask claude :D
-    pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, is_entrypoint: bool) -> Self {
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        is_entrypoint: bool,
+        allow_lambda: bool,
+    ) -> Self {
+        Self::random_with_options(random, ctx, scope, is_entrypoint, allow_lambda, true)
+    }
+
+    /// Like `random`, but with explicit control over whether slices are allowed at the top level
+    pub fn random_with_options(
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        is_entrypoint: bool,
+        allow_lambda: bool,
+        allow_slice: bool,
+    ) -> Self {
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
-        work.push_back(WorkItem::Generate { slot: 0, depth: 0, allow_slice: true, is_entrypoint });
+        work.push_back(WorkItem::Generate {
+            slot: 0,
+            depth: 0,
+            allow_slice,
+            is_entrypoint,
+            allow_lambda,
+        });
 
         while let Some(item) = work.pop_front() {
             match item {
-                WorkItem::Generate { slot, depth, allow_slice, is_entrypoint } => {
-                    Self::process_generate(random, ctx, scope, &mut slots, &mut work, slot, depth, allow_slice, is_entrypoint);
+                WorkItem::Generate { slot, depth, allow_slice, is_entrypoint, allow_lambda } => {
+                    Self::process_generate(
+                        random,
+                        ctx,
+                        scope,
+                        &mut slots,
+                        &mut work,
+                        slot,
+                        depth,
+                        allow_slice,
+                        is_entrypoint,
+                        allow_lambda,
+                    );
                 }
                 WorkItem::FinalizeArray { slot, inner, size } => {
                     let ty = slots[inner].take().unwrap();
@@ -149,9 +219,20 @@ impl Type {
                 WorkItem::FinalizeLambda { slot, inners, ret } => {
                     let args: Vec<_> = inners.iter().map(|&i| slots[i].take().unwrap()).collect();
                     let names: Vec<_> = (0..args.len()).map(|i| format!("param_{}", i)).collect();
-                    let params = names.iter().zip(args.iter()).map(|(name, arg)| (name.clone(), arg.clone())).collect();
+                    let params = names
+                        .iter()
+                        .zip(args.iter())
+                        .map(|(name, arg)| (name.clone(), arg.clone()))
+                        .collect();
                     let ret = slots[ret].take().unwrap();
-                    slots[slot] = Some(Type::Lambda(Lambda { name: format!("lambda_{}", random_string(random, ctx.max_name_characters_count)), params, ret: Box::new(ret) }));
+                    slots[slot] = Some(Type::Lambda(Lambda {
+                        name: format!(
+                            "lambda_{}",
+                            random_string(random, ctx.max_name_characters_count)
+                        ),
+                        params,
+                        ret: Box::new(ret),
+                    }));
                 }
             }
         }
@@ -169,9 +250,10 @@ impl Type {
         depth: usize,
         allow_slice: bool,
         is_entrypoint: bool,
+        allow_lambda: bool,
     ) {
-        // To avoid infinite recursion, we limit the depth of generated types. If we reach the max depth,
-        // the generated type will be `Field`
+        // To avoid infinite recursion, we limit the depth of generated types. If we reach the max
+        // depth, the generated type will be `Field`
         if depth > ctx.max_type_depth {
             slots[slot] = Some(Type::Field(Field {}));
             return;
@@ -180,9 +262,17 @@ impl Type {
         // Build list of available types
         let valid_structs: Vec<_> = if is_entrypoint {
             // This branch is triggered when creating the types for the main function definition.
-            scope.structs.iter().filter(|s| s.fields.iter().all(|f| f.ty.is_valid_public_input())).collect()
+            scope
+                .structs
+                .iter()
+                .filter(|s| s.fields.iter().all(|f| f.ty.is_valid_public_input()))
+                .collect()
+        } else if !allow_slice {
+            // Filter out structs that contain slices when slices are not allowed
+            scope.structs.iter().filter(|s| !s.contains_slice()).collect()
         } else {
-            // This branch is the default case, when creating local variables, compound types, etc...
+            // This branch is the default case, when creating local variables, compound types,
+            // etc...
             scope.structs.iter().collect()
         };
 
@@ -193,7 +283,7 @@ impl Type {
         if !valid_structs.is_empty() {
             available.push("Struct");
         }
-        if depth == 0 {
+        if depth == 0 && allow_lambda {
             available.push("Lambda");
         }
 
@@ -208,14 +298,20 @@ impl Type {
 
                 // Reserve a slot for the inner type
                 slots.push(None);
-                
+
                 let size = random.random_range(ctx.min_element_count..ctx.max_element_count);
 
                 // So that we assemble the `Array` once we trigger this work item
                 work.push_front(WorkItem::FinalizeArray { slot, inner, size });
 
                 // But first, we need to generate the inner type
-                work.push_front(WorkItem::Generate { slot: inner, depth: depth + 1, allow_slice: false, is_entrypoint });
+                work.push_front(WorkItem::Generate {
+                    slot: inner,
+                    depth: depth + 1,
+                    allow_slice: false,
+                    is_entrypoint,
+                    allow_lambda: false,
+                });
             }
             "Slice" => {
                 let inner = slots.len();
@@ -229,11 +325,18 @@ impl Type {
                 work.push_front(WorkItem::FinalizeSlice { slot, inner, size });
 
                 // But first, we need to generate the inner type
-                work.push_front(WorkItem::Generate { slot: inner, depth: depth + 1, allow_slice: false, is_entrypoint: false });
+                work.push_front(WorkItem::Generate {
+                    slot: inner,
+                    depth: depth + 1,
+                    allow_slice: false,
+                    is_entrypoint: false,
+                    allow_lambda: false,
+                });
             }
             "Tuple" => {
                 let min_count = ctx.min_element_count.max(2); // Tuples need at least 2 elements, otherwise they "downcast" to the inner type
-                let count = random.random_range(min_count..ctx.max_element_count.max(min_count + 1));
+                let count =
+                    random.random_range(min_count..ctx.max_element_count.max(min_count + 1));
 
                 let first = slots.len();
 
@@ -246,7 +349,13 @@ impl Type {
 
                 // But first, we need to generate the inner types
                 for &i in &inners {
-                    work.push_front(WorkItem::Generate { slot: i, depth: depth + 1, allow_slice: false, is_entrypoint });
+                    work.push_front(WorkItem::Generate {
+                        slot: i,
+                        depth: depth + 1,
+                        allow_slice: false,
+                        is_entrypoint,
+                        allow_lambda: false,
+                    });
                 }
             }
             "Struct" => {
@@ -268,13 +377,26 @@ impl Type {
                 // So that we assemble the `Lambda` once we trigger this work item
                 work.push_front(WorkItem::FinalizeLambda { slot, inners: inners.clone(), ret });
 
-                // But first, we need to generate the parameter types
+                // But first, we need to generate the parameter types @todo check whether lambdas
+                // can be inside arrays, lambdas, structs...
                 for &i in &inners {
-                    work.push_front(WorkItem::Generate { slot: i, depth: depth + 1, allow_slice: true, is_entrypoint: false });
+                    work.push_front(WorkItem::Generate {
+                        slot: i,
+                        depth: depth + 1,
+                        allow_slice: true,
+                        is_entrypoint: false,
+                        allow_lambda: false,
+                    });
                 }
 
                 // And the return type
-                work.push_front(WorkItem::Generate { slot: ret, depth: depth + 1, allow_slice: true, is_entrypoint: false });
+                work.push_front(WorkItem::Generate {
+                    slot: ret,
+                    depth: depth + 1,
+                    allow_slice: true,
+                    is_entrypoint: false,
+                    allow_lambda: false,
+                });
             }
             "Null" => slots[slot] = Some(Type::Null),
             _ => unreachable!(),
@@ -287,9 +409,9 @@ impl Type {
             Type::Integer(i) => i.random_value(random, ctx),
             Type::Boolean(b) => b.random_value(random),
             Type::String(s) => s.random_value(random),
-            Type::Array(a) => a.random_value(random, &ctx),
-            Type::Slice(s) => s.random_value(random, &ctx),
-            Type::Tuple(t) => t.random_value(random, &ctx),
+            Type::Array(a) => a.random_value(random, ctx),
+            Type::Slice(s) => s.random_value(random, ctx),
+            Type::Tuple(t) => t.random_value(random, ctx),
             Type::Struct(s) => s.random_value(random, ctx),
             Type::Lambda(l) => l.random_value(random, ctx),
             Type::Null => "()".to_string(),
@@ -301,16 +423,35 @@ impl Type {
             Type::Field(_) | Type::Integer(_) | Type::Boolean(_) => true,
             Type::String(s) => s.size > 0,
             Type::Array(a) => a.size > 0 && a.ty.is_valid_public_input(),
-            Type::Tuple(t) => !t.inner.is_empty() && t.inner.iter().all(|ty| ty.is_valid_public_input()),
+            Type::Tuple(t) => {
+                !t.inner.is_empty() && t.inner.iter().all(|ty| ty.is_valid_public_input())
+            }
             Type::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
             Type::Slice(_) | Type::Lambda(_) | Type::Null => false,
         }
     }
+
+    /// Returns true if this type contains a slice anywhere (including nested within
+    /// structs/arrays/tuples)
+    pub fn contains_slice(&self) -> bool {
+        match self {
+            Type::Field(_) | Type::Integer(_) | Type::Boolean(_) | Type::String(_) | Type::Null => {
+                false
+            }
+            Type::Slice(_) => true,
+            Type::Array(a) => a.ty.contains_slice(),
+            Type::Tuple(t) => t.inner.iter().any(|ty| ty.contains_slice()),
+            Type::Struct(s) => s.fields.iter().any(|f| f.ty.contains_slice()),
+            Type::Lambda(l) => {
+                l.params.iter().any(|(_, ty)| ty.contains_slice()) || l.ret.contains_slice()
+            }
+        }
+    }
 }
 
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 // Primitive Types
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 
 impl Field {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
@@ -331,7 +472,7 @@ impl Field {
 impl Integer {
     pub fn random(random: &mut impl Rng) -> Self {
         let (bits, signed) = *INTEGER_PARAMS.choose(random).unwrap();
-        
+
         Self { bits, signed }
     }
 
@@ -339,7 +480,11 @@ impl Integer {
         let type_name = format!("{}{}", if self.signed { "i" } else { "u" }, self.bits);
 
         if self.bits == 1 {
-            return format!("({} as {})", if random.random_bool(0.5) { "1" } else { "0" }, type_name);
+            return format!(
+                "({} as {})",
+                if random.random_bool(0.5) { "1" } else { "0" },
+                type_name
+            );
         }
 
         let (value, neg) = if self.signed {
@@ -365,7 +510,8 @@ impl Integer {
             (v, false)
         };
 
-        // This is to avoid Noir complaining about numbers not fitting in the expected type due to shadow casting @todo overkill?
+        // This is to avoid Noir complaining about numbers not fitting in the expected type due to
+        // shadow casting @todo overkill?
         if neg {
             format!("((-{}) as {})", value, type_name)
         } else {
@@ -389,10 +535,7 @@ impl StringType {
             0
         };
 
-        Self {
-            size,
-            hash_number,
-        }
+        Self { size, hash_number }
     }
 
     pub fn random_value(&self, random: &mut impl Rng) -> String {
@@ -407,9 +550,9 @@ impl StringType {
     }
 }
 
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 // Compound Types
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 
 impl Array {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
@@ -436,47 +579,86 @@ impl Tuple {
     }
 }
 
-// @todo clean struct, struct field and lambda
 impl Struct {
-    pub fn random(random: &mut impl Rng, ctx: &Context) -> Self {
+    /// Generate a random struct. `previous_structs` contains structs that can be used as field
+    /// types (to avoid circular dependencies, struct N can only contain structs 0..N-1).
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        previous_structs: &[Struct],
+        allow_slice: bool,
+    ) -> Self {
         let name = format!("Struct_{}", random_string(random, ctx.max_name_characters_count));
+
+        // Create a scope with previous structs available for field types
+        let mut scope = Scope::new();
+        scope.structs = previous_structs.to_vec();
+
         let fields = (0..ctx.max_struct_fields_count)
-            .map(|i| StructField::random(random, &ctx, &Scope::new(), format!("field_{}", i)))
+            .map(|i| StructField::random(random, ctx, &scope, format!("field_{}", i), allow_slice))
             .collect();
 
         Self { name, fields }
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let fields: Vec<_> = self.fields
+        let fields: Vec<_> = self
+            .fields
             .iter()
             .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx)))
             .collect();
 
         format!("{} {{ {} }}", self.name, fields.join(", "))
     }
+
+    /// Returns true if any field contains a slice
+    pub fn contains_slice(&self) -> bool {
+        self.fields.iter().any(|f| f.ty.contains_slice())
+    }
 }
 
 impl StructField {
-    pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, name: String) -> Self {
-        let ty = Box::new(Type::random(random, ctx, scope, false));
-        let visibility = *[Visibility::Public, Visibility::Private, Visibility::PublicCrate].choose(random).unwrap();
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        name: String,
+        allow_slice: bool,
+    ) -> Self {
+        // Allow lambdas in struct fields
+        let ty = Box::new(Type::random_with_options(
+            random,
+            ctx,
+            scope,
+            false,
+            true, // allow_lambda for struct fields
+            allow_slice,
+        ));
+        let visibility = *[Visibility::Public, Visibility::Private, Visibility::PublicCrate]
+            .choose(random)
+            .unwrap();
 
         Self { name: name.clone(), ty, visibility }
     }
 }
 
 impl Lambda {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String { // @todo
-        let params: Vec<_> = self.params.iter().map(|(name, ty)| format!("{}: {}", name, ty)).collect();
-
-        format!("|{}| -> {}", params.join(", "), self.ret)
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+        let params: Vec<_> =
+            self.params.iter().map(|(name, ty)| format!("{}: {}", name, ty)).collect();
+        let body = if matches!(*self.ret, Type::Null) {
+            String::new()
+        } else {
+            self.ret.random_value(random, ctx)
+        };
+        // Format: |param: Type| -> RetType { body }
+        format!("|{}| -> {} {{ {} }}", params.join(", "), self.ret, body)
     }
 }
 
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 // Display
-// ------------------------------------------------------------
+// ────────────────────────────────────────────────────────────────────────────────
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -493,8 +675,9 @@ impl std::fmt::Display for Type {
             }
             Type::Struct(s) => write!(f, "{}", s.name),
             Type::Lambda(l) => {
-                let params: Vec<_> = l.params.iter().map(|(name, ty)| format!("{}: {}", name, ty)).collect();
-                write!(f, "|{}| -> {}", params.join(", "), l.ret)
+                // Type signature format: fn (Type1, Type2) -> RetType
+                let param_types: Vec<_> = l.params.iter().map(|(_, ty)| ty.to_string()).collect();
+                write!(f, "fn ({}) -> {}", param_types.join(", "), l.ret)
             }
             Type::Null => write!(f, "()"),
         }
@@ -511,6 +694,10 @@ impl std::fmt::Display for Visibility {
     }
 }
 
+// ────────────────────────────────────────────────────────────────────────────────
+// Tests
+// ────────────────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,13 +708,13 @@ mod tests {
         let ctx = Context {
             max_inputs_count: 5,
             min_element_count: 1,
-            max_element_count: 10,
+            max_element_count: 5,
             min_string_size: 1,
             max_string_size: 10,
             max_expression_depth: 3,
-            max_type_depth: 5,
+            max_type_depth: 3,
             max_structs_count: 5,
-            max_struct_fields_count: 5,
+            max_struct_fields_count: 10,
             max_globals_count: 5,
             max_functions_count: 5,
             max_function_parameters_count: 5,
@@ -549,13 +736,36 @@ mod tests {
             max_if_else_branch_count: 4,
         };
 
-        let structs = (0..5).map(|_| Struct::random(random, &ctx)).collect();
+        let mut structs: Vec<Struct> = Vec::new();
+        for _ in 0..5 {
+            let s = Struct::random(random, &ctx, &structs, false); // allow_slice = false
+            structs.push(s);
+        }
+
+        for s in structs.iter() {
+            println!(
+                "struct {} {{\n{}\n}}\n\n",
+                s.name,
+                s.fields
+                    .iter()
+                    .map(|f| format!("    {}{}: {},", f.visibility, f.name, f.ty))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+
         let mut scope = Scope::with_variables(vec![], vec![]);
         scope.structs = structs;
 
-        for _ in 0..25 {
-            let ty = Type::random(random, &ctx, &scope, false);
-            println!("{}", ty);
+        println!("fn main() {{\n");
+        for i in 0..25 {
+            let ty = Type::random(random, &ctx, &scope, false, true);
+            if matches!(ty, Type::Lambda(_)) {
+                println!("    let v{} = {};", i, ty.random_value(random, &ctx));
+            } else {
+                println!("    let v{}: {} = {};", i, ty, ty.random_value(random, &ctx));
+            }
         }
+        println!("}}")
     }
 }

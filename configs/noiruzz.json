@@ -2,27 +2,29 @@
     "max_inputs_count": 5,
 
     "min_element_count": 1,
-    "max_element_count": 10,
+    "max_element_count": 5,
 
     "min_string_size": 1,
     "max_string_size": 10,
 
-    "max_expression_depth": 5,
-    "max_type_depth": 5,
+    "max_expression_depth": 3,
+    "max_type_depth": 3,
 
     "max_structs_count": 5,
     "max_struct_fields_count": 5,
     "max_globals_count": 5,
     "max_functions_count": 5,
 
-    "max_function_parameters_count": 5,
-    "max_function_return_types_count": 5,
+    "max_function_parameters_count": 3,
+    "max_function_return_types_count": 3,
 
     "max_main_expressions_count": 25,
     "max_block_expressions_count": 5,
 
     "max_string_hashes_count": 5,
     "max_name_characters_count": 5,
+
+    "max_if_else_branch_count": 4,
 
     "max_small_upper_bound": 5,
 
@@ -32,9 +34,9 @@
     "exclude_prime_probability": 0.1,
     "mutable_probability": 0.4,
     "raw_string_probability": 0.2,
+    "new_variable_probability": 0.2,
 
     "allow_slices": true,
-    "allow_references": true,
     "allow_structs": true,
 
     "filter_entrypoint_structs": false,

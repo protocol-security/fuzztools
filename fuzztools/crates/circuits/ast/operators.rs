@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//! Implements the Noir IR operators
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Operator {
     Add,
     Sub,
@@ -28,13 +30,20 @@ impl Operator {
     pub fn arithmetic_integer() -> &'static [Operator] {
         &[Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Mod]
     }
-    
+
     pub fn comparison_field() -> &'static [Operator] {
         &[Self::Equal, Self::NotEqual]
     }
 
     pub fn comparison_integer() -> &'static [Operator] {
-        &[Self::Less, Self::LessOrEqual, Self::Greater, Self::GreaterOrEqual, Self::Equal, Self::NotEqual]
+        &[
+            Self::Less,
+            Self::LessOrEqual,
+            Self::Greater,
+            Self::GreaterOrEqual,
+            Self::Equal,
+            Self::NotEqual,
+        ]
     }
 
     pub fn binary_boolean() -> &'static [Operator] {
@@ -44,8 +53,12 @@ impl Operator {
     pub fn binary_integer() -> &'static [Operator] {
         &[Self::And, Self::Or, Self::Xor, Self::Shl, Self::Shr]
     }
-    
-    pub fn unary_integer() -> &'static [Operator] {
+
+    pub fn unary_field_and_unsigned_integer() -> &'static [Operator] {
+        &[Self::Not]
+    }
+
+    pub fn unary_signed_integer() -> &'static [Operator] {
         &[Self::Neg, Self::Not]
     }
 
@@ -53,6 +66,10 @@ impl Operator {
         &[Self::Not]
     }
 }
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Display
+// ────────────────────────────────────────────────────────────────────────────────
 
 impl std::fmt::Display for Operator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
