@@ -371,7 +371,7 @@ impl ExprGraph {
 
         match *choices.choose(random).unwrap() {
             "lit" => {
-                self.lit(Type::random(random, ctx, scope, false, false));
+                self.lit(Type::random(random, ctx, scope, false, false, true));
             }
             "var" => self.rand_var(random),
             "field_binop" => self.rand_binop(
@@ -517,12 +517,12 @@ impl ExprGraph {
 
         let params: Vec<(String, Type)> = (0..param_count)
             .map(|i| {
-                let ty = Type::random(random, ctx, scope, false, false);
+                let ty = Type::random(random, ctx, scope, false, false, true);
                 (format!("p{i}"), ty)
             })
             .collect();
 
-        let ret_ty = Type::random(random, ctx, scope, false, false);
+        let ret_ty = Type::random(random, ctx, scope, false, false, true);
         let lambda_node = self.lambda_def(params.clone(), ret_ty.clone());
 
         // Bind the lambda to a variable so it can be called later

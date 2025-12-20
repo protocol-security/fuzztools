@@ -10,6 +10,10 @@ use crate::{
 use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
 
+// ────────────────────────────────────────────────────────────────────────────────
+// Type definitions
+// ────────────────────────────────────────────────────────────────────────────────
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Field(Field),
@@ -87,7 +91,7 @@ pub struct Lambda {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Type Implementation
+// Type Implementations
 // ────────────────────────────────────────────────────────────────────────────────
 
 const INTEGER_PARAMS: [(u8, bool); 10] = [
@@ -108,8 +112,8 @@ enum WorkItem {
         slot: usize,
         depth: usize,
         allow_slice: bool,
-        is_entrypoint: bool,
         allow_lambda: bool,
+        is_entrypoint: bool,
     },
     FinalizeArray {
         slot: usize,
@@ -160,17 +164,6 @@ impl Type {
     //
     // If you do not understand something, just ask claude :D
     pub fn random(
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        is_entrypoint: bool,
-        allow_lambda: bool,
-    ) -> Self {
-        Self::random_with_options(random, ctx, scope, is_entrypoint, allow_lambda, true)
-    }
-
-    /// Like `random`, but with explicit control over whether slices are allowed at the top level
-    pub fn random_with_options(
         random: &mut impl Rng,
         ctx: &Context,
         scope: &Scope,
@@ -474,6 +467,7 @@ impl Integer {
         let (bits, signed) = *INTEGER_PARAMS.choose(random).unwrap();
 
         Self { bits, signed }
+
     }
 
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
@@ -626,7 +620,7 @@ impl StructField {
         allow_slice: bool,
     ) -> Self {
         // Allow lambdas in struct fields
-        let ty = Box::new(Type::random_with_options(
+        let ty = Box::new(Type::random(
             random,
             ctx,
             scope,
@@ -701,6 +695,8 @@ impl std::fmt::Display for Visibility {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
+    use std::io::{Write, BufWriter};
 
     #[test]
     fn test_type_random() {
@@ -742,30 +738,34 @@ mod tests {
             structs.push(s);
         }
 
-        for s in structs.iter() {
-            println!(
-                "struct {} {{\n{}\n}}\n\n",
+        let mut scope = Scope::with_variables(vec![], vec![]);
+        scope.structs = structs;
+
+        let mut file = BufWriter::new(File::create("../a/src/main.nr").expect("Unable to open file"));
+
+        for s in scope.structs.iter() {
+            writeln!(
+                file,
+                "struct {} {{\n{}\n}}\n",
                 s.name,
                 s.fields
                     .iter()
                     .map(|f| format!("    {}{}: {},", f.visibility, f.name, f.ty))
                     .collect::<Vec<_>>()
                     .join("\n")
-            );
+            ).unwrap();
         }
 
-        let mut scope = Scope::with_variables(vec![], vec![]);
-        scope.structs = structs;
-
-        println!("fn main() {{\n");
+        writeln!(file, "fn main() {{\n").unwrap();
         for i in 0..25 {
-            let ty = Type::random(random, &ctx, &scope, false, true);
+            let ty = Type::random(random, &ctx, &scope, false, true, true);
             if matches!(ty, Type::Lambda(_)) {
-                println!("    let v{} = {};", i, ty.random_value(random, &ctx));
+                writeln!(file, "    let v{} = {};", i, ty.random_value(random, &ctx)).unwrap();
             } else {
-                println!("    let v{}: {} = {};", i, ty, ty.random_value(random, &ctx));
+                writeln!(file, "    let v{}: {} = {};", i, ty, ty.random_value(random, &ctx)).unwrap();
             }
         }
-        println!("}}")
+        writeln!(file, "}}").unwrap();
     }
 }
+
