@@ -698,7 +698,7 @@ mod tests {
         let mut scope = Scope::new();
         let mut structs: Vec<Struct> = Vec::new();
         for _ in 0..5 {
-            let s = Struct::random(random, &ctx, &structs, false);
+            let s = Struct::random(random, &ctx, &structs);
             structs.push(s);
         }
         scope.structs = structs;

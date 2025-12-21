@@ -107,6 +107,8 @@ const INTEGER_PARAMS: [(u8, bool); 10] = [
     (64, true),
 ];
 
+const VISIBILITIES: [Visibility; 3] = [Visibility::Public, Visibility::Private, Visibility::PublicCrate];
+
 enum WorkItem {
     Generate {
         slot: usize,
@@ -137,39 +139,47 @@ enum WorkItem {
 }
 
 impl Type {
-    // My first approach was to use recursion like `Type::random() -> Array -> Type::random() ->
-    // ...` The problem is this made the stack implode when generating deeply nested types
-    // (e.g., `[[[Field; 3]; 2]; ...]`)
-    //
-    // ## The Solution
-    // Instead of recursion, we use a work queue on the heap, by storing the type of work to do in a
-    // `VecDeque<WorkItem>` and traversing it iteratively, like a to-do list. The generation flow is
-    // as follows:
-    //
-    // - `GenerateType`: Decides what type to create. Primitives go directly into their slot.
-    //   Compound types reserve slots for children and push both `GenerateType` (for children) and
-    //   `Finalize*` (to assemble)
-    // - `Finalize*`: Takes completed children from their slots and assembles the parent type
-    //
-    // Initial:  slots=[None], work=[Generate(0)]
-    // Step 1:   Generate(0) -> Array chosen -> slots=[None, None]
-    //           work=[Generate(1), FinalizeArray(0, inner=1)]
-    // Step 2:   Generate(1) -> Tuple chosen -> slots=[None, None, None, None]
-    //           work=[Generate(2), Generate(3), FinalizeTuple(1), FinalizeArray(0)]
-    // Step 3:   Generate(2) -> Field -> slots=[None, None, Some(Field), None]
-    // Step 4:   Generate(3) -> bool  -> slots=[None, None, Some(Field), Some(bool)]
-    // Step 5:   FinalizeTuple(1)     -> slots=[None, Some(Tuple), ...]
-    // Step 6:   FinalizeArray(0)     -> slots=[Some(Array<Tuple>), ...]
-    // Done!     Return slots[0]
-    //
-    // If you do not understand something, just ask claude :D
+    /// My first approach was to use recursion like `Type::random() -> Array -> Type::random() ->
+    /// ...` The problem is this made the stack implode when generating deeply nested types
+    /// (e.g., `[[[Field; 3]; 2]; ...]`)
+    ///
+    /// ## The Solution
+    /// Instead of recursion, we use a work queue on the heap, by storing the type of work to do in a
+    /// `VecDeque<WorkItem>` and traversing it iteratively, like a to-do list. The generation flow is
+    /// as follows:
+    ///
+    /// - `GenerateType`: Decides what type to create. Primitives go directly into their slot.
+    ///   Compound types reserve slots for children and push both `GenerateType` (for children) and
+    ///   `Finalize*` (to assemble)
+    /// - `Finalize*`: Takes completed children from their slots and assembles the parent type
+    ///
+    /// - Initial:  slots=[None], work=[Generate(0)]
+    /// - Step 1:
+    ///              Generate(0) -> Array chosen -> slots=[None, None]
+    ///              work=[Generate(1), FinalizeArray(0, inner=1)]
+    /// - Step 2:
+    ///              Generate(1) -> Tuple chosen -> slots=[None, None, None, None]
+    ///              work=[Generate(2), Generate(3), FinalizeTuple(1), FinalizeArray(0)]
+    /// - Step 3:
+    ///              Generate(2) -> Field -> slots=[None, None, Some(Field), None]
+    /// - Step 4:
+    ///              Generate(3) -> bool -> slots=[None, None, Some(Field), Some(bool)]
+    /// Step 5:
+    ///              FinalizeTuple(1) -> slots=[None, Some(Tuple), ...]
+    /// Step 6:
+    ///              FinalizeArray(0) -> slots=[Some(Array<Tuple>), ...]
+    ///
+    /// Done!
+    ///              Return slots[0]
+    ///
+    /// If you do not understand something, just ask claude :D
     pub fn random(
         random: &mut impl Rng,
         ctx: &Context,
         scope: &Scope,
-        is_entrypoint: bool,
-        allow_lambda: bool,
         allow_slice: bool,
+        allow_lambda: bool,
+        is_entrypoint: bool,
     ) -> Self {
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
@@ -177,8 +187,8 @@ impl Type {
             slot: 0,
             depth: 0,
             allow_slice,
-            is_entrypoint,
             allow_lambda,
+            is_entrypoint,
         });
 
         while let Some(item) = work.pop_front() {
@@ -193,8 +203,8 @@ impl Type {
                         slot,
                         depth,
                         allow_slice,
-                        is_entrypoint,
                         allow_lambda,
+                        is_entrypoint,
                     );
                 }
                 WorkItem::FinalizeArray { slot, inner, size } => {
@@ -217,10 +227,11 @@ impl Type {
                         .zip(args.iter())
                         .map(|(name, arg)| (name.clone(), arg.clone()))
                         .collect();
+
                     let ret = slots[ret].take().unwrap();
                     slots[slot] = Some(Type::Lambda(Lambda {
                         name: format!(
-                            "lambda_{}",
+                            "lambda_{}", // @todo index names
                             random_string(random, ctx.max_name_characters_count)
                         ),
                         params,
@@ -242,8 +253,8 @@ impl Type {
         slot: usize,
         depth: usize,
         allow_slice: bool,
-        is_entrypoint: bool,
         allow_lambda: bool,
+        is_entrypoint: bool,
     ) {
         // To avoid infinite recursion, we limit the depth of generated types. If we reach the max
         // depth, the generated type will be `Field`
@@ -262,7 +273,7 @@ impl Type {
                 .collect()
         } else if !allow_slice {
             // Filter out structs that contain slices when slices are not allowed
-            scope.structs.iter().filter(|s| !s.contains_slice()).collect()
+            scope.structs.iter().filter(|s| !s.fields.iter().any(|f| f.ty.contains_slice())).collect()
         } else {
             // This branch is the default case, when creating local variables, compound types,
             // etc...
@@ -273,11 +284,11 @@ impl Type {
         if allow_slice {
             available.push("Slice");
         }
+        if allow_lambda {
+            available.push("Lambda");
+        }
         if !valid_structs.is_empty() {
             available.push("Struct");
-        }
-        if depth == 0 && allow_lambda {
-            available.push("Lambda");
         }
 
         // @todo weighted selection of types ??
@@ -302,8 +313,8 @@ impl Type {
                     slot: inner,
                     depth: depth + 1,
                     allow_slice: false,
+                    allow_lambda: true,
                     is_entrypoint,
-                    allow_lambda: false,
                 });
             }
             "Slice" => {
@@ -322,8 +333,8 @@ impl Type {
                     slot: inner,
                     depth: depth + 1,
                     allow_slice: false,
+                    allow_lambda: true,
                     is_entrypoint: false,
-                    allow_lambda: false,
                 });
             }
             "Tuple" => {
@@ -346,8 +357,8 @@ impl Type {
                         slot: i,
                         depth: depth + 1,
                         allow_slice: false,
+                        allow_lambda: true,
                         is_entrypoint,
-                        allow_lambda: false,
                     });
                 }
             }
@@ -377,8 +388,8 @@ impl Type {
                         slot: i,
                         depth: depth + 1,
                         allow_slice: true,
+                        allow_lambda: true,
                         is_entrypoint: false,
-                        allow_lambda: false,
                     });
                 }
 
@@ -387,8 +398,8 @@ impl Type {
                     slot: ret,
                     depth: depth + 1,
                     allow_slice: true,
-                    is_entrypoint: false,
                     allow_lambda: false,
+                    is_entrypoint: false,
                 });
             }
             "Null" => slots[slot] = Some(Type::Null),
@@ -411,7 +422,16 @@ impl Type {
         }
     }
 
-    pub fn is_valid_public_input(&self) -> bool {
+    pub fn random_method(&self, random: &mut impl Rng) -> String {
+        match self {
+            Type::Field(_) => "Field".to_string(),
+            Type::Integer(_) => "Integer".to_string(),
+            Type::Boolean(_) => "Boolean".to_string(),
+            Type::String(_) => "String".to_string(),
+        }
+    }
+
+    fn is_valid_public_input(&self) -> bool {
         match self {
             Type::Field(_) | Type::Integer(_) | Type::Boolean(_) => true,
             Type::String(s) => s.size > 0,
@@ -426,7 +446,7 @@ impl Type {
 
     /// Returns true if this type contains a slice anywhere (including nested within
     /// structs/arrays/tuples)
-    pub fn contains_slice(&self) -> bool {
+    fn contains_slice(&self) -> bool {
         match self {
             Type::Field(_) | Type::Integer(_) | Type::Boolean(_) | Type::String(_) | Type::Null => {
                 false
@@ -436,7 +456,7 @@ impl Type {
             Type::Tuple(t) => t.inner.iter().any(|ty| ty.contains_slice()),
             Type::Struct(s) => s.fields.iter().any(|f| f.ty.contains_slice()),
             Type::Lambda(l) => {
-                l.params.iter().any(|(_, ty)| ty.contains_slice()) || l.ret.contains_slice()
+                false // @todo this is kinda weird because the compiler allows weird constructs if args return are slices so...
             }
         }
     }
@@ -460,6 +480,13 @@ impl Field {
         )
         .to_string()
     }
+
+    pub fn methods(&self) -> Vec<String> {
+        vec![
+            "assert_max_bit_size".to_string(), // // @todo v15.assert_max_bit_size::<240>(); where at comptime 240 or whatever must be enoiugh to hold the value
+            "sgn0".to_string(),
+        ]
+    }
 }
 
 impl Integer {
@@ -475,7 +502,7 @@ impl Integer {
 
         if self.bits == 1 {
             return format!(
-                "({} as {})",
+                "{}{}",
                 if random.random_bool(0.5) { "1" } else { "0" },
                 type_name
             );
@@ -504,12 +531,10 @@ impl Integer {
             (v, false)
         };
 
-        // This is to avoid Noir complaining about numbers not fitting in the expected type due to
-        // shadow casting @todo overkill?
         if neg {
-            format!("((-{}) as {})", value, type_name)
+            format!("-{}{}", value, type_name)
         } else {
-            format!("({} as {})", value, type_name)
+            format!("{}{}", value, type_name)
         }
     }
 }
@@ -558,8 +583,7 @@ impl Array {
 
 impl Slice {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let size = random.random_range(0..ctx.max_element_count);
-        let elems: Vec<_> = (0..size).map(|_| self.ty.random_value(random, ctx)).collect();
+        let elems: Vec<_> = (0..self.size).map(|_| self.ty.random_value(random, ctx)).collect();
 
         format!("&[{}]", elems.join(", "))
     }
@@ -580,16 +604,15 @@ impl Struct {
         random: &mut impl Rng,
         ctx: &Context,
         previous_structs: &[Struct],
-        allow_slice: bool,
     ) -> Self {
-        let name = format!("Struct_{}", random_string(random, ctx.max_name_characters_count));
+        let name = format!("Struct_{}", random_string(random, ctx.max_name_characters_count)); // @todo index names
 
         // Create a scope with previous structs available for field types
         let mut scope = Scope::new();
         scope.structs = previous_structs.to_vec();
 
         let fields = (0..ctx.max_struct_fields_count)
-            .map(|i| StructField::random(random, ctx, &scope, format!("field_{}", i), allow_slice))
+            .map(|i| StructField::random(random, ctx, &scope, format!("field_{}", i)))
             .collect();
 
         Self { name, fields }
@@ -604,11 +627,6 @@ impl Struct {
 
         format!("{} {{ {} }}", self.name, fields.join(", "))
     }
-
-    /// Returns true if any field contains a slice
-    pub fn contains_slice(&self) -> bool {
-        self.fields.iter().any(|f| f.ty.contains_slice())
-    }
 }
 
 impl StructField {
@@ -617,22 +635,18 @@ impl StructField {
         ctx: &Context,
         scope: &Scope,
         name: String,
-        allow_slice: bool,
     ) -> Self {
-        // Allow lambdas in struct fields
+        let visibility = *VISIBILITIES.choose(random).unwrap();
         let ty = Box::new(Type::random(
             random,
             ctx,
             scope,
             false,
-            true, // allow_lambda for struct fields
-            allow_slice,
+            true,
+            false,
         ));
-        let visibility = *[Visibility::Public, Visibility::Private, Visibility::PublicCrate]
-            .choose(random)
-            .unwrap();
 
-        Self { name: name.clone(), ty, visibility }
+        Self { name, ty, visibility }
     }
 }
 
@@ -640,10 +654,10 @@ impl Lambda {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let params: Vec<_> =
             self.params.iter().map(|(name, ty)| format!("{}: {}", name, ty)).collect();
-        let body = if matches!(*self.ret, Type::Null) {
+        let body = if matches!(*self.ret, Type::Null) { // @todo
             String::new()
         } else {
-            self.ret.random_value(random, ctx)
+            self.ret.random_value(random, ctx) 
         };
         // Format: |param: Type| -> RetType { body }
         format!("|{}| -> {} {{ {} }}", params.join(", "), self.ret, body)
@@ -702,39 +716,39 @@ mod tests {
     fn test_type_random() {
         let random = &mut rand::rng();
         let ctx = Context {
-            max_inputs_count: 5,
+            max_inputs_count: 3,
             min_element_count: 1,
-            max_element_count: 5,
+            max_element_count: 3,
             min_string_size: 1,
-            max_string_size: 10,
-            max_expression_depth: 3,
-            max_type_depth: 3,
-            max_structs_count: 5,
-            max_struct_fields_count: 10,
-            max_globals_count: 5,
-            max_functions_count: 5,
-            max_function_parameters_count: 5,
-            max_function_return_types_count: 5,
-            max_main_expressions_count: 25,
-            max_block_expressions_count: 5,
-            max_string_hashes_count: 5,
-            max_name_characters_count: 5,
-            max_small_upper_bound: 5,
-            integer_signed_probability: 0.33,
-            boundary_value_probability: 0.25,
-            small_upper_bound_probability: 0.2,
-            exclude_prime_probability: 0.1,
-            mutable_probability: 0.4,
-            raw_string_probability: 0.2,
+            max_string_size: 4,
+            max_expression_depth: 2,
+            max_type_depth: 2,
+            max_structs_count: 3,
+            max_struct_fields_count: 4,
+            max_globals_count: 2,
+            max_functions_count: 3,
+            max_function_parameters_count: 3,
+            max_function_return_types_count: 2,
+            max_main_expressions_count: 8,
+            max_block_expressions_count: 3,
+            max_string_hashes_count: 3,
+            max_name_characters_count: 4,
+            max_small_upper_bound: 3,
+            integer_signed_probability: 0.5,
+            boundary_value_probability: 0.33,
+            small_upper_bound_probability: 0.33,
+            exclude_prime_probability: 0.25,
+            mutable_probability: 0.5,
+            raw_string_probability: 0.5,
             type_depth: 0,
             expression_depth: 0,
-            new_variable_probability: 0.5,
-            max_if_else_branch_count: 4,
+            new_variable_probability: 0.75,
+            max_if_else_branch_count: 3,
         };
 
         let mut structs: Vec<Struct> = Vec::new();
         for _ in 0..5 {
-            let s = Struct::random(random, &ctx, &structs, false); // allow_slice = false
+            let s = Struct::random(random, &ctx, &structs);
             structs.push(s);
         }
 

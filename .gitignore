@@ -11,3 +11,4 @@ Cargo.lock
 *.dot
 *.pdf
 *.DS_Store
+/.vscode

@@ -62,7 +62,7 @@ pub struct AccessPath {
 #[derive(Clone, Default)]
 pub struct Scope {
     /// Stack of scopes, each scope is a list of variables
-    scopes: Vec<Vec<Variable>>,
+    pub scopes: Vec<Vec<Variable>>,
     /// Input parameters (always visible)
     pub inputs: Vec<Variable>,
     /// Structs (always visible)
