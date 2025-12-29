@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         return Err(anyhow::anyhow!("Config file not found: {}", config_path));
     }
 
-    let config: Context = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+    let ctx: Context = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
     let prelude = format!(
         "{HEADER}\n{GREEN}INFO{RESET}      Seed:              {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Config:            {RED}{}{RESET}\n\
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     );
 
     // Create the application
-    let mut app = App::new(config, prelude, crash_dir, debug_dir)?;
+    let mut app = App::new(ctx, prelude, crash_dir, debug_dir)?;
 
     // Run the application
     let mut random = SmallRng::seed_from_u64(cli.seed);

@@ -11,14 +11,17 @@
     "max_type_depth": 3,
 
     "max_structs_count": 5,
+
+    "min_struct_fields_count": 1,
     "max_struct_fields_count": 5,
+
     "max_globals_count": 5,
     "max_functions_count": 5,
 
     "max_function_parameters_count": 3,
     "max_function_return_types_count": 3,
 
-    "max_main_expressions_count": 25,
+    "max_main_expressions_count": 50,
     "max_block_expressions_count": 5,
 
     "max_string_hashes_count": 5,
@@ -36,10 +39,33 @@
     "raw_string_probability": 0.2,
     "new_variable_probability": 0.2,
 
+    "field_weight": 5,
+    "unsigned_weight": 5,
+    "signed_weight": 5,
+    "boolean_weight": 5,
+    "string_weight": 3,
+    "array_weight": 3,
+    "slice_weight": 5,
+    "tuple_weight": 3,
+    "struct_weight": 3,
+    "lambda_weight": 0,
+    "null_weight": 1,
+
+    "literal_weight": 5,
+    "lambda_def_weight": 0,
+    "variable_weight": 5,
+    "unary_weight": 4,
+    "field_binary_weight": 4,
+    "boolean_binary_weight": 3,
+    "integer_binary_weight": 4,
+    "index_array_weight": 3,
+    "index_slice_weight": 3,
+    "index_tuple_weight": 3,
+    "field_access_weight": 3,
+    "lambda_call_weight": 4,
+
     "allow_slices": true,
     "allow_structs": true,
-
-    "filter_entrypoint_structs": false,
 
     "type_depth": 0,
     "expression_depth": 0
