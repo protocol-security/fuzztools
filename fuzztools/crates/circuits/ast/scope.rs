@@ -4,16 +4,16 @@ use crate::circuits::ast::types::*;
 
 pub fn types_compatible(a: &Type, b: &Type) -> bool {
     match (a, b) {
-        (Type::Field(_), Type::Field(_)) => true,
-        (Type::Boolean(_), Type::Boolean(_)) => true,
+        (Type::Field, Type::Field) => true,
+        (Type::Boolean, Type::Boolean) => true,
         (Type::Integer(i1), Type::Integer(i2)) => i1.bits == i2.bits && i1.signed == i2.signed,
         (Type::Array(a1), Type::Array(a2)) => {
             a1.size == a2.size && types_compatible(&a1.ty, &a2.ty)
         }
         (Type::Slice(s1), Type::Slice(s2)) => types_compatible(&s1.ty, &s2.ty),
         (Type::Tuple(t1), Type::Tuple(t2)) => {
-            t1.inner.len() == t2.inner.len() &&
-                t1.inner.iter().zip(t2.inner.iter()).all(|(a, b)| types_compatible(a, b))
+            t1.elements.len() == t2.elements.len() &&
+                t1.elements.iter().zip(t2.elements.iter()).all(|(a, b)| types_compatible(a, b))
         }
         (Type::Struct(s1), Type::Struct(s2)) => {
             s1.name == s2.name &&
@@ -32,7 +32,7 @@ pub fn types_compatible(a: &Type, b: &Type) -> bool {
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// A variable in scope
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
     pub ty: Type,
@@ -44,7 +44,7 @@ pub struct Variable {
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// Represents an accessible path that yields a specific type
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct AccessPath {
     /// The variable name
     pub base: String,
@@ -153,8 +153,8 @@ impl Scope {
     pub fn tuple_index_accesses(&self, target_ty: &Type) -> Vec<AccessPath> {
         let mut result = Vec::new();
         for var in self.all_variables() {
-            if let Type::Tuple(Tuple { inner }) = &var.ty {
-                for (idx, elem_ty) in inner.iter().enumerate() {
+            if let Type::Tuple(Tuple { elements }) = &var.ty {
+                for (idx, elem_ty) in elements.iter().enumerate() {
                     if types_compatible(elem_ty, target_ty) {
                         result.push(AccessPath {
                             base: var.name.clone(),

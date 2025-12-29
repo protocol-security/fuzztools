@@ -1,8 +1,7 @@
-//! Math utilities.
-
+use rand::{seq::IndexedRandom, Rng};
+use crate::circuits::context::Context;
 use crate::mutations::Random;
 use alloy::primitives::U256;
-use rand::{seq::IndexedRandom, Rng};
 use std::str::FromStr;
 
 pub fn curve_prime(curve: &str) -> U256 {
@@ -20,7 +19,7 @@ pub fn curve_prime(curve: &str) -> U256 {
     U256::from_str(value).unwrap()
 }
 
-pub fn bernoulli(prob: f64, random: &mut impl Rng) -> bool {
+pub fn bernoulli(random: &mut impl Rng, prob: f64) -> bool {
     if prob <= 0.0 {
         return false;
     }
@@ -36,17 +35,15 @@ pub fn bernoulli(prob: f64, random: &mut impl Rng) -> bool {
 /// `exclude_prime` is `false`. The `small_upper_bound_probability` value indicates the
 /// probability of choosing a small integer, i.e. from the domain `[0..=small_upper_bound]`.
 pub fn random_field_element(
-    curve: &str,
     random: &mut impl Rng,
-    exclude_prime: bool,
-    boundary_value_probability: f64,
-    small_upper_bound_probability: f64,
-    max_small_upper_bound: u128,
+    ctx: &Context,
+    curve: &str,
 ) -> U256 {
     let prime = curve_prime(curve);
+    let exclude_prime = bernoulli(random, ctx.exclude_prime_probability);
 
     // Choose from boundary values
-    let value = if bernoulli(boundary_value_probability, random) {
+    let value = if bernoulli(random, ctx.boundary_value_probability) {
         if exclude_prime {
             // Choose from `[0, 1]`
             *[U256::ZERO, U256::ONE].choose(random).unwrap()
@@ -56,8 +53,8 @@ pub fn random_field_element(
         }
     } else {
         // Choose from `[0..=small_upper_bound]`
-        if bernoulli(small_upper_bound_probability, random) {
-            U256::from(random.random_range(0..=max_small_upper_bound))
+        if bernoulli(random, ctx.small_upper_bound_probability) {
+            U256::from(random.random_range(0..=ctx.max_small_upper_bound))
         } else {
             // Choose from `[0..=Fp - 1]`
             U256::random(random) % prime
@@ -66,3 +63,16 @@ pub fn random_field_element(
 
     value
 }
+
+
+pub const LETTERS: [&str; 52] = [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
+    "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l",
+    "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+];
+
+#[inline(always)]
+pub fn random_string(rng: &mut impl Rng, size: usize) -> String {
+    (0..size).map(|_| *LETTERS.choose(rng).unwrap()).collect()
+}
+
