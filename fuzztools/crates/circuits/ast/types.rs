@@ -10,7 +10,7 @@ use rand::{seq::IndexedRandom, Rng};
 // Type definitions
 // ────────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     Field,
     Unsigned,

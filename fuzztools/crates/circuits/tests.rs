@@ -320,7 +320,7 @@ mod tests {
         let before = forest.clone();
 
         // Apply one random equivalence rule
-        let rewriter = Rewriter::equivalence();
+        let rewriter = Rewriter::new();
         rewriter.apply_random(random, &mut forest);
 
         // Save both for comparison
@@ -330,5 +330,32 @@ mod tests {
 
         println!("Before: {} nodes", before.graph.node_count());
         println!("After:  {} nodes", forest.graph.node_count());
+    }
+
+    #[test]
+    fn test_formatter() {
+        let random = &mut rand::rng();
+        let ctx: Context =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
+        let scope = create_scope(random, &ctx);
+        let mut out = String::new();
+
+        for s in scope.structs.iter() {
+            out.push_str(&format!("{}", s));
+        }
+
+        out.push_str("fn main() {\n");
+
+        let mut forest = Forest::default();
+        forest.random(random, &ctx, &scope);
+
+        out.push_str(&format!("{}", forest));
+        out.push_str("}\n");
+
+        compile_noir_code(&out, "test_formatter");
+
+        forest.save_as_dot(&std::env::current_dir().unwrap().join("test_formatter.dot"));
+
+        println!("{}", out);
     }
 }
