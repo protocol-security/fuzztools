@@ -1,7 +1,7 @@
 use crate::circuits::ast::operators::Operator;
 
 /// A rule that can be applied to transform expressions in the graph
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct Rule {
     pub name: &'static str,
     pub kind: RuleKind,
@@ -9,7 +9,7 @@ pub struct Rule {
 
 // @todo add many more
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════
     // STRUCTURAL TRANSFORMATIONS

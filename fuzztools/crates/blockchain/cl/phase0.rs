@@ -93,26 +93,26 @@ pub const EJECTION_BALANCE: Gwei = 16_000_000_000;
 pub const MIN_PER_EPOCH_CHURN_LIMIT: u64 = 4;
 pub const CHURN_LIMIT_QUOTIENT: u64 = 65_536;
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Fork {
     pub previous_version: Version,
     pub current_version: Version,
     pub epoch: Epoch,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct ForkData {
     pub current_version: Version,
     pub genesis_validators_root: Root,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Checkpoint {
     pub epoch: Epoch,
     pub root: Root,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Validator {
     pub pubkey: BLSPubkey,
     pub withdrawal_credentials: FixedBytes<32>,
@@ -124,7 +124,7 @@ pub struct Validator {
     pub withdrawable_epoch: Epoch,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct AttestationData {
     pub slot: Slot,
     pub index: CommitteeIndex,
@@ -133,14 +133,14 @@ pub struct AttestationData {
     pub target: Checkpoint,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct IndexedAttestation {
     pub attesting_indices: [ValidatorIndex; MAX_VALIDATORS_PER_COMMITTEE],
     pub data: AttestationData,
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct PendingAttestation {
     pub aggregation_bits: [u8; MAX_VALIDATORS_PER_COMMITTEE],
     pub data: AttestationData,
@@ -148,27 +148,27 @@ pub struct PendingAttestation {
     pub proposer_index: ValidatorIndex,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Eth1Data {
     pub deposit_root: Root,
     pub deposit_count: u64,
     pub block_hash: Hash32,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct HistoricalBatch {
     pub block_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
     pub state_roots: [Root; SLOTS_PER_HISTORICAL_ROOT as usize],
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct DepositMessage {
     pub pubkey: BLSPubkey,
     pub withdrawal_credentials: FixedBytes<32>,
     pub amount: Gwei,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct DepositData {
     pub pubkey: BLSPubkey,
     pub withdrawal_credentials: FixedBytes<32>,
@@ -176,7 +176,7 @@ pub struct DepositData {
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct BeaconBlockHeader {
     pub slot: Slot,
     pub proposer_index: ValidatorIndex,
@@ -185,44 +185,44 @@ pub struct BeaconBlockHeader {
     pub body_root: Root,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct SigningData {
     pub object_root: Root,
     pub domain: Domain,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct ProposerSlashing {
     pub signed_header_1: SignedBeaconBlockHeader,
     pub signed_header_2: SignedBeaconBlockHeader,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct AttesterSlashing {
     pub attestation_1: IndexedAttestation,
     pub attestation_2: IndexedAttestation,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Attestation {
     pub aggregation_bits: [u8; MAX_VALIDATORS_PER_COMMITTEE],
     pub data: AttestationData,
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Deposit {
     pub proof: [FixedBytes<32>; DEPOSIT_CONTRACT_TREE_DEPTH + 1],
     pub data: DepositData,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct VoluntaryExit {
     pub epoch: Epoch,
     pub validator_index: ValidatorIndex,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -234,7 +234,7 @@ pub struct BeaconBlockBody {
     pub voluntary_exits: [SignedVoluntaryExit; MAX_VOLUNTARY_EXITS as usize],
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct BeaconBlock {
     pub slot: Slot,
     pub proposer_index: ValidatorIndex,
@@ -243,7 +243,7 @@ pub struct BeaconBlock {
     pub body: BeaconBlockBody,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,
@@ -270,19 +270,19 @@ pub struct BeaconState {
     pub finalized_checkpoint: Checkpoint,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct SignedVoluntaryExit {
     pub message: VoluntaryExit,
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct SignedBeaconBlock {
     pub message: BeaconBlock,
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct SignedBeaconBlockHeader {
     pub message: BeaconBlockHeader,
     pub signature: BLSSignature,

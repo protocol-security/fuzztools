@@ -1,6 +1,6 @@
 //! Implements the Noir IR operators
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operator {
     Add,
     Sub,
@@ -20,6 +20,8 @@ pub enum Operator {
     NotEqual,
     Not,
     Neg,
+    // @todo Ref
+    // @todo DeRef
 }
 
 impl Operator {

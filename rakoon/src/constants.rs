@@ -21,7 +21,7 @@ pub(crate) const CLEAR_SCREEN: &str = "\x1b[2J\x1b[H";
 pub(crate) const AUTH_PRIVATE_KEY: &str =
     "0x8c04e41e317a7cf0cf4c2f7431d0a890a950f352df41ff6d053698df61a73bba";
 
-#[derive(Clone, ValueEnum, Debug, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 /// Used as a CLI flag to select the transaction type to fuzz
 pub(crate) enum TransactionType {
     Legacy,

@@ -49,7 +49,7 @@ pub const MAX_BLOBS_PER_BLOCK_ELECTRA: u64 = 9;
 pub const MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA: Gwei = 128_000_000_000;
 pub const MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT: Gwei = 256_000_000_000;
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct PendingDeposit {
     pub pubkey: BLSPubkey,
     pub withdrawal_credentials: FixedBytes<32>,
@@ -58,20 +58,20 @@ pub struct PendingDeposit {
     pub slot: Slot,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct PendingPartialWithdrawal {
     pub validator_index: ValidatorIndex,
     pub amount: Gwei,
     pub withdrawable_epoch: Epoch,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct PendingConsolidation {
     pub source_index: ValidatorIndex,
     pub target_index: ValidatorIndex,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct DepositRequest {
     pub pubkey: BLSPubkey,
     pub withdrawal_credentials: FixedBytes<32>,
@@ -80,21 +80,21 @@ pub struct DepositRequest {
     pub index: u64,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct WithdrawalRequest {
     pub source_address: ExecutionAddress,
     pub validator_pubkey: BLSPubkey,
     pub amount: Gwei,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct ConsolidationRequest {
     pub source_address: ExecutionAddress,
     pub source_pubkey: BLSPubkey,
     pub target_pubkey: BLSPubkey,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct ExecutionRequests {
     // [New in Electra:EIP6110]
     pub deposits: [DepositRequest; MAX_DEPOSIT_REQUESTS_PER_PAYLOAD as usize],
@@ -104,7 +104,7 @@ pub struct ExecutionRequests {
     pub consolidations: [ConsolidationRequest; MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD as usize],
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct SingleAttestation {
     pub committee_index: CommitteeIndex,
     pub attester_index: ValidatorIndex,
@@ -112,7 +112,7 @@ pub struct SingleAttestation {
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct AttesterSlashing {
     // [Modified in Electra:EIP7549]
     pub attestation_1: IndexedAttestation,
@@ -120,7 +120,7 @@ pub struct AttesterSlashing {
     pub attestation_2: IndexedAttestation,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -141,7 +141,7 @@ pub struct BeaconBlockBody {
     pub execution_requests: ExecutionRequests,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct Attestation {
     // [Modified in Electra:EIP7549]
     pub aggregation_bits: [u8; MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT as usize],
@@ -151,7 +151,7 @@ pub struct Attestation {
     pub committee_bits: [u8; MAX_COMMITTEES_PER_SLOT as usize],
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct IndexedAttestation {
     // [Modified in Electra:EIP7549]
     pub attesting_indices:
@@ -160,7 +160,7 @@ pub struct IndexedAttestation {
     pub signature: BLSSignature,
 }
 
-#[derive(Copy, Clone, Mutable)]
+#[derive(Clone, Copy, Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,
