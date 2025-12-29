@@ -17,12 +17,8 @@ use std::{collections::HashMap, fmt::Write, path::Path};
 pub struct Forest {
     pub graph: DiGraph<Node, usize>,
     pub var_counter: usize,
-
-    // TypeKind -> [NodeIndex]
     pub types: HashMap<TypeKind, Vec<NodeIndex>>,
-    // NodeKind -> [NodeIndex]
     pub nodes: HashMap<NodeKind, Vec<NodeIndex>>,
-    // Operator -> [NodeIndex]
     pub operators: HashMap<Operator, Vec<NodeIndex>>,
 }
 
@@ -32,47 +28,35 @@ impl Forest {
             Node::Input { ty, .. } | Node::Literal { ty, .. } | Node::Variable { ty, .. } => {
                 ty.clone()
             }
-            Node::Operator { op } => {
-                if op.is_comparison() {
-                    Type::Boolean
-                } else {
-                    self.ty(self.left(idx).unwrap())
+            Node::Operator { ret, .. } => ret.clone(),
+            Node::Index { .. } => match self.ty(self.left(idx).unwrap()) {
+                Type::Array(a) => (*a.ty).clone(),
+                Type::Slice(s) => (*s.ty).clone(),
+                _ => unreachable!(),
+            },
+            Node::TupleIndex { value } => match self.ty(self.left(idx).unwrap()) {
+                Type::Tuple(t) => t.elements[*value].clone(),
+                _ => unreachable!(),
+            },
+            Node::FieldAccess { name } => match self.ty(self.left(idx).unwrap()) {
+                Type::Struct(s) => {
+                    s.fields.iter().find(|f| &f.name == name).unwrap().ty.as_ref().clone()
                 }
-            }
-            Node::Index { .. } => {
-                let parent_ty = self.ty(self.left(idx).unwrap());
-                match parent_ty {
-                    Type::Array(Array { ty, .. }) | Type::Slice(Slice { ty, .. }) => (*ty).clone(),
-                    _ => unreachable!(),
-                }
-            }
-            Node::TupleIndex { value } => {
-                let parent_ty = self.ty(self.left(idx).unwrap());
-                match parent_ty {
-                    Type::Tuple(Tuple { elements, .. }) => elements[*value].clone(),
-                    _ => unreachable!(),
-                }
-            }
-            Node::FieldAccess { name } => {
-                let parent_ty = self.ty(self.left(idx).unwrap());
-                match parent_ty {
-                    Type::Struct(Struct { fields, .. }) => {
-                        fields.iter().find(|f| &f.name == name).unwrap().ty.as_ref().clone()
-                    }
-                    _ => unreachable!(),
-                }
-            }
+                _ => unreachable!(),
+            },
         }
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
-    // Handlers for creating nodes
+    // Node creation
     // ────────────────────────────────────────────────────────────────────────────────
 
+    #[inline(always)]
     pub fn input(&mut self, name: String, ty: Type) -> NodeIndex {
         self.graph.add_node(Node::Input { name, ty })
     }
 
+    #[inline(always)]
     pub fn variable(&mut self, name: String, ty: Type, value: NodeIndex) -> NodeIndex {
         let idx = self.graph.add_node(Node::Variable { name, ty });
         self.graph.add_edge(idx, value, 0);
@@ -80,12 +64,20 @@ impl Forest {
         idx
     }
 
+    #[inline(always)]
     pub fn literal(&mut self, value: String, ty: Type) -> NodeIndex {
         self.graph.add_node(Node::Literal { value, ty })
     }
 
-    pub fn operator(&mut self, op: Operator, lhs: NodeIndex, rhs: Option<NodeIndex>) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Operator { op });
+    #[inline(always)]
+    pub fn operator(
+        &mut self,
+        op: Operator,
+        ret: Type,
+        lhs: NodeIndex,
+        rhs: Option<NodeIndex>,
+    ) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Operator { op, ret });
         self.graph.add_edge(idx, lhs, 0);
 
         // In unary operations, there is no right operand, so `rhs` is `None`
@@ -96,6 +88,7 @@ impl Forest {
         idx
     }
 
+    #[inline(always)]
     pub fn index(&mut self, parent: NodeIndex, value: usize) -> NodeIndex {
         let idx = self.graph.add_node(Node::Index { value });
         self.graph.add_edge(idx, parent, 0);
@@ -103,6 +96,7 @@ impl Forest {
         idx
     }
 
+    #[inline(always)]
     pub fn tuple_index(&mut self, parent: NodeIndex, value: usize) -> NodeIndex {
         let idx = self.graph.add_node(Node::TupleIndex { value });
         self.graph.add_edge(idx, parent, 0);
@@ -110,6 +104,7 @@ impl Forest {
         idx
     }
 
+    #[inline(always)]
     pub fn field_access(&mut self, parent: NodeIndex, name: String) -> NodeIndex {
         let idx = self.graph.add_node(Node::FieldAccess { name });
         self.graph.add_edge(idx, parent, 0);
@@ -118,14 +113,54 @@ impl Forest {
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
-    // Handy mutations
+    // Graph queries
     // ────────────────────────────────────────────────────────────────────────────────
 
-    /// Swap the left and right operands of a binary operation
+    /// Get operand at position `pos` (0 = left/primary, 1 = right)
+    #[inline(always)]
+    pub fn operand(&self, idx: NodeIndex, pos: usize) -> Option<NodeIndex> {
+        self.graph
+            .edges_directed(idx, Direction::Outgoing)
+            .find(|e| *e.weight() == pos)
+            .map(|e| e.target())
+    }
+
+    #[inline(always)]
+    pub fn left(&self, idx: NodeIndex) -> Option<NodeIndex> {
+        self.operand(idx, 0)
+    }
+
+    #[inline(always)]
+    pub fn right(&self, idx: NodeIndex) -> Option<NodeIndex> {
+        self.operand(idx, 1)
+    }
+
+    /// Collect incoming edges to a node
+    #[inline(always)]
+    pub fn incoming_edges(&self, node: NodeIndex) -> Vec<(NodeIndex, usize)> {
+        self.graph
+            .edges_directed(node, Direction::Incoming)
+            .map(|e| (e.source(), *e.weight()))
+            .collect()
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────
+    // Graph mutations
+    // ────────────────────────────────────────────────────────────────────────────────
+
+    /// Remove node if it has no edges
+    #[inline(always)]
+    fn remove_if_orphan(&mut self, node: NodeIndex) {
+        if self.graph.edges(node).next().is_none() {
+            self.graph.remove_node(node);
+        }
+    }
+
+    /// Swap left and right operands of a binary operation
     pub fn swap_operands(&mut self, n: NodeIndex) {
         let edges: Vec<_> = self
             .graph
-            .edges_directed(n, Direction::Incoming)
+            .edges_directed(n, Direction::Outgoing)
             .map(|e| (e.id(), *e.weight(), e.target()))
             .collect();
 
@@ -133,67 +168,69 @@ impl Forest {
             self.graph.remove_edge(edges[0].0);
             self.graph.remove_edge(edges[1].0);
 
-            self.graph.add_edge(edges[0].2, n, 1 - edges[0].1);
-            self.graph.add_edge(edges[1].2, n, 1 - edges[1].1);
+            self.graph.add_edge(n, edges[0].2, 1 - edges[0].1);
+            self.graph.add_edge(n, edges[1].2, 1 - edges[1].1);
         }
     }
 
-    /// Given an operator at position `n`, replace the operand connected by the edge with weight
-    /// `pos` with the node `new`, removing the old operand if it has no remaining edges
+    /// Replace operand at position `pos`, removing it if orphaned
+    #[inline(always)]
     pub fn replace_operand(&mut self, n: NodeIndex, pos: usize, new: NodeIndex) {
-        let edge_to_remove =
-            self.graph.edges_directed(n, Direction::Incoming).find(|e| *e.weight() == pos);
-
-        if let Some(edge) = edge_to_remove {
-            let old_operand = edge.source();
-            let edge_id = edge.id();
-
-            self.graph.remove_edge(edge_id);
-
-            // Remove the old operand if it has no remaining edges
-            let has_edges =
-                self.graph.edges_directed(old_operand, Direction::Incoming).next().is_some() ||
-                    self.graph.edges_directed(old_operand, Direction::Outgoing).next().is_some();
-
-            if !has_edges {
-                self.graph.remove_node(old_operand);
-            }
+        if let Some(edge) =
+            self.graph.edges_directed(n, Direction::Outgoing).find(|e| *e.weight() == pos)
+        {
+            let old = edge.target();
+            self.graph.remove_edge(edge.id());
+            self.remove_if_orphan(old);
         }
+        self.graph.add_edge(n, new, pos);
+    }
 
-        self.graph.add_edge(new, n, pos);
+    /// Add operand at position `pos`
+    #[inline(always)]
+    pub fn add_operand(&mut self, n: NodeIndex, pos: usize, operand: NodeIndex) {
+        self.graph.add_edge(n, operand, pos);
+    }
+
+    /// Remove operand at position `pos`, removing target if orphaned
+    #[inline(always)]
+    pub fn remove_operand(&mut self, n: NodeIndex, pos: usize) {
+        if let Some(edge) =
+            self.graph.edges_directed(n, Direction::Outgoing).find(|e| *e.weight() == pos)
+        {
+            let old = edge.target();
+            self.graph.remove_edge(edge.id());
+            self.remove_if_orphan(old);
+        }
+    }
+
+    /// Redirect incoming edges from `old` to `new`
+    #[inline(always)]
+    pub fn redirect_edges(&mut self, old: NodeIndex, new: NodeIndex, edges: &[(NodeIndex, usize)]) {
+        for &(source, weight) in edges {
+            if let Some(edge) = self
+                .graph
+                .edges_directed(old, Direction::Incoming)
+                .find(|e| e.source() == source && *e.weight() == weight)
+            {
+                self.graph.remove_edge(edge.id());
+            }
+            self.graph.add_edge(source, new, weight);
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
-    // Queries to the expression graph
+    // Helpers
     // ────────────────────────────────────────────────────────────────────────────────
 
-    /// Get the left operand (edge weight 0) of an operator
-    pub fn left(&self, idx: NodeIndex) -> Option<NodeIndex> {
-        self.graph
-            .edges_directed(idx, Direction::Outgoing)
-            .find(|e| *e.weight() == 0)
-            .map(|e| e.target())
-    }
-
-    /// Get the right operand (edge weight 1) of a binary operation
-    pub fn right(&self, idx: NodeIndex) -> Option<NodeIndex> {
-        self.graph
-            .edges_directed(idx, Direction::Outgoing)
-            .find(|e| *e.weight() == 1)
-            .map(|e| e.target())
-    }
-
-    // ────────────────────────────────────────────────────────────────────────────────
-    // Handy helpers
-    // ────────────────────────────────────────────────────────────────────────────────
-
+    #[inline(always)]
     pub fn next_var(&mut self) -> String {
         let n = self.var_counter;
         self.var_counter += 1;
         format!("v{n}")
     }
 
-    /// Register a node in all tracking maps
+    #[inline(always)]
     pub fn register(&mut self, idx: NodeIndex, kind: NodeKind, ty: &Type, op: Option<Operator>) {
         self.types.entry(ty.kind()).or_default().push(idx);
         self.nodes.entry(kind).or_default().push(idx);
@@ -203,38 +240,38 @@ impl Forest {
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
-    // Utils to export as DOT file
+    // DOT export
     // ────────────────────────────────────────────────────────────────────────────────
 
-    /// Get the edge label based on the `Node` type
-    fn dot_edge_label(&self, idx: NodeIndex, weight: usize) -> String {
-        match &self.graph[idx] {
-            Node::Operator { .. } => if weight == 0 { "lhs" } else { "rhs" }.into(),
-            Node::Variable { .. } => "let".into(),
-            _ => String::new(),
-        }
-    }
-
     pub fn save_as_dot(&self, path: &Path) {
-        let mut out = String::new();
-        out.push_str(
-            "digraph {\n  rankdir=BT;\n  node [fontname=monospace shape=box style=\"filled,rounded\" margin=\"0.4,0.2\"];\n",
+        let mut out = String::from(
+            "digraph {\n  rankdir=BT;\n  node [fontname=monospace shape=box style=\"filled,rounded\" margin=\"0.4,0.2\"];\n"
         );
 
         for n in self.graph.node_indices() {
-            let label = self.graph[n].to_string();
-            let color = self.graph[n].color();
-
+            let node = &self.graph[n];
             let _ = writeln!(
                 out,
-                "  {} [label=\"{}\" fillcolor=\"{color}\"]",
+                "  {} [label=\"{}\" fillcolor=\"{}\"]",
                 n.index(),
-                label.replace('"', "\\\"")
+                node.to_string().replace('"', "\\\""),
+                node.color()
             );
         }
 
         for e in self.graph.edge_references() {
-            let lbl = self.dot_edge_label(e.source(), *e.weight());
+            let lbl = match &self.graph[e.source()] {
+                Node::Operator { op, .. } if op.is_unary() => "unary",
+                Node::Operator { .. } => {
+                    if *e.weight() == 0 {
+                        "lhs"
+                    } else {
+                        "rhs"
+                    }
+                }
+                Node::Variable { .. } => "let",
+                _ => "",
+            };
             let _ = writeln!(
                 out,
                 "  {} -> {} [label=\"{lbl}\" dir=back]",

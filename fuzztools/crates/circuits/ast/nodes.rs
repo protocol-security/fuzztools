@@ -29,7 +29,7 @@ pub enum Node {
     Literal { value: String, ty: Type },
 
     /// An operator node, `+`, `-`, `*`, `/`, `%`, etc...
-    Operator { op: Operator },
+    Operator { op: Operator, ret: Type },
 
     /// An index node, `a[2]`, `b[3]`, etc...
     Index { value: usize },
@@ -48,6 +48,7 @@ pub enum Node {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Node {
+    #[inline(always)]
     pub fn kind(&self) -> NodeKind {
         match self {
             Self::Input { .. } => NodeKind::Input,
@@ -60,13 +61,15 @@ impl Node {
         }
     }
 
+    #[inline(always)]
     pub fn color(&self) -> &'static str {
-        match self.kind() {
-            NodeKind::Input => "#d56b4bff",  // red
-            NodeKind::Literal => "#a0d8ef",  // light blue
-            NodeKind::Variable => "#98d98e", // light green
-            NodeKind::Operator => "#ffd700", // yellow
-            NodeKind::Index | NodeKind::TupleIndex | NodeKind::FieldAccess => "#ffb6c1", /* light pink */
+        match self {
+            Self::Input { .. } => "#d56b4bff",                       // red
+            Self::Literal { .. } => "#a0d8ef",                       // light blue
+            Self::Variable { .. } => "#98d98e",                      // light green
+            Self::Operator { op, .. } if op.is_unary() => "#ffa500", // orange for unary
+            Self::Operator { .. } => "#ffd700",                      // yellow for binary
+            Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#ffb6c1", /* light pink */
         }
     }
 }

@@ -25,17 +25,15 @@ pub enum Operator {
 }
 
 impl Operator {
-    // Field operators
-    pub fn binary_field() -> &'static [Operator] {
+    pub const fn binary_field() -> &'static [Operator] {
         &[Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Equal, Self::NotEqual]
     }
 
-    pub fn unary_field() -> &'static [Operator] {
+    pub const fn unary_field() -> &'static [Operator] {
         &[Self::Neg]
     }
 
-    // Signed integer operators
-    pub fn binary_integer_signed() -> &'static [Operator] {
+    pub const fn binary_integer_signed() -> &'static [Operator] {
         &[
             Self::Add,
             Self::Sub,
@@ -56,12 +54,11 @@ impl Operator {
         ]
     }
 
-    pub fn unary_integer_signed() -> &'static [Operator] {
+    pub const fn unary_integer_signed() -> &'static [Operator] {
         &[Self::Neg, Self::Not]
     }
 
-    // Unsigned integer operators
-    pub fn binary_integer_unsigned() -> &'static [Operator] {
+    pub const fn binary_integer_unsigned() -> &'static [Operator] {
         &[
             Self::Add,
             Self::Sub,
@@ -82,20 +79,19 @@ impl Operator {
         ]
     }
 
-    pub fn unary_integer_unsigned() -> &'static [Operator] {
+    pub const fn unary_integer_unsigned() -> &'static [Operator] {
         &[Self::Not]
     }
 
-    // Boolean operators
-    pub fn binary_boolean() -> &'static [Operator] {
+    pub const fn binary_boolean() -> &'static [Operator] {
         &[Self::And, Self::Or, Self::Xor, Self::Equal, Self::NotEqual]
     }
 
-    pub fn unary_boolean() -> &'static [Operator] {
+    pub const fn unary_boolean() -> &'static [Operator] {
         &[Self::Not]
     }
 
-    pub fn is_comparison(&self) -> bool {
+    pub const fn is_comparison(&self) -> bool {
         matches!(
             self,
             Self::Less |
@@ -105,6 +101,10 @@ impl Operator {
                 Self::Equal |
                 Self::NotEqual
         )
+    }
+
+    pub const fn is_unary(&self) -> bool {
+        matches!(self, Self::Neg | Self::Not)
     }
 }
 
