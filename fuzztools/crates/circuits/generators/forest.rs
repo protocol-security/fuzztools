@@ -13,8 +13,11 @@ use crate::circuits::{
 };
 use petgraph::graph::NodeIndex;
 
+// ────────────────────────────────────────────────────────────────────────────────
+// Forest generation
+// ────────────────────────────────────────────────────────────────────────────────
+
 impl Forest {
-    /// Generates a random tree based on the given `ctx` and `scope`
     pub fn random(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
         let count = random.random_range(ctx.min_expression_count..ctx.max_expression_count);
 
@@ -30,17 +33,20 @@ impl Forest {
         for _ in 0..count {
             let mut n = 0;
 
+            // At first, we can only generate literals (if no inputs are provided from scope)
             choices[n] = (NodeKind::Literal, ctx.literal_weight);
             n += 1;
 
             let has_nodes = self.graph.node_count() > 0;
             if has_nodes {
+                // If there are nodes, we can assign to them or do operations on them
                 choices[n] = (NodeKind::Variable, ctx.variable_weight);
                 n += 1;
                 choices[n] = (NodeKind::Operator, ctx.operator_weight);
                 n += 1;
             }
 
+            // If there are arrays or slices, we can index into them, as well as tuples and structs
             let has_array = self.types.contains_key(&TypeKind::Array);
             let has_slice = self.types.contains_key(&TypeKind::Slice);
             let has_tuple = self.types.contains_key(&TypeKind::Tuple);
@@ -59,6 +65,7 @@ impl Forest {
                 n += 1;
             }
 
+            // Now we can choose a node kind based on the weights provided in `ctx`
             match choices[..n].choose_weighted(random, |c| c.1).unwrap().0 {
                 NodeKind::Literal => self.gen_literal(random, ctx, scope),
                 NodeKind::Variable => self.gen_variable(random),
@@ -66,27 +73,31 @@ impl Forest {
                 NodeKind::Index => self.gen_index(random),
                 NodeKind::TupleIndex => self.gen_tuple_index(random),
                 NodeKind::FieldAccess => self.gen_field_access(random),
-                _ => unreachable!(),
+                _ => {}
             }
         }
     }
 
+    /// Creates a single node with a random literal value
     fn gen_literal(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
         let ty = Type::random(random, ctx, scope, TypeLocation::Default);
         let idx = self.literal(ty.random_value(random, ctx), ty.clone());
         self.register(idx, NodeKind::Literal, &ty, None);
     }
 
+    /// Creates a single node and links to it the result of another node of the same type
     fn gen_variable(&mut self, random: &mut impl Rng) {
         // We do this instead of using `node_indices().collect()choose(random)` because the first
         // one is O(n) and the second one is O(1)
         let source = NodeIndex::new(random.random_range(0..self.graph.node_count()));
         let ty = self.ty(source);
-        let var_name = self.next_var();
-        let idx = self.variable(var_name, ty.clone(), source);
+        let name = self.next_var();
+        let idx = self.variable(name, ty.clone(), source);
+
         self.register(idx, NodeKind::Variable, &ty, None);
     }
 
+    /// Creates a single node and links to it the result of one or two other nodes
     fn gen_operator(&mut self, random: &mut impl Rng, ctx: &Context) {
         // We do this instead of using `node_indices().collect()choose(random)` because the first
         // one is O(n) and the second one is O(1)
@@ -107,25 +118,31 @@ impl Forest {
         };
 
         let peers = self.types.get(&kind);
-        if random.random_bool(ctx.unary_probability) || peers.map_or(true, |v| v.len() < 2) {
+        let use_unary =
+            random.random_bool(ctx.unary_probability) || peers.map_or(true, |v| v.len() < 2);
+
+        if use_unary {
             let op = *un.choose(random).unwrap();
-            let idx = self.operator(op, left, None);
+            let idx = self.operator(op, left_ty.clone(), left, None);
+
             self.register(idx, NodeKind::Operator, &left_ty, Some(op));
         } else {
             let right = *peers.unwrap().choose(random).unwrap();
             let op = *bin.choose(random).unwrap();
-            let idx = self.operator(op, left, Some(right));
-            self.register(idx, NodeKind::Operator, &left_ty, Some(op));
+            let ret = if op.is_comparison() { Type::Boolean } else { left_ty };
+            let idx = self.operator(op, ret.clone(), left, Some(right));
+
+            self.register(idx, NodeKind::Operator, &ret, Some(op));
         }
     }
 
+    /// Creates a single node and links to it an array or slice node result
     fn gen_index(&mut self, random: &mut impl Rng) {
         let parent = *self
             .types
             .get(&TypeKind::Array)
             .or_else(|| self.types.get(&TypeKind::Slice))
-            .unwrap()
-            .choose(random)
+            .and_then(|v| v.choose(random))
             .unwrap();
 
         let (inner, size) = match self.ty(parent) {
@@ -139,8 +156,9 @@ impl Forest {
         self.register(idx, NodeKind::Index, &inner, None);
     }
 
+    /// Creates a single node and links to it a tuple node result
     fn gen_tuple_index(&mut self, random: &mut impl Rng) {
-        let parent = *self.types.get(&TypeKind::Tuple).unwrap().choose(random).unwrap();
+        let parent = *self.types.get(&TypeKind::Tuple).and_then(|v| v.choose(random)).unwrap();
         let elements = match self.ty(parent) {
             Type::Tuple(Tuple { elements, .. }) => elements,
             _ => unreachable!(),
@@ -151,8 +169,9 @@ impl Forest {
         self.register(idx, NodeKind::TupleIndex, &elements[i], None);
     }
 
+    /// Creates a single node and links to it a struct node result
     fn gen_field_access(&mut self, random: &mut impl Rng) {
-        let parent = *self.types.get(&TypeKind::Struct).unwrap().choose(random).unwrap();
+        let parent = *self.types.get(&TypeKind::Struct).and_then(|v| v.choose(random)).unwrap();
         let fields = match self.ty(parent) {
             Type::Struct(Struct { fields, .. }) => fields,
             _ => unreachable!(),
