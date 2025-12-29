@@ -1,7 +1,6 @@
-use rand::{seq::IndexedRandom, Rng};
-use crate::circuits::context::Context;
-use crate::mutations::Random;
+use crate::{circuits::context::Context, mutations::Random};
 use alloy::primitives::U256;
+use rand::{seq::IndexedRandom, Rng};
 use std::str::FromStr;
 
 pub fn curve_prime(curve: &str) -> U256 {
@@ -34,11 +33,7 @@ pub fn bernoulli(random: &mut impl Rng, prob: f64) -> bool {
 /// a boundary value, i.e. `[0, 1]` or `[0, 1, Fp - 1]` if
 /// `exclude_prime` is `false`. The `small_upper_bound_probability` value indicates the
 /// probability of choosing a small integer, i.e. from the domain `[0..=small_upper_bound]`.
-pub fn random_field_element(
-    random: &mut impl Rng,
-    ctx: &Context,
-    curve: &str,
-) -> U256 {
+pub fn random_field_element(random: &mut impl Rng, ctx: &Context, curve: &str) -> U256 {
     let prime = curve_prime(curve);
     let exclude_prime = bernoulli(random, ctx.exclude_prime_probability);
 
@@ -64,7 +59,6 @@ pub fn random_field_element(
     value
 }
 
-
 pub const LETTERS: [&str; 52] = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
     "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l",
@@ -75,4 +69,3 @@ pub const LETTERS: [&str; 52] = [
 pub fn random_string(rng: &mut impl Rng, size: usize) -> String {
     (0..size).map(|_| *LETTERS.choose(rng).unwrap()).collect()
 }
-

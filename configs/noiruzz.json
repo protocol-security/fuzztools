@@ -1,43 +1,20 @@
 {
-    "max_inputs_count": 5,
+    "min_expression_count": 5,
+    "max_expression_count": 25,
 
     "min_element_count": 1,
-    "max_element_count": 5,
+    "max_element_count": 3,
 
     "min_string_size": 1,
     "max_string_size": 10,
 
-    "max_expression_depth": 3,
-    "max_type_depth": 3,
-
-    "max_structs_count": 5,
+    "min_function_parameters_count": 1,
+    "max_function_parameters_count": 3,
 
     "min_struct_fields_count": 1,
-    "max_struct_fields_count": 5,
-
-    "max_globals_count": 5,
-    "max_functions_count": 5,
-
-    "max_function_parameters_count": 3,
-    "max_function_return_types_count": 3,
-
-    "max_main_expressions_count": 50,
-    "max_block_expressions_count": 5,
-
-    "max_string_hashes_count": 5,
-    "max_name_characters_count": 5,
-
-    "max_if_else_branch_count": 4,
+    "max_struct_fields_count": 3,
 
     "max_small_upper_bound": 5,
-
-    "integer_signed_probability": 0.33,
-    "boundary_value_probability": 0.25,
-    "small_upper_bound_probability": 0.2,
-    "exclude_prime_probability": 0.1,
-    "mutable_probability": 0.4,
-    "raw_string_probability": 0.2,
-    "new_variable_probability": 0.2,
 
     "field_weight": 5,
     "unsigned_weight": 5,
@@ -49,24 +26,19 @@
     "tuple_weight": 3,
     "struct_weight": 3,
     "lambda_weight": 0,
-    "null_weight": 1,
 
-    "literal_weight": 5,
-    "lambda_def_weight": 0,
+    "literal_weight": 2,
     "variable_weight": 5,
-    "unary_weight": 4,
-    "field_binary_weight": 4,
-    "boolean_binary_weight": 3,
-    "integer_binary_weight": 4,
-    "index_array_weight": 3,
-    "index_slice_weight": 3,
-    "index_tuple_weight": 3,
+    "operator_weight": 7,
+    "index_weight": 3,
+    "tuple_index_weight": 3,
     "field_access_weight": 3,
-    "lambda_call_weight": 4,
 
-    "allow_slices": true,
-    "allow_structs": true,
+    "boundary_value_probability": 0.25,
+    "exclude_prime_probability": 0.1,
+    "small_upper_bound_probability": 0.2,
+    "raw_string_probability": 0.2,
+    "unary_probability": 0.2,
 
-    "type_depth": 0,
-    "expression_depth": 0
+    "max_type_depth": 2
 }

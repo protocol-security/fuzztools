@@ -1,8 +1,15 @@
 use std::collections::VecDeque;
 
-use rand::{Rng, seq::IndexedRandom};
+use rand::{seq::IndexedRandom, Rng};
 
-use crate::circuits::{ast::{scope::Scope, types::{Array, Integer, Lambda, Slice, StringType, Struct, StructField, Tuple, Type, TypeKind, Visibility}}, context::Context};
+use crate::circuits::{
+    ast::types::{
+        Array, Integer, Lambda, Slice, StringType, Struct, StructField, Tuple, Type, TypeKind,
+        Visibility,
+    },
+    context::Context,
+    scope::Scope,
+};
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Type generation
@@ -14,34 +21,15 @@ pub enum TypeLocation {
     Nested,
     TupleElement,
     TupleNested,
-    Default
+    Default,
 }
 
 enum WorkItem {
-    Generate {
-        slot: usize,
-        depth: usize,
-        location: TypeLocation,
-    },
-    FinalizeArray {
-        slot: usize,
-        inner: usize,
-        size: usize,
-    },
-    FinalizeSlice {
-        slot: usize,
-        inner: usize,
-        size: usize,
-    },
-    FinalizeTuple {
-        slot: usize,
-        inners: Vec<usize>,
-    },
-    FinalizeLambda {
-        slot: usize,
-        inners: Vec<usize>,
-        ret: usize,
-    },
+    Generate { slot: usize, depth: usize, location: TypeLocation },
+    FinalizeArray { slot: usize, inner: usize, size: usize },
+    FinalizeSlice { slot: usize, inner: usize, size: usize },
+    FinalizeTuple { slot: usize, inners: Vec<usize> },
+    FinalizeLambda { slot: usize, inners: Vec<usize>, ret: usize },
 }
 
 impl Type {
@@ -75,27 +63,21 @@ impl Type {
     ///              Return slots[0]
     ///
     /// If you do not understand something, just ask claude :D
-    pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, location: TypeLocation) -> Self {
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        location: TypeLocation,
+    ) -> Self {
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
-        work.push_back(WorkItem::Generate {
-            slot: 0,
-            depth: 0,
-            location,
-        });
+        work.push_back(WorkItem::Generate { slot: 0, depth: 0, location });
 
         while let Some(item) = work.pop_front() {
             match item {
                 WorkItem::Generate { slot, depth, location } => {
                     Self::process_generate(
-                        random,
-                        ctx,
-                        scope,
-                        &mut slots,
-                        &mut work,
-                        slot,
-                        depth,
-                        location,
+                        random, ctx, scope, &mut slots, &mut work, slot, depth, location,
                     );
                 }
                 WorkItem::FinalizeArray { slot, inner, size } => {
@@ -144,13 +126,17 @@ impl Type {
         }
 
         // Build list of available types
-        let valid_structs: Vec<_> = scope.structs.iter().filter(|s| {
-            match location {
+        let valid_structs: Vec<_> = scope
+            .structs
+            .iter()
+            .filter(|s| match location {
                 TypeLocation::Main => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
-                TypeLocation::Nested | TypeLocation::TupleNested => !s.fields.iter().any(|f| f.ty.allows_slice()),
+                TypeLocation::Nested | TypeLocation::TupleNested => {
+                    !s.fields.iter().any(|f| f.ty.allows_slice())
+                }
                 _ => true,
-            }
-        }).collect();
+            })
+            .collect();
 
         let mut available = vec![
             (TypeKind::Field, ctx.field_weight),
@@ -179,14 +165,17 @@ impl Type {
             TypeKind::Unsigned => slots[slot] = Some(Type::Integer(Integer::random(random, false))),
             TypeKind::Signed => slots[slot] = Some(Type::Integer(Integer::random(random, true))),
             TypeKind::Boolean => slots[slot] = Some(Type::Boolean),
-            TypeKind::String => slots[slot] = Some(Type::String(StringType::random(random, ctx, location))),
+            TypeKind::String => {
+                slots[slot] = Some(Type::String(StringType::random(random, ctx, location)))
+            }
             TypeKind::Array => {
                 let inner = slots.len();
 
                 // Reserve a slot for the inner type
                 slots.push(None);
 
-                let min_size = if location == TypeLocation::Main { 1 } else { ctx.min_element_count };
+                let min_size =
+                    if location == TypeLocation::Main { 1 } else { ctx.min_element_count };
                 let size = random.random_range(min_size..ctx.max_element_count);
 
                 // So that we assemble the `Array` once we trigger this work item
@@ -310,14 +299,17 @@ impl Struct {
     /// types (to avoid circular dependencies, struct N can only contain structs 0..N-1).
     pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, name: String) -> Self {
         let size = random.random_range(ctx.min_struct_fields_count..ctx.max_struct_fields_count);
-        let fields = (0..size).map(|i| StructField::random(random, ctx, scope, format!("field_{}", i))).collect();
+        let fields = (0..size)
+            .map(|i| StructField::random(random, ctx, scope, format!("field_{}", i)))
+            .collect();
 
         Self { name, fields }
     }
 }
 
 impl StructField {
-    const VISIBILITIES: [Visibility; 3] = [Visibility::Public, Visibility::Private, Visibility::PublicCrate];
+    const VISIBILITIES: [Visibility; 3] =
+        [Visibility::Public, Visibility::Private, Visibility::PublicCrate];
 
     pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, name: String) -> Self {
         let visibility = *Self::VISIBILITIES.choose(random).unwrap();
@@ -344,8 +336,9 @@ impl TypeLocation {
             Self::Main => Self::Main,                 // Main stays Main forever
             Self::Default => Self::TupleElement,      // Default -> TupleElement
             Self::Nested => Self::TupleNested,        // Nested -> TupleNested
-            Self::TupleElement => Self::TupleElement, // TupleElement -> TupleElement (can't re-enter)
-            Self::TupleNested => Self::TupleNested,   // Stay TupleNested
+            Self::TupleElement => Self::TupleElement, /* TupleElement -> TupleElement (can't */
+            // re-enter)
+            Self::TupleNested => Self::TupleNested, // Stay TupleNested
         }
     }
 

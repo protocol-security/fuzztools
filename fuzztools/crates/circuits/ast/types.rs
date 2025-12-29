@@ -1,9 +1,9 @@
 //! Implements the Noir IR types
 
 use crate::circuits::{
-        ast::{utils::{bernoulli, random_field_element, random_string}},
-        context::Context,
-    };
+    context::Context,
+    utils::{bernoulli, random_field_element, random_string},
+};
 use rand::{seq::IndexedRandom, Rng};
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ pub enum TypeKind {
     Struct,
     Lambda,
     // @todo Reference
-    Empty
+    Empty,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -103,7 +103,13 @@ impl Type {
     pub fn kind(&self) -> TypeKind {
         match self {
             Type::Field => TypeKind::Field,
-            Type::Integer(i) => if i.signed { TypeKind::Signed } else { TypeKind::Unsigned },
+            Type::Integer(i) => {
+                if i.signed {
+                    TypeKind::Signed
+                } else {
+                    TypeKind::Unsigned
+                }
+            }
             Type::Boolean => TypeKind::Boolean,
             Type::String(_) => TypeKind::String,
             Type::Array(_) => TypeKind::Array,
@@ -142,16 +148,19 @@ impl Type {
     /// - Primitive types: `Field`, `Integer`, `Boolean`
     /// - Strings with a non-zero size
     /// - Arrays with a non-zero size and a valid sub-type
-    /// - Tuples with a size greater than 1 (as otherwise they collapse to a single type) and a valid sub-type
+    /// - Tuples with a size greater than 1 (as otherwise they collapse to a single type) and a
+    ///   valid sub-type
     /// - Structs where all fields are valid public inputs @todo they allow empty structs wtf
-    /// 
+    ///
     /// The rest are all invalid as public inputs.
     pub fn is_valid_public_input(&self) -> bool {
         match self {
             Type::Field | Type::Integer(_) | Type::Boolean => true,
             Type::String(s) => s.size > 0,
             Type::Array(a) => a.size > 0 && a.ty.is_valid_public_input(),
-            Type::Tuple(t) => t.elements.len() > 1 && t.elements.iter().all(|e| e.is_valid_public_input()),
+            Type::Tuple(t) => {
+                t.elements.len() > 1 && t.elements.iter().all(|e| e.is_valid_public_input())
+            }
             Type::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
             Type::Slice(_) | Type::Lambda(_) | Type::Empty => false,
         }
@@ -159,7 +168,12 @@ impl Type {
 
     pub fn allows_slice(&self) -> bool {
         match self {
-            Type::Field | Type::Integer(_) | Type::Boolean | Type::String(_) | Type::Lambda(_) | Type::Empty => false,
+            Type::Field |
+            Type::Integer(_) |
+            Type::Boolean |
+            Type::String(_) |
+            Type::Lambda(_) |
+            Type::Empty => false,
             Type::Slice(_) => true,
             Type::Array(a) => a.ty.allows_slice(),
             Type::Tuple(t) => t.elements.iter().any(|e| e.allows_slice()),
@@ -195,7 +209,7 @@ impl Integer {
                 random.random_range(min..=max)
             }
         } else {
-            let max= (1 << self.bits) - 1;
+            let max = (1 << self.bits) - 1;
 
             if bernoulli(random, ctx.boundary_value_probability) {
                 *[0, 1, max].choose(random).unwrap()
@@ -251,7 +265,11 @@ impl Tuple {
 
 impl Struct {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let fields: Vec<_> = self.fields.iter().map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx))).collect();
+        let fields: Vec<_> = self
+            .fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx)))
+            .collect();
 
         format!("{} {{ {} }}", self.name, fields.join(", "))
     }
@@ -259,7 +277,12 @@ impl Struct {
 
 impl Lambda {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let params = self.params.iter().map(|(name, ty)| format!("{}: {}", name, ty)).collect::<Vec<_>>().join(", ");
+        let params = self
+            .params
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect::<Vec<_>>()
+            .join(", ");
 
         // @todo body
         format!("|{}| -> {} {{ {} }}", params, self.ret, self.ret.random_value(random, ctx))
@@ -279,9 +302,18 @@ impl std::fmt::Display for Type {
             Type::String(s) => write!(f, "str<{}>", s.size),
             Type::Array(a) => write!(f, "[{}; {}]", a.ty, a.size),
             Type::Slice(s) => write!(f, "[{}]", s.ty),
-            Type::Tuple(t) => write!(f, "({})", t.elements.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")),
+            Type::Tuple(t) => write!(
+                f,
+                "({})",
+                t.elements.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+            ),
             Type::Struct(s) => write!(f, "{}", s.name),
-            Type::Lambda(l) => write!(f, "fn({}) -> {}", l.params.iter().map(|(_, ty)| format!("{}", ty)).collect::<Vec<_>>().join(", "), l.ret),
+            Type::Lambda(l) => write!(
+                f,
+                "fn({}) -> {}",
+                l.params.iter().map(|(_, ty)| format!("{}", ty)).collect::<Vec<_>>().join(", "),
+                l.ret
+            ),
             Type::Empty => f.write_str("()"),
         }
     }

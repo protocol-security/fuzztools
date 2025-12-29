@@ -13,3 +13,7 @@ The main target of this repo is to have in one place a set of utilities to build
 - [mutable](./mutable/): macro that implements automatically the `Mutable` trait for arbitrary structs
 - [noiruzz](./noiruzz/): Noir fuzzer
 - [rakoon](./rakoon/): transaction fuzzer for the Ethereum protocol 
+
+## Ideas
+
+- Maybe, to add more mutations/entropy, we could have like a LLM moddel running and we ask queries on the fly? like, given this DSL, generate a different mutation from the already generated ones

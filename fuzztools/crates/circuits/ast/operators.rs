@@ -25,47 +25,86 @@ pub enum Operator {
 }
 
 impl Operator {
-    pub fn arithmetic_field() -> &'static [Operator] {
-        &[Self::Add, Self::Sub, Self::Mul, Self::Div]
+    // Field operators
+    pub fn binary_field() -> &'static [Operator] {
+        &[Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Equal, Self::NotEqual]
     }
 
-    pub fn arithmetic_integer() -> &'static [Operator] {
-        &[Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Mod]
+    pub fn unary_field() -> &'static [Operator] {
+        &[Self::Neg]
     }
 
-    pub fn comparison_field() -> &'static [Operator] {
-        &[Self::Equal, Self::NotEqual]
-    }
-
-    pub fn comparison_integer() -> &'static [Operator] {
+    // Signed integer operators
+    pub fn binary_integer_signed() -> &'static [Operator] {
         &[
+            Self::Add,
+            Self::Sub,
+            Self::Mul,
+            Self::Div,
+            Self::Mod,
             Self::Less,
             Self::LessOrEqual,
             Self::Greater,
             Self::GreaterOrEqual,
             Self::Equal,
             Self::NotEqual,
+            Self::And,
+            Self::Or,
+            Self::Xor,
+            Self::Shl,
+            Self::Shr,
         ]
     }
 
-    pub fn binary_boolean() -> &'static [Operator] {
-        &[Self::And, Self::Or, Self::Xor]
+    pub fn unary_integer_signed() -> &'static [Operator] {
+        &[Self::Neg, Self::Not]
     }
 
-    pub fn binary_integer() -> &'static [Operator] {
-        &[Self::And, Self::Or, Self::Xor, Self::Shl, Self::Shr]
+    // Unsigned integer operators
+    pub fn binary_integer_unsigned() -> &'static [Operator] {
+        &[
+            Self::Add,
+            Self::Sub,
+            Self::Mul,
+            Self::Div,
+            Self::Mod,
+            Self::Less,
+            Self::LessOrEqual,
+            Self::Greater,
+            Self::GreaterOrEqual,
+            Self::Equal,
+            Self::NotEqual,
+            Self::And,
+            Self::Or,
+            Self::Xor,
+            Self::Shl,
+            Self::Shr,
+        ]
     }
 
-    pub fn unary_field_and_unsigned_integer() -> &'static [Operator] {
+    pub fn unary_integer_unsigned() -> &'static [Operator] {
         &[Self::Not]
     }
 
-    pub fn unary_signed_integer() -> &'static [Operator] {
-        &[Self::Neg, Self::Not]
+    // Boolean operators
+    pub fn binary_boolean() -> &'static [Operator] {
+        &[Self::And, Self::Or, Self::Xor, Self::Equal, Self::NotEqual]
     }
 
     pub fn unary_boolean() -> &'static [Operator] {
         &[Self::Not]
+    }
+
+    pub fn is_comparison(&self) -> bool {
+        matches!(
+            self,
+            Self::Less |
+                Self::LessOrEqual |
+                Self::Greater |
+                Self::GreaterOrEqual |
+                Self::Equal |
+                Self::NotEqual
+        )
     }
 }
 
