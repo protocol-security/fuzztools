@@ -8,14 +8,14 @@ mod error;
 pub use error::RpcError;
 
 /// A client for making RPC calls to a JSON-RPC endpoint.
-///
-/// # Examples
-///
-/// ```
-/// let client = RpcClient::new("https://api.example.com", Duration::from_secs(10));
-/// let result = client.call("eth_blockNumber", json!({})).await?;
-/// println!("Result: {:?}", result);
-/// ```
+//
+// # Examples
+//
+// ```
+// let client = RpcClient::new("https://api.example.com", Duration::from_secs(10));
+// let result = client.call("eth_blockNumber", json!({})).await?;
+// println!("Result: {:?}", result);
+// ```
 pub struct RpcClient {
     inner: Client,
     url: String,
