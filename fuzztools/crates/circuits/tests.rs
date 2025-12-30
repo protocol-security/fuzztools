@@ -1,29 +1,20 @@
 #[cfg(test)]
 mod tests {
-    use crate::circuits::{
-        ast::{
-            forest::Forest,
-            nodes::{Node, NodeKind},
-            types::{StringType, Struct, StructField, Type, Visibility},
+    use crate::{
+        builders::CircuitBuilder,
+        circuits::{
+            ast::{
+                forest::Forest,
+                nodes::{Node, NodeKind},
+                types::{StringType, Struct, StructField, Type, Visibility},
+            },
+            context::Context,
+            generators::types::TypeLocation,
+            rewriter::Rewriter,
+            scope::Scope,
         },
-        context::Context,
-        generators::types::TypeLocation,
-        rewriter::Rewriter,
-        scope::{Scope, Variable},
     };
-    use rand::Rng;
     use std::{fs, process::Command};
-
-    fn create_scope(random: &mut impl Rng, ctx: &Context) -> Scope {
-        let mut scope = Scope::new();
-        let mut structs: Vec<Struct> = Vec::new();
-        for i in 0..5 {
-            let s = Struct::random(random, &ctx, &scope, format!("s{}", i));
-            structs.push(s);
-        }
-        scope.structs = structs;
-        scope
-    }
 
     fn compile_noir_code(code: &str, test_name: &str) {
         let tmp_dir = std::env::current_dir().unwrap().join(format!("../tmp"));
@@ -71,7 +62,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         let mut out = String::new();
 
@@ -96,7 +88,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         let mut out = String::new();
 
@@ -127,7 +120,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         let mut out = String::new();
 
@@ -159,7 +153,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         let mut out = String::new();
 
@@ -194,7 +189,7 @@ mod tests {
                 visibility: Visibility::Public,
             }],
         };
-        let mut scope = Scope::new();
+        let mut scope = Scope::default();
         scope.structs = vec![s];
 
         let mut out = String::new();
@@ -221,7 +216,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         let mut forest = Forest::default();
         forest.random(random, &ctx, &scope);
@@ -233,7 +229,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         // 1. Create input nodes
         let input_count = 5;
@@ -256,36 +253,31 @@ mod tests {
         // Generate random expressions on top of inputs
         parent_forest.random(random, &ctx, &scope);
 
-        // 3. Collect all variables defined in parent forest into a scope
-        let parent_variables: Vec<Variable> = parent_forest
+        // 3. Collect parent variables as (name, type) tuples
+        let parent_vars: Vec<(String, Type)> = parent_forest
             .nodes
             .get(&NodeKind::Variable)
-            .map(|vars| {
-                vars.iter()
-                    .filter_map(|&idx| match &parent_forest.graph[idx] {
-                        Node::Variable { name, ty, .. } => {
-                            Some(Variable { name: name.clone(), ty: ty.clone(), mutable: false })
-                        }
-                        _ => None,
-                    })
-                    .collect()
+            .into_iter()
+            .flatten()
+            .filter_map(|&idx| match &parent_forest.graph[idx] {
+                Node::Variable { name, ty, .. } => Some((name.clone(), ty.clone())),
+                _ => None,
             })
-            .unwrap_or_default();
+            .collect();
 
-        // 4. Create sub-forest with: original inputs + parent's variables as inputs
+        // 4. Create sub-forest with original inputs + parent's variables as inputs
         let mut sub_forest = Forest::default();
-        sub_forest.var_counter = parent_forest.var_counter; // Continue variable naming
+        sub_forest.var_counter = parent_forest.var_counter;
 
-        // Add original inputs
-        for (name, ty) in &inputs {
+        for (name, ty) in inputs.iter().chain(&parent_vars) {
             let idx = sub_forest.input(name.clone(), ty.clone());
             sub_forest.register(idx, NodeKind::Input, ty, None);
         }
 
         // Add parent's variables as inputs to sub-forest
-        for var in &parent_variables {
-            let idx = sub_forest.input(var.name.clone(), var.ty.clone());
-            sub_forest.register(idx, NodeKind::Input, &var.ty, None);
+        for var in &parent_vars {
+            let idx = sub_forest.input(var.0.clone(), var.1.clone());
+            sub_forest.register(idx, NodeKind::Input, &var.1, None);
         }
 
         // Generate sub-forest expressions
@@ -296,13 +288,16 @@ mod tests {
         sub_forest.save_as_dot(&std::env::current_dir().unwrap().join("test_sub_forest.dot"));
 
         // Assertions
-        assert!(parent_forest.nodes.get(&NodeKind::Input).map_or(0, |v| v.len()) == input_count);
-
         let sub_input_count = sub_forest.nodes.get(&NodeKind::Input).map_or(0, |v| v.len());
-        assert_eq!(sub_input_count, input_count + parent_variables.len());
+        assert_eq!(parent_forest.nodes.get(&NodeKind::Input).map_or(0, |v| v.len()), input_count);
+        assert_eq!(sub_input_count, input_count + parent_vars.len());
 
-        println!("Parent forest: {} inputs, {} variables", input_count, parent_variables.len());
-        println!("Sub forest: {} inputs (original + inherited)", sub_input_count);
+        println!(
+            "Parent: {} inputs, {} vars | Sub: {} inputs",
+            input_count,
+            parent_vars.len(),
+            sub_input_count
+        );
     }
 
     #[test]
@@ -310,7 +305,8 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         // Create and populate a forest
         let mut forest = Forest::default();
@@ -337,25 +333,17 @@ mod tests {
         let random = &mut rand::rng();
         let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let scope = create_scope(random, &ctx);
-        let mut out = String::new();
-
-        for s in scope.structs.iter() {
-            out.push_str(&format!("{}", s));
-        }
-
-        out.push_str("fn main() {\n");
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(random, &ctx);
 
         let mut forest = Forest::default();
         forest.random(random, &ctx, &scope);
 
-        out.push_str(&format!("{}", forest));
-        out.push_str("}\n");
-
-        compile_noir_code(&out, "test_formatter");
+        let circuit = builder.format_circuit(&scope, &forest);
 
         forest.save_as_dot(&std::env::current_dir().unwrap().join("test_formatter.dot"));
+        compile_noir_code(&circuit, "test_formatter");
 
-        println!("{}", out);
+        println!("{}", circuit);
     }
 }

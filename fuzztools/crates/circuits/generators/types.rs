@@ -1,7 +1,3 @@
-use std::collections::VecDeque;
-
-use rand::{seq::IndexedRandom, Rng};
-
 use crate::circuits::{
     ast::types::{
         Array, Integer, Lambda, Slice, StringType, Struct, StructField, Tuple, Type, TypeKind,
@@ -10,12 +6,14 @@ use crate::circuits::{
     context::Context,
     scope::Scope,
 };
+use rand::{seq::IndexedRandom, Rng};
+use std::collections::VecDeque;
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Type generation
 // ────────────────────────────────────────────────────────────────────────────────
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeLocation {
     Main,
     Nested,

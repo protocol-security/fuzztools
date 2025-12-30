@@ -24,6 +24,26 @@ pub struct Context {
     pub min_struct_fields_count: usize,
     pub max_struct_fields_count: usize,
 
+    // This controls the number of structs to create
+    pub min_struct_count: usize,
+    pub max_struct_count: usize,
+
+    // This controls the number of globals to create
+    pub min_globals_count: usize,
+    pub max_globals_count: usize,
+
+    // This controls the number of inputs to create
+    pub min_input_count: usize,
+    pub max_input_count: usize,
+
+    // This controls the number of functions to create
+    pub min_function_count: usize,
+    pub max_function_count: usize,
+
+    // This controls the number of rewriter rules to apply
+    pub min_rewrites_count: usize,
+    pub max_rewrites_count: usize,
+
     // This controls the biggest small value
     pub max_small_upper_bound: usize,
 
@@ -46,6 +66,7 @@ pub struct Context {
     pub index_weight: usize,
     pub tuple_index_weight: usize,
     pub field_access_weight: usize,
+    pub call_weight: usize,
 
     // This controls the probability of creating boundary values
     pub boundary_value_probability: f64,
@@ -61,6 +82,9 @@ pub struct Context {
 
     // This controls the probability of creating unary operators
     pub unary_probability: f64,
+
+    /// This controls the probability of creating functions that return a value
+    pub function_return_probability: f64,
 
     // This controls the depth of the generated types
     pub max_type_depth: usize,

@@ -4,7 +4,7 @@ use crate::circuits::ast::{operators::Operator, types::Type};
 // Node definitions
 // ────────────────────────────────────────────────────────────────────────────────
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     Input,
     Literal,
@@ -13,11 +13,10 @@ pub enum NodeKind {
     Index,
     TupleIndex,
     FieldAccess,
-    // @todo call, if, else if, else, for, loop, while, cast, sub_block, assert, comptime y unsafe
-    // y las funciones oracle y todo eso
+    Call,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Node {
     /// Input node in case of main/functions/lambdas
     Input { name: String, ty: Type },
@@ -39,8 +38,14 @@ pub enum Node {
 
     /// A field access node, `a.field`, `b.field`, etc...
     FieldAccess { name: String },
-    // @todo call, if, else if, else, for, loop, while, cast, sub_block, assert, comptime y unsafe
+
+    /// A function call node, `foo(a, b)`, `bar(x)`, etc...
+    Call { name: String, ret: Type },
+    // @todo if, else if, else, for, loop, while, cast, sub_block, assert, comptime y unsafe
     // y las funciones oracle y todo eso
+
+    // @audit hay assert_eq(a, b), assert_gt/lt(a, b), assert_constant(a) that ensures the value
+    // is known at compile-time
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -58,6 +63,7 @@ impl Node {
             Self::Index { .. } => NodeKind::Index,
             Self::TupleIndex { .. } => NodeKind::TupleIndex,
             Self::FieldAccess { .. } => NodeKind::FieldAccess,
+            Self::Call { .. } => NodeKind::Call,
         }
     }
 
@@ -70,6 +76,7 @@ impl Node {
             Self::Operator { op, .. } if op.is_unary() => "#ffa500", // orange for unary
             Self::Operator { .. } => "#ffd700",                      // yellow for binary
             Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#ffb6c1", /* light pink */
+            Self::Call { .. } => "#c8a2c8", // lilac for calls
         }
     }
 }
@@ -79,11 +86,12 @@ impl std::fmt::Display for Node {
         match self {
             Self::Input { name, ty } => write!(f, "{}: {}", name, ty),
             Self::Variable { name, .. } => write!(f, "{}", name),
-            Self::Literal { value, .. } => write!(f, "{}", value),
+            Self::Literal { ty, .. } => write!(f, "{}", ty),
             Self::Operator { op, .. } => write!(f, "{}", op),
             Self::Index { value } => write!(f, "[{}]", value),
             Self::TupleIndex { value } => write!(f, ".{}", value),
             Self::FieldAccess { name } => write!(f, ".{}", name),
+            Self::Call { name, ret } => write!(f, "{}(..) -> {}", name, ret),
         }
     }
 }

@@ -103,13 +103,8 @@ impl Type {
     pub fn kind(&self) -> TypeKind {
         match self {
             Type::Field => TypeKind::Field,
-            Type::Integer(i) => {
-                if i.signed {
-                    TypeKind::Signed
-                } else {
-                    TypeKind::Unsigned
-                }
-            }
+            Type::Integer(i) if i.signed => TypeKind::Signed,
+            Type::Integer(_) => TypeKind::Unsigned,
             Type::Boolean => TypeKind::Boolean,
             Type::String(_) => TypeKind::String,
             Type::Array(_) => TypeKind::Array,
@@ -139,7 +134,7 @@ impl Type {
             Type::Slice(s) => s.random_value(random, ctx),
             Type::Tuple(t) => t.random_value(random, ctx),
             Type::Struct(s) => s.random_value(random, ctx),
-            Type::Lambda(l) => l.random_value(random, ctx),
+            Type::Lambda(l) => l.random_value(),
             Type::Empty => "()".to_string(),
         }
     }
@@ -276,7 +271,7 @@ impl Struct {
 }
 
 impl Lambda {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+    pub fn random_value(&self) -> String {
         let params = self
             .params
             .iter()
@@ -284,8 +279,7 @@ impl Lambda {
             .collect::<Vec<_>>()
             .join(", ");
 
-        // @todo body
-        format!("|{}| -> {} {{ {} }}", params, self.ret, self.ret.random_value(random, ctx))
+        format!("|{}| -> {}", params, self.ret)
     }
 }
 
@@ -311,7 +305,7 @@ impl std::fmt::Display for Type {
             Type::Lambda(l) => write!(
                 f,
                 "fn({}) -> {}",
-                l.params.iter().map(|(_, ty)| format!("{}", ty)).collect::<Vec<_>>().join(", "),
+                l.params.iter().map(|(_, ty)| ty.to_string()).collect::<Vec<_>>().join(", "),
                 l.ret
             ),
             Type::Empty => f.write_str("()"),

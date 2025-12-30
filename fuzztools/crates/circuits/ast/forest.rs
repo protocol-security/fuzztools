@@ -17,7 +17,8 @@ use std::{collections::HashMap, fmt::Write, path::Path};
 pub struct Forest {
     pub graph: DiGraph<Node, usize>,
     pub var_counter: usize,
-    pub types: HashMap<TypeKind, Vec<NodeIndex>>,
+    pub types: HashMap<Type, Vec<NodeIndex>>,
+    pub type_kinds: HashMap<TypeKind, Vec<NodeIndex>>,
     pub nodes: HashMap<NodeKind, Vec<NodeIndex>>,
     pub operators: HashMap<Operator, Vec<NodeIndex>>,
 }
@@ -25,9 +26,10 @@ pub struct Forest {
 impl Forest {
     pub fn ty(&self, idx: NodeIndex) -> Type {
         match &self.graph[idx] {
-            Node::Input { ty, .. } | Node::Literal { ty, .. } | Node::Variable { ty, .. } => {
-                ty.clone()
-            }
+            Node::Input { ty, .. } |
+            Node::Literal { ty, .. } |
+            Node::Variable { ty, .. } |
+            Node::Call { ret: ty, .. } => ty.clone(),
             Node::Operator { ret, .. } => ret.clone(),
             Node::Index { .. } => match self.ty(self.left(idx).unwrap()) {
                 Type::Array(a) => (*a.ty).clone(),
@@ -108,6 +110,16 @@ impl Forest {
     pub fn field_access(&mut self, parent: NodeIndex, name: String) -> NodeIndex {
         let idx = self.graph.add_node(Node::FieldAccess { name });
         self.graph.add_edge(idx, parent, 0);
+
+        idx
+    }
+
+    #[inline(always)]
+    pub fn call(&mut self, name: String, ret: Type, args: Vec<NodeIndex>) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Call { name, ret });
+        for (pos, arg) in args.into_iter().enumerate() {
+            self.graph.add_edge(idx, arg, pos);
+        }
 
         idx
     }
@@ -205,15 +217,15 @@ impl Forest {
     }
 
     /// Redirect incoming edges from `old` to `new`
-    #[inline(always)]
     pub fn redirect_edges(&mut self, old: NodeIndex, new: NodeIndex, edges: &[(NodeIndex, usize)]) {
         for &(source, weight) in edges {
-            if let Some(edge) = self
+            if let Some(id) = self
                 .graph
                 .edges_directed(old, Direction::Incoming)
                 .find(|e| e.source() == source && *e.weight() == weight)
+                .map(|e| e.id())
             {
-                self.graph.remove_edge(edge.id());
+                self.graph.remove_edge(id);
             }
             self.graph.add_edge(source, new, weight);
         }
@@ -232,7 +244,8 @@ impl Forest {
 
     #[inline(always)]
     pub fn register(&mut self, idx: NodeIndex, kind: NodeKind, ty: &Type, op: Option<Operator>) {
-        self.types.entry(ty.kind()).or_default().push(idx);
+        self.types.entry(ty.clone()).or_default().push(idx);
+        self.type_kinds.entry(ty.kind()).or_default().push(idx);
         self.nodes.entry(kind).or_default().push(idx);
         if let Some(op) = op {
             self.operators.entry(op).or_default().push(idx);
@@ -254,23 +267,19 @@ impl Forest {
                 out,
                 "  {} [label=\"{}\" fillcolor=\"{}\"]",
                 n.index(),
-                node.to_string().replace('"', "\\\""),
+                node,
                 node.color()
             );
         }
 
         for e in self.graph.edge_references() {
             let lbl = match &self.graph[e.source()] {
-                Node::Operator { op, .. } if op.is_unary() => "unary",
-                Node::Operator { .. } => {
-                    if *e.weight() == 0 {
-                        "lhs"
-                    } else {
-                        "rhs"
-                    }
-                }
-                Node::Variable { .. } => "let",
-                _ => "",
+                Node::Operator { op, .. } if op.is_unary() => "unary".into(),
+                Node::Operator { .. } if *e.weight() == 0 => "lhs".into(),
+                Node::Operator { .. } => "rhs".into(),
+                Node::Variable { .. } => "let".into(),
+                Node::Call { .. } => format!("arg{}", e.weight()),
+                _ => String::new(),
             };
             let _ = writeln!(
                 out,

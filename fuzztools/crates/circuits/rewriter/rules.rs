@@ -51,7 +51,7 @@ impl Rule {
 // ═══════════════════════════════════════════════════════════════════════════════
 // RULE CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
-
+// @todo simplify this by merging rules
 pub const COMM_ADD: Rule = Rule::new(RuleKind::SwapOperands { ops: &[Operator::Add] });
 pub const COMM_MUL: Rule = Rule::new(RuleKind::SwapOperands { ops: &[Operator::Mul] });
 pub const COMM_AND: Rule = Rule::new(RuleKind::SwapOperands { ops: &[Operator::And] });
@@ -115,7 +115,7 @@ pub const INJECT_XOR_XOR: Rule = Rule::new(RuleKind::InjectXorXor);
 pub const DOUBLE_MUL_TWO: Rule = Rule::new(RuleKind::DoubleMulTwo);
 pub const MUL_NEG_ONE_NEG: Rule = Rule::new(RuleKind::MulNegOneNeg);
 
-pub const EQUIVALENCE_RULES: &[Rule] = &[
+pub const RULES: &[Rule] = &[
     COMM_ADD,
     COMM_MUL,
     COMM_AND,
@@ -153,10 +153,19 @@ pub const EQUIVALENCE_RULES: &[Rule] = &[
     NEGATE_COMPARISON,
     DEMORGAN,
     COMPLEMENT_XOR,
+    INJECT_ADD_SUB,
+    INJECT_SUB_ADD,
+    INJECT_MUL_DIV,
+    INJECT_XOR_XOR,
+    DOUBLE_NEG,
+    DOUBLE_NOT,
+    DOUBLE_NEG,
+    DOUBLE_NOT,
+    ADD_ZERO,
+    MUL_ONE,
+    MUL_ZERO,
+    SELF_SUB,
+    SELF_XOR,
+    IDEM_AND,
+    IDEM_OR,
 ];
-
-pub const OBFUSCATION_RULES: &[Rule] =
-    &[INJECT_ADD_SUB, INJECT_SUB_ADD, INJECT_MUL_DIV, INJECT_XOR_XOR, DOUBLE_NEG, DOUBLE_NOT];
-
-pub const SIMPLIFICATION_RULES: &[Rule] =
-    &[DOUBLE_NEG, DOUBLE_NOT, ADD_ZERO, MUL_ONE, MUL_ZERO, SELF_SUB, SELF_XOR, IDEM_AND, IDEM_OR];
