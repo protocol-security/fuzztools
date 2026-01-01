@@ -2,13 +2,6 @@
 Cargo.lock
 .DS_Store
 /crashes
-/ref
-/a
-/circuzz
-/TODO.md
-/tmp
-/egg
 *.dot
-*.pdf
-*.DS_Store
 /.vscode
+*.svg

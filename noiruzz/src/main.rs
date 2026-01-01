@@ -15,24 +15,21 @@ struct Cli {
     #[arg(long, default_value = "0", help = "Seed for the random generator")]
     seed: u64,
 
+    #[arg(long, default_value = "0", help = "Number of executions per circuit")]
+    executions: usize,
+
     #[arg(long, help = "Path to the config file")]
     config: Option<String>,
 
-    #[arg(long, help = "Path to the crash report directory")]
-    crash_report_dir: Option<String>,
-
-    #[arg(long, help = "Path to the debug directory for compile errors")]
-    debug_dir: Option<String>,
+    #[arg(long, help = "Path to the crash directory")]
+    crash_dir: Option<String>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let crash_dir = cli.crash_report_dir.unwrap_or_else(|| "./crashes/noiruzz/".into());
+    let crash_dir = cli.crash_dir.unwrap_or_else(|| "./crashes/".into());
     fs::create_dir_all(&crash_dir)?;
-
-    let debug_dir = cli.debug_dir.unwrap_or_else(|| "./crashes/noiruzz/debug".into());
-    fs::create_dir_all(&debug_dir)?;
 
     let config_path = cli.config.unwrap_or_else(|| "./configs/noiruzz.json".into());
     if !Path::new(&config_path).exists() {
@@ -41,20 +38,17 @@ fn main() -> Result<()> {
 
     let ctx: Context = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
     let prelude = format!(
-        "{HEADER}\n{GREEN}INFO{RESET}      Seed:              {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Config:            {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Crash report dir:  {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Debug dir:         {RED}{}{RESET}\n\n",
-        cli.seed, config_path, crash_dir, debug_dir
+        "{HEADER}\n{GREEN}INFO{RESET}      Seed:       {RED}{}{RESET}\n\
+         {GREEN}INFO{RESET}      Executions: {RED}{}{RESET}\n\
+         {GREEN}INFO{RESET}      Config:     {RED}{}{RESET}\n\
+         {GREEN}INFO{RESET}      Crash dir:  {RED}{}{RESET}\n\n",
+        cli.seed, cli.executions, config_path, crash_dir
     );
 
-    // Create the application
-    let mut app = App::new(ctx, prelude, crash_dir, debug_dir)?;
-
-    // Run the application
+    let mut app = App::new(ctx, cli.executions, prelude, crash_dir)?;
     let mut random = SmallRng::seed_from_u64(cli.seed);
-    let result = app.run(&mut random);
-    if let Err(e) = result {
+
+    if let Err(e) = app.run(&mut random) {
         eprintln!("\n\n\x1b[1;31m[!] Error: {e}\x1b[0m");
     }
 

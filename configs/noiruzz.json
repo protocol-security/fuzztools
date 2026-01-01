@@ -1,44 +1,86 @@
 {
-    "min_expression_count": 5,
-    "max_expression_count": 25,
+    "min_expression_count": 20,
+    "max_expression_count": 30,
 
     "min_element_count": 1,
     "max_element_count": 3,
 
     "min_string_size": 1,
-    "max_string_size": 10,
+    "max_string_size": 5,
 
-    "min_function_parameters_count": 1,
+    "min_function_parameters_count": 0,
     "max_function_parameters_count": 3,
 
     "min_struct_fields_count": 1,
     "max_struct_fields_count": 3,
 
+    "min_struct_count": 0,
+    "max_struct_count": 3,
+
+    "min_globals_count": 0,
+    "max_globals_count": 3,
+
+    "min_input_count": 0,
+    "max_input_count": 3,
+
+    "min_function_count": 0,
+    "max_function_count": 3,
+
+    "min_function_body_size": 0,
+    "max_function_body_size": 5,
+
+    "min_lambda_body_size": 0,
+    "max_lambda_body_size": 5,
+
+    "min_rewrites_count": 1,
+    "max_rewrites_count": 10,
+
     "max_small_upper_bound": 5,
 
-    "field_weight": 5,
+    "field_weight": 2,
     "unsigned_weight": 5,
     "signed_weight": 5,
-    "boolean_weight": 5,
-    "string_weight": 3,
+    "boolean_weight": 4,
+    "string_weight": 1,
     "array_weight": 3,
-    "slice_weight": 5,
+    "slice_weight": 3,
     "tuple_weight": 3,
     "struct_weight": 3,
-    "lambda_weight": 0,
+    "lambda_weight": 1,
 
-    "literal_weight": 2,
-    "variable_weight": 5,
-    "operator_weight": 7,
-    "index_weight": 3,
-    "tuple_index_weight": 3,
-    "field_access_weight": 3,
+    "literal_weight": 3,
+    "variable_weight": 2,
+    "operator_weight": 4,
+    "index_weight": 2,
+    "tuple_index_weight": 2,
+    "field_access_weight": 2,
+    "call_weight": 3,
+    "cast_weight": 1,
+    "assignment_weight": 12,
+    "for_loop_weight": 2,
+    "if_weight": 5,
+    "assert_weight": 5,
 
-    "boundary_value_probability": 0.25,
+    "min_for_loop_body_size": 1,
+    "max_for_loop_body_size": 5,
+
+    "min_if_body_size": 1,
+    "max_if_body_size": 5,
+
+    "min_else_if_count": 0,
+    "max_else_if_count": 3,
+
+    "else_probability": 0.5,
+
+    "boundary_value_probability": 0.1,
     "exclude_prime_probability": 0.1,
-    "small_upper_bound_probability": 0.2,
+    "small_upper_bound_probability": 0.1,
     "raw_string_probability": 0.2,
-    "unary_probability": 0.2,
+    "unary_probability": 0.15,
+    "function_return_probability": 0.5,
+    "mutable_probability": 0.99,
+    "compound_assignment_probability": 0.5,
+    "assert_message_probability": 0.3,
 
     "max_type_depth": 2
 }

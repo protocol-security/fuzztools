@@ -38,7 +38,7 @@ pub fn random_field_element(random: &mut impl Rng, ctx: &Context, curve: &str) -
     let exclude_prime = bernoulli(random, ctx.exclude_prime_probability);
 
     // Choose from boundary values
-    let value = if bernoulli(random, ctx.boundary_value_probability) {
+    if bernoulli(random, ctx.boundary_value_probability) {
         if exclude_prime {
             // Choose from `[0, 1]`
             *[U256::ZERO, U256::ONE].choose(random).unwrap()
@@ -54,9 +54,7 @@ pub fn random_field_element(random: &mut impl Rng, ctx: &Context, curve: &str) -
             // Choose from `[0..=Fp - 1]`
             U256::random(random) % prime
         }
-    };
-
-    value
+    }
 }
 
 pub const LETTERS: [&str; 52] = [

@@ -198,6 +198,6 @@ impl Mutable for Vec<u8> {
             19 => return true,
             _ => unreachable!(),
         }
-        return false;
+        false
     }
 }

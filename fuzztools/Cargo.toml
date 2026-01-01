@@ -22,3 +22,8 @@ petgraph.workspace = true
 
 [lib]
 path = "crates/lib.rs"
+
+[lints.clippy]
+too_many_arguments = "allow"
+new_without_default = "allow"
+collapsible_if = "allow"

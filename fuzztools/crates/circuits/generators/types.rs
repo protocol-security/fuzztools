@@ -52,8 +52,7 @@ impl Type {
     ///   Generate(3), FinalizeTuple(1), FinalizeArray(0)]
     /// - Step 3: Generate(2) -> Field -> slots=[None, None, Some(Field), None]
     /// - Step 4: Generate(3) -> bool -> slots=[None, None, Some(Field), Some(bool)]
-    /// Step 5:
-    ///              FinalizeTuple(1) -> slots=[None, Some(Tuple), ...]
+    /// - Step 5: FinalizeTuple(1) -> slots=[None, Some(Tuple), ...]
     /// Step 6:
     ///              FinalizeArray(0) -> slots=[Some(Array<Tuple>), ...]
     ///

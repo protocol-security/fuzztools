@@ -7,20 +7,23 @@ use crate::circuits::ast::{
     types::*,
 };
 use petgraph::{
-    graph::{DiGraph, NodeIndex},
-    visit::EdgeRef,
+    graph::NodeIndex,
+    stable_graph::StableDiGraph,
+    visit::{EdgeRef, IntoEdgeReferences},
     Direction,
 };
 use std::{collections::HashMap, fmt::Write, path::Path};
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Forest {
-    pub graph: DiGraph<Node, usize>,
+    pub graph: StableDiGraph<Node, usize>,
     pub var_counter: usize,
     pub types: HashMap<Type, Vec<NodeIndex>>,
     pub type_kinds: HashMap<TypeKind, Vec<NodeIndex>>,
     pub nodes: HashMap<NodeKind, Vec<NodeIndex>>,
     pub operators: HashMap<Operator, Vec<NodeIndex>>,
+    pub mutable_refs: HashMap<String, NodeIndex>,
+    pub depth: usize,
 }
 
 impl Forest {
@@ -46,6 +49,9 @@ impl Forest {
                 }
                 _ => unreachable!(),
             },
+            Node::Cast { target } => target.clone(),
+            Node::Assignment { .. } => self.ty(self.left(idx).unwrap()),
+            Node::ForLoop { .. } | Node::If { .. } | Node::Assert { .. } => Type::Empty,
         }
     }
 
@@ -59,8 +65,14 @@ impl Forest {
     }
 
     #[inline(always)]
-    pub fn variable(&mut self, name: String, ty: Type, value: NodeIndex) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Variable { name, ty });
+    pub fn variable(
+        &mut self,
+        name: String,
+        ty: Type,
+        mutable: bool,
+        value: NodeIndex,
+    ) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Variable { name, ty, mutable });
         self.graph.add_edge(idx, value, 0);
 
         idx
@@ -124,6 +136,33 @@ impl Forest {
         idx
     }
 
+    #[inline(always)]
+    pub fn cast(&mut self, source: NodeIndex, target: Type) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Cast { target });
+        self.graph.add_edge(idx, source, 0);
+
+        idx
+    }
+
+    /// Creates an assignment node for reassigning a mutable variable or a component of it.
+    /// - `target`: The variable or access chain (e.g., Variable, Index, TupleIndex, FieldAccess)
+    /// - `value`: The expression to assign
+    ///
+    /// This represents statements like `x = 5`, `arr[0] = 5`, `s.field = 5`, `tuple.0 = 5`
+    /// If `op` is Some, this is a compound assignment (e.g., `x += 5`)
+    #[inline(always)]
+    pub fn assignment(
+        &mut self,
+        target: NodeIndex,
+        value: NodeIndex,
+        op: Option<Operator>,
+    ) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Assignment { target, op });
+        self.graph.add_edge(idx, value, 0);
+
+        idx
+    }
+
     // ────────────────────────────────────────────────────────────────────────────────
     // Graph queries
     // ────────────────────────────────────────────────────────────────────────────────
@@ -160,12 +199,39 @@ impl Forest {
     // Graph mutations
     // ────────────────────────────────────────────────────────────────────────────────
 
-    /// Remove node if it has no edges
-    #[inline(always)]
-    fn remove_if_orphan(&mut self, node: NodeIndex) {
-        if self.graph.edges(node).next().is_none() {
-            self.graph.remove_node(node);
+    /// Remove node if it has no incoming edges, cleaning up all HashMaps
+    pub fn remove_if_orphan(&mut self, node: NodeIndex) {
+        if self.graph.edges_directed(node, Direction::Incoming).next().is_some() {
+            return;
         }
+
+        // Get node info before removal
+        let Some(n) = self.graph.node_weight(node) else { return };
+        let ty = self.ty(node);
+        let ty_kind = ty.kind();
+        let node_kind = n.kind();
+        let op = match n {
+            Node::Operator { op, .. } => Some(*op),
+            _ => None,
+        };
+
+        // Remove from HashMaps
+        if let Some(v) = self.types.get_mut(&ty) {
+            v.retain(|&x| x != node);
+        }
+        if let Some(v) = self.type_kinds.get_mut(&ty_kind) {
+            v.retain(|&x| x != node);
+        }
+        if let Some(v) = self.nodes.get_mut(&node_kind) {
+            v.retain(|&x| x != node);
+        }
+        if let Some(op) = op {
+            if let Some(v) = self.operators.get_mut(&op) {
+                v.retain(|&x| x != node);
+            }
+        }
+
+        self.graph.remove_node(node);
     }
 
     /// Swap left and right operands of a binary operation
@@ -278,6 +344,7 @@ impl Forest {
                 Node::Operator { .. } if *e.weight() == 0 => "lhs".into(),
                 Node::Operator { .. } => "rhs".into(),
                 Node::Variable { .. } => "let".into(),
+                Node::Assignment { .. } => "value".into(),
                 Node::Call { .. } => format!("arg{}", e.weight()),
                 _ => String::new(),
             };

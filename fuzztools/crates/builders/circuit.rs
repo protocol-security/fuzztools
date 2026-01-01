@@ -12,14 +12,21 @@ use crate::circuits::{
 };
 use rand::{seq::IndexedRandom, Rng};
 
+/// A generated circuit with all its components
+#[derive(Clone)]
+pub struct GeneratedCircuit {
+    pub code: Circuit,
+    pub scope: Scope,
+    pub forest: Forest,
+}
+
 #[derive(Default)]
 pub struct CircuitBuilder {}
 
 impl CircuitBuilder {
-    /// Create a random Noir circuit
-    pub fn circuit(&self, random: &mut impl Rng, ctx: &Context) -> Forest {
+    /// Create a random Noir circuit with all components
+    pub fn generate(&self, random: &mut impl Rng, ctx: &Context) -> GeneratedCircuit {
         let scope = self.create_scope(random, ctx);
-
         let mut forest = Forest::default();
 
         // Add inputs to the forest
@@ -28,14 +35,17 @@ impl CircuitBuilder {
             forest.register(idx, NodeKind::Input, ty, None);
         }
 
-        // Add globals to the forest as inputs @todo variables?
+        // Add globals to the forest as inputs
         for (name, ty, _) in &scope.globals {
             let idx = forest.input(name.clone(), ty.clone());
             forest.register(idx, NodeKind::Input, ty, None);
         }
 
         forest.random(random, ctx, &scope);
-        forest
+
+        let code = self.format_circuit(&scope, &forest);
+
+        GeneratedCircuit { code, scope, forest }
     }
 
     pub fn format_circuit(&self, scope: &Scope, forest: &Forest) -> Circuit {
@@ -79,7 +89,7 @@ impl CircuitBuilder {
     ) -> String {
         let mut lines = Vec::new();
         for (name, ty) in &scope.inputs {
-            let value = ty.random_value(random, ctx);
+            let value = ty.random_value(random, ctx, scope);
             lines.push(format!("{} = {}", name, value));
         }
         lines.join("\n")
@@ -102,7 +112,7 @@ impl CircuitBuilder {
             .map(|i| {
                 let ty = Type::random(random, ctx, &scope, TypeLocation::Default);
                 let name = format!("g{}", i);
-                (name, ty.clone(), ty.random_value(random, ctx))
+                (name, ty.clone(), ty.random_value(random, ctx, &scope))
             })
             .collect::<Vec<(String, Type, String)>>();
         scope.globals = globals;
@@ -118,7 +128,13 @@ impl CircuitBuilder {
                 func.body.register(idx, NodeKind::Input, ty, None);
             }
 
-            func.body.random(random, ctx, &scope);
+            func.body.random_with_bounds(
+                random,
+                ctx,
+                &scope,
+                ctx.min_function_body_size,
+                ctx.max_function_body_size,
+            );
 
             // Create return expression if function has return type
             func.ret_expr = func.ret.as_ref().map(|ret_ty| {
@@ -127,7 +143,7 @@ impl CircuitBuilder {
                 if let Some(&idx) = candidates.choose(random) {
                     func.body.get_expr_for_node(idx)
                 } else {
-                    ret_ty.random_value(random, ctx)
+                    ret_ty.random_value(random, ctx, &scope)
                 }
             });
 

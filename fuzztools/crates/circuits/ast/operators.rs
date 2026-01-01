@@ -106,6 +106,65 @@ impl Operator {
     pub const fn is_unary(&self) -> bool {
         matches!(self, Self::Neg | Self::Not)
     }
+
+    /// Returns true if this operator can be used in compound assignment (e.g., +=, -=)
+    pub const fn is_compound_assignable(&self) -> bool {
+        matches!(
+            self,
+            Self::Add |
+                Self::Sub |
+                Self::Mul |
+                Self::Div |
+                Self::Mod |
+                Self::And |
+                Self::Or |
+                Self::Xor |
+                Self::Shl |
+                Self::Shr
+        )
+    }
+
+    /// Returns compound assignment operators valid for Field type
+    pub const fn compound_field() -> &'static [Operator] {
+        &[Self::Add, Self::Sub, Self::Mul, Self::Div]
+    }
+
+    /// Returns compound assignment operators valid for signed integers
+    pub const fn compound_integer_signed() -> &'static [Operator] {
+        &[
+            Self::Add,
+            Self::Sub,
+            Self::Mul,
+            Self::Div,
+            Self::Mod,
+            Self::And,
+            Self::Or,
+            Self::Xor,
+            Self::Shl,
+            Self::Shr,
+        ]
+    }
+
+    /// Returns compound assignment operators valid for unsigned integers
+    pub const fn compound_integer_unsigned() -> &'static [Operator] {
+        &[
+            Self::Add,
+            Self::Sub,
+            Self::Mul,
+            Self::Div,
+            Self::Mod,
+            Self::And,
+            Self::Or,
+            Self::Xor,
+            Self::Shl,
+            Self::Shr,
+        ]
+    }
+
+    /// Returns compound assignment operators valid for booleans
+    pub const fn compound_boolean() -> &'static [Operator] {
+        &[Self::And, Self::Or, Self::Xor]
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────────

@@ -40,6 +40,14 @@ pub struct Context {
     pub min_function_count: usize,
     pub max_function_count: usize,
 
+    // This controls the size of function bodies (separate from main)
+    pub min_function_body_size: usize,
+    pub max_function_body_size: usize,
+
+    // This controls the size of lambda bodies
+    pub min_lambda_body_size: usize,
+    pub max_lambda_body_size: usize,
+
     // This controls the number of rewriter rules to apply
     pub min_rewrites_count: usize,
     pub max_rewrites_count: usize,
@@ -67,6 +75,26 @@ pub struct Context {
     pub tuple_index_weight: usize,
     pub field_access_weight: usize,
     pub call_weight: usize,
+    pub cast_weight: usize,
+    pub assignment_weight: usize,
+    pub for_loop_weight: usize,
+    pub if_weight: usize,
+    pub assert_weight: usize,
+
+    // This controls the size of for loop bodies
+    pub min_for_loop_body_size: usize,
+    pub max_for_loop_body_size: usize,
+
+    // This controls the size of if/else if/else bodies
+    pub min_if_body_size: usize,
+    pub max_if_body_size: usize,
+
+    // This controls the number of else-if branches (0 means no else-if)
+    pub min_else_if_count: usize,
+    pub max_else_if_count: usize,
+
+    // This controls the probability of generating an else branch
+    pub else_probability: f64,
 
     // This controls the probability of creating boundary values
     pub boundary_value_probability: f64,
@@ -82,6 +110,15 @@ pub struct Context {
 
     // This controls the probability of creating unary operators
     pub unary_probability: f64,
+
+    // This controls the probability of creating mutable variables
+    pub mutable_probability: f64,
+
+    // This controls the probability of creating compound assignments (+=, -=, etc.)
+    pub compound_assignment_probability: f64,
+
+    // This controls the probability of including a message in assert statements
+    pub assert_message_probability: f64,
 
     /// This controls the probability of creating functions that return a value
     pub function_return_probability: f64,

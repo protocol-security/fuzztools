@@ -75,7 +75,7 @@ macro_rules! impl_mutable {
                     10 => {
                         let value = random.random::<$type>();
                         if value != 0 {
-                            *self = *self % value;
+                            *self %= value;
                         }
                     }
                     // set_zero

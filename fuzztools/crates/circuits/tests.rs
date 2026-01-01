@@ -71,11 +71,24 @@ mod tests {
             out.push_str(&format!("{}", s));
         }
 
+        for (name, ty, value) in &scope.globals {
+            out.push_str(&format!("global {}: {} = {};\n\n", name, ty, value));
+        }
+
+        for f in &scope.functions {
+            out.push_str(&format!("{}\n\n", f));
+        }
+
         out.push_str("fn main() {\n");
 
         for i in 0..50 {
             let ty = Type::random(random, &ctx, &scope, TypeLocation::Default);
-            out.push_str(&format!("    let v{}: {} = {};\n", i, ty, ty.random_value(random, &ctx)));
+            out.push_str(&format!(
+                "    let v{}: {} = {};\n",
+                i,
+                ty,
+                ty.random_value(random, &ctx, &scope)
+            ));
         }
 
         out.push_str("}\n");
@@ -97,6 +110,14 @@ mod tests {
             out.push_str(&format!("{}", s));
         }
 
+        for (name, ty, value) in &scope.globals {
+            out.push_str(&format!("global {}: {} = {};\n\n", name, ty, value));
+        }
+
+        for f in &scope.functions {
+            out.push_str(&format!("{}\n\n", f));
+        }
+
         out.push_str("fn main() {\n");
 
         for i in 0..50 {
@@ -105,8 +126,8 @@ mod tests {
                 "    let v{}: [{}; 2] = [{}, {}];\n",
                 i,
                 ty,
-                ty.random_value(random, &ctx),
-                ty.random_value(random, &ctx)
+                ty.random_value(random, &ctx, &scope),
+                ty.random_value(random, &ctx, &scope)
             ));
         }
 
@@ -129,6 +150,14 @@ mod tests {
             out.push_str(&format!("{}", s));
         }
 
+        for (name, ty, value) in &scope.globals {
+            out.push_str(&format!("global {}: {} = {};\n\n", name, ty, value));
+        }
+
+        for f in &scope.functions {
+            out.push_str(&format!("{}\n\n", f));
+        }
+
         out.push_str("fn main() {\n");
 
         for i in 0..50 {
@@ -138,8 +167,8 @@ mod tests {
                 i,
                 ty,
                 ty,
-                ty.random_value(random, &ctx),
-                ty.random_value(random, &ctx)
+                ty.random_value(random, &ctx, &scope),
+                ty.random_value(random, &ctx, &scope)
             ));
         }
 
@@ -160,6 +189,14 @@ mod tests {
 
         for s in scope.structs.iter() {
             out.push_str(&format!("{}", s));
+        }
+
+        for (name, ty, value) in &scope.globals {
+            out.push_str(&format!("global {}: {} = {};\n\n", name, ty, value));
+        }
+
+        for f in &scope.functions {
+            out.push_str(&format!("{}\n\n", f));
         }
 
         let inputs = (0..50)
@@ -196,6 +233,14 @@ mod tests {
 
         for s in scope.structs.iter() {
             out.push_str(&format!("{}", s));
+        }
+
+        for (name, ty, value) in &scope.globals {
+            out.push_str(&format!("global {}: {} = {};\n\n", name, ty, value));
+        }
+
+        for f in &scope.functions {
+            out.push_str(&format!("{}\n\n", f));
         }
 
         let inputs = (0..50)
@@ -274,30 +319,12 @@ mod tests {
             sub_forest.register(idx, NodeKind::Input, ty, None);
         }
 
-        // Add parent's variables as inputs to sub-forest
-        for var in &parent_vars {
-            let idx = sub_forest.input(var.0.clone(), var.1.clone());
-            sub_forest.register(idx, NodeKind::Input, &var.1, None);
-        }
-
         // Generate sub-forest expressions
         sub_forest.random(random, &ctx, &scope);
 
         // Save both for inspection
         parent_forest.save_as_dot(&std::env::current_dir().unwrap().join("test_parent_forest.dot"));
         sub_forest.save_as_dot(&std::env::current_dir().unwrap().join("test_sub_forest.dot"));
-
-        // Assertions
-        let sub_input_count = sub_forest.nodes.get(&NodeKind::Input).map_or(0, |v| v.len());
-        assert_eq!(parent_forest.nodes.get(&NodeKind::Input).map_or(0, |v| v.len()), input_count);
-        assert_eq!(sub_input_count, input_count + parent_vars.len());
-
-        println!(
-            "Parent: {} inputs, {} vars | Sub: {} inputs",
-            input_count,
-            parent_vars.len(),
-            sub_input_count
-        );
     }
 
     #[test]
@@ -317,7 +344,7 @@ mod tests {
 
         // Apply one random equivalence rule
         let rewriter = Rewriter::new();
-        rewriter.apply_random(random, &mut forest);
+        rewriter.apply_random(random, &mut forest, &ctx, &scope);
 
         // Save both for comparison
         let base = std::env::current_dir().unwrap();

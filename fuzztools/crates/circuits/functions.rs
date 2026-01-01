@@ -27,7 +27,9 @@ impl Function {
             .random_bool(ctx.function_return_probability)
             .then(|| Type::random(random, ctx, scope, TypeLocation::Default));
 
-        Self { name, params, ret, body: Forest::default(), ret_expr: None }
+        let body = Forest::default();
+
+        Self { name, params, ret, body, ret_expr: None }
     }
 
     pub fn signature(&self) -> String {

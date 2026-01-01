@@ -1,4 +1,5 @@
-use crate::circuits::ast::{operators::Operator, types::Type};
+use crate::circuits::ast::{forest::Forest, operators::Operator, types::Type};
+use petgraph::graph::NodeIndex;
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Node definitions
@@ -14,6 +15,11 @@ pub enum NodeKind {
     TupleIndex,
     FieldAccess,
     Call,
+    Cast,
+    Assignment,
+    ForLoop,
+    If,
+    Assert,
 }
 
 #[derive(Debug, Clone)]
@@ -22,7 +28,7 @@ pub enum Node {
     Input { name: String, ty: Type },
 
     /// A variable node, `a`, `b`, `c`, etc...
-    Variable { name: String, ty: Type },
+    Variable { name: String, ty: Type, mutable: bool },
 
     /// A literal value of the given type, `23`, `false`, `"hello"`, etc...
     Literal { value: String, ty: Type },
@@ -41,11 +47,31 @@ pub enum Node {
 
     /// A function call node, `foo(a, b)`, `bar(x)`, etc...
     Call { name: String, ret: Type },
-    // @todo if, else if, else, for, loop, while, cast, sub_block, assert, comptime y unsafe
-    // y las funciones oracle y todo eso
 
-    // @audit hay assert_eq(a, b), assert_gt/lt(a, b), assert_constant(a) that ensures the value
-    // is known at compile-time
+    /// A cast expression, `expr as Type`
+    Cast { target: Type },
+
+    /// An assignment to a mutable variable or a component of it (e.g., `x = 5`, `arr[0] = 5`,
+    /// `s.field = 5`). Edge 0 points to the value expression. The `target` field stores the
+    /// NodeIndex of the variable or access chain being assigned to. After an assignment,
+    /// subsequent code should reference the Assignment node (not the original Variable) to get
+    /// the current value.
+    /// If `op` is Some, this is a compound assignment (e.g., `x += 5`, `x -= 5`).
+    Assignment { target: NodeIndex, op: Option<Operator> },
+
+    /// A for loop statement: `for var in start..end { body }`.
+    ForLoop { var: String, ty: Type, start: String, end: String, body: Box<Forest> },
+
+    /// An if/else if/else statement
+    If {
+        condition: NodeIndex,
+        then_body: Box<Forest>,
+        else_ifs: Vec<(NodeIndex, Box<Forest>)>,
+        else_body: Option<Box<Forest>>,
+    },
+
+    /// An assert statement: `assert(COND)` or `assert(COND, MSG)`
+    Assert { condition: NodeIndex, message: Option<String> },
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -64,6 +90,11 @@ impl Node {
             Self::TupleIndex { .. } => NodeKind::TupleIndex,
             Self::FieldAccess { .. } => NodeKind::FieldAccess,
             Self::Call { .. } => NodeKind::Call,
+            Self::Cast { .. } => NodeKind::Cast,
+            Self::Assignment { .. } => NodeKind::Assignment,
+            Self::ForLoop { .. } => NodeKind::ForLoop,
+            Self::If { .. } => NodeKind::If,
+            Self::Assert { .. } => NodeKind::Assert,
         }
     }
 
@@ -76,7 +107,12 @@ impl Node {
             Self::Operator { op, .. } if op.is_unary() => "#ffa500", // orange for unary
             Self::Operator { .. } => "#ffd700",                      // yellow for binary
             Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#ffb6c1", /* light pink */
-            Self::Call { .. } => "#c8a2c8", // lilac for calls
+            Self::Call { .. } => "#c8a2c8",       // lilac for calls
+            Self::Cast { .. } => "#dda0dd",       // plum for casts
+            Self::Assignment { .. } => "#ff6b6b", // coral red for assignments
+            Self::ForLoop { .. } => "#87ceeb",    // sky blue for for loops
+            Self::If { .. } => "#90ee90",         // light green for if statements
+            Self::Assert { .. } => "#ff4500",     // orange-red for assert
         }
     }
 }
@@ -92,6 +128,22 @@ impl std::fmt::Display for Node {
             Self::TupleIndex { value } => write!(f, ".{}", value),
             Self::FieldAccess { name } => write!(f, ".{}", name),
             Self::Call { name, ret } => write!(f, "{}(..) -> {}", name, ret),
+            Self::Cast { target } => write!(f, "as {}", target),
+            Self::Assignment { op: Some(op), .. } => write!(f, "{}=", op),
+            Self::Assignment { op: None, .. } => write!(f, "="),
+            Self::ForLoop { var, ty, .. } => write!(f, "for {}: {} in ..", var, ty),
+            Self::If { else_ifs, else_body, .. } => {
+                let else_if_count = else_ifs.len();
+                let has_else = else_body.is_some();
+                write!(f, "if (+{} else if, else={})", else_if_count, has_else)
+            }
+            Self::Assert { message, .. } => {
+                if message.is_some() {
+                    write!(f, "assert(.., msg)")
+                } else {
+                    write!(f, "assert(..)")
+                }
+            }
         }
     }
 }

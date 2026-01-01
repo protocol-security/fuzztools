@@ -1,5 +1,9 @@
-use crate::circuits::ast::{forest::Forest, nodes::Node, operators::Operator, types::*};
-use petgraph::graph::NodeIndex;
+use crate::circuits::{
+    ast::{forest::Forest, nodes::Node, operators::Operator, types::*},
+    context::Context,
+    scope::Scope,
+};
+use petgraph::{graph::NodeIndex, visit::EdgeRef, Direction};
 use rand::Rng;
 use rules::{Rule, RuleKind, RULES};
 use std::collections::HashMap;
@@ -37,7 +41,13 @@ impl Rewriter {
     }
 
     /// O(n), is the best i can do for now @todo
-    pub fn apply_random(&self, random: &mut impl Rng, forest: &mut Forest) {
+    pub fn apply_random(
+        &self,
+        random: &mut impl Rng,
+        forest: &mut Forest,
+        ctx: &Context,
+        scope: &Scope,
+    ) {
         let mut choice: Option<(NodeIndex, usize)> = None;
         let mut count = 0u32;
 
@@ -77,11 +87,19 @@ impl Rewriter {
         }
 
         if let Some((node, idx)) = choice {
-            self.apply(random, forest, node, &self.rules[idx].kind);
+            self.apply(random, forest, node, &self.rules[idx].kind, ctx, scope);
         }
     }
 
-    fn apply(&self, random: &mut impl Rng, forest: &mut Forest, n: NodeIndex, kind: &RuleKind) {
+    fn apply(
+        &self,
+        random: &mut impl Rng,
+        forest: &mut Forest,
+        n: NodeIndex,
+        kind: &RuleKind,
+        ctx: &Context,
+        scope: &Scope,
+    ) {
         match kind {
             RuleKind::SwapOperands { .. } => forest.swap_operands(n),
             RuleKind::Associate { .. } => do_associate(forest, n),
@@ -99,10 +117,16 @@ impl Rewriter {
             RuleKind::NegateComparison => do_negate_comparison(forest, n),
             RuleKind::DeMorgan => do_demorgan(forest, n),
             RuleKind::ComplementXor => do_complement_xor(forest, n),
-            RuleKind::InjectAddSub => do_inject(random, forest, n, Operator::Add, Operator::Sub),
-            RuleKind::InjectSubAdd => do_inject(random, forest, n, Operator::Sub, Operator::Add),
-            RuleKind::InjectMulDiv => do_inject_nonzero(random, forest, n),
-            RuleKind::InjectXorXor => do_inject(random, forest, n, Operator::Xor, Operator::Xor),
+            RuleKind::InjectAddSub => {
+                do_inject(random, forest, n, Operator::Add, Operator::Sub, ctx, scope)
+            }
+            RuleKind::InjectSubAdd => {
+                do_inject(random, forest, n, Operator::Sub, Operator::Add, ctx, scope)
+            }
+            RuleKind::InjectMulDiv => do_inject_nonzero(random, forest, n, ctx, scope),
+            RuleKind::InjectXorXor => {
+                do_inject(random, forest, n, Operator::Xor, Operator::Xor, ctx, scope)
+            }
             RuleKind::DoubleMulTwo => do_double_mul_two(forest, n),
             RuleKind::MulNegOneNeg => do_mul_neg_one_neg(forest, n),
         }
@@ -174,13 +198,21 @@ fn matches_rule(
 
         (RuleKind::DoubleUnary { op }, None) => can_apply_unary(f, left, *op),
 
-        (RuleKind::AddNegSub, Some(Operator::Sub)) => is_binary,
+        // Negation only allowed on signed types (Field or signed integers)
+        (RuleKind::AddNegSub, Some(Operator::Sub)) => {
+            is_binary && left.is_some_and(|l| is_signed_type(f, l))
+        }
         (RuleKind::AddNegSub, Some(Operator::Add)) => {
-            right.is_some_and(|r| op_of(f, r) == Some(Operator::Neg))
+            right.is_some_and(|r| op_of(f, r) == Some(Operator::Neg)) &&
+                left.is_some_and(|l| is_signed_type(f, l))
         }
 
-        (RuleKind::NegZeroSub, Some(Operator::Neg)) => is_unary,
-        (RuleKind::NegZeroSub, Some(Operator::Sub)) => left.is_some_and(|l| is_lit(f, l, "0")),
+        (RuleKind::NegZeroSub, Some(Operator::Neg)) => {
+            is_unary && left.is_some_and(|l| is_signed_type(f, l))
+        }
+        (RuleKind::NegZeroSub, Some(Operator::Sub)) => {
+            left.is_some_and(|l| is_lit(f, l, "0")) && right.is_some_and(|r| is_signed_type(f, r))
+        }
 
         (RuleKind::FlipComparison, Some(o)) => matches!(
             o,
@@ -205,10 +237,15 @@ fn matches_rule(
         (RuleKind::ComplementXor, Some(Operator::Xor)) => right.is_some_and(|r| is_one(f, r)),
 
         (RuleKind::DoubleMulTwo, Some(Operator::Add)) => left == right,
-        (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => right.is_some_and(|r| is_lit(f, r, "2")),
+        (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => right.is_some_and(|r| is_two(f, r)),
 
-        (RuleKind::MulNegOneNeg, Some(Operator::Mul)) => right.is_some_and(|r| is_lit(f, r, "-1")),
-        (RuleKind::MulNegOneNeg, Some(Operator::Neg)) => is_unary,
+        // MulNegOneNeg only for signed types (can't negate unsigned)
+        (RuleKind::MulNegOneNeg, Some(Operator::Mul)) => {
+            right.is_some_and(|r| is_neg_one(f, r)) && left.is_some_and(|l| is_signed_type(f, l))
+        }
+        (RuleKind::MulNegOneNeg, Some(Operator::Neg)) => {
+            is_unary && left.is_some_and(|l| is_signed_type(f, l))
+        }
 
         (RuleKind::InjectAddSub | RuleKind::InjectSubAdd | RuleKind::InjectMulDiv, _) => {
             left.is_some_and(|l| matches!(f.ty(l), Type::Field | Type::Integer(_)))
@@ -337,12 +374,11 @@ fn do_absorb(f: &mut Forest, n: NodeIndex, op: Operator) {
 
 fn do_self_inverse(f: &mut Forest, n: NodeIndex, op: Operator) {
     let ty = f.ty(n);
-    let val = match op {
-        Operator::Sub | Operator::Xor => "0",
-        Operator::Div => "1",
+    let lit = match op {
+        Operator::Sub | Operator::Xor => make_zero(f, &ty),
+        Operator::Div => make_one(f, &ty),
         _ => return,
     };
-    let lit = f.literal(val.into(), ty);
     redirect(f, n, lit);
 }
 
@@ -397,19 +433,33 @@ fn do_add_neg_sub(f: &mut Forest, n: NodeIndex) {
 fn do_neg_zero_sub(f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Neg) => {
+            // -x → 0 - x
             let operand = f.left(n).unwrap();
             let ty = ret_of(f, n);
             let zero = f.literal("0".into(), ty);
             set_op(f, n, Operator::Sub);
-            f.replace_operand(n, 0, zero);
+            // Add operand at pos 1 FIRST to keep it alive
             f.add_operand(n, 1, operand);
+            f.replace_operand(n, 0, zero);
         }
         Some(Operator::Sub) if f.left(n).is_some_and(|l| is_lit(f, l, "0")) => {
+            // 0 - x → -x
             let right = f.right(n).unwrap();
             set_op(f, n, Operator::Neg);
-            f.remove_operand(n, 0);
-            f.remove_operand(n, 1);
+            // Add right at pos 0 FIRST to keep it alive
             f.add_operand(n, 0, right);
+            f.remove_operand(n, 1);
+            // Now safe to remove old pos 0 (the duplicate edge)
+            if let Some(edge) = f
+                .graph
+                .edges_directed(n, Direction::Outgoing)
+                .find(|e| *e.weight() == 0 && e.target() != right)
+            {
+                let old = edge.target();
+                let id = edge.id();
+                f.graph.remove_edge(id);
+                f.remove_if_orphan(old);
+            }
         }
         _ => {}
     }
@@ -500,19 +550,38 @@ fn do_complement_xor(f: &mut Forest, n: NodeIndex) {
     }
 }
 
-fn do_inject(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op1: Operator, op2: Operator) {
+fn do_inject(
+    random: &mut impl Rng,
+    f: &mut Forest,
+    n: NodeIndex,
+    op1: Operator,
+    op2: Operator,
+    ctx: &Context,
+    scope: &Scope,
+) {
     let ty = f.ty(n);
     let edges = f.incoming_edges(n); // Capture BEFORE creating new nodes
-    let r = f.literal(random.random::<u32>().to_string(), ty.clone());
+    let r = f.literal(ty.random_value(random, ctx, scope), ty.clone());
     let first = f.operator(op1, ty.clone(), n, Some(r));
     let second = f.operator(op2, ty, first, Some(r));
     f.redirect_edges(n, second, &edges);
 }
 
-fn do_inject_nonzero(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
+fn do_inject_nonzero(
+    random: &mut impl Rng,
+    f: &mut Forest,
+    n: NodeIndex,
+    ctx: &Context,
+    scope: &Scope,
+) {
     let ty = f.ty(n);
+    let value = ty.random_value(random, ctx, scope);
+    // Skip if value is zero (can't divide by zero)
+    if value.starts_with('0') || value.starts_with("-0") || value == "false" {
+        return;
+    }
     let edges = f.incoming_edges(n); // Capture BEFORE creating new nodes
-    let r = f.literal(random.random::<u32>().saturating_add(1).to_string(), ty.clone());
+    let r = f.literal(value, ty.clone());
     let first = f.operator(Operator::Mul, ty.clone(), n, Some(r));
     let second = f.operator(Operator::Div, ty, first, Some(r));
     f.redirect_edges(n, second, &edges);
@@ -521,11 +590,12 @@ fn do_inject_nonzero(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
 fn do_double_mul_two(f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Add) if f.left(n) == f.right(n) => {
-            let two = f.literal("2".into(), f.ty(n));
+            let ty = f.ty(n);
+            let two = make_two(f, &ty);
             set_op(f, n, Operator::Mul);
             f.replace_operand(n, 1, two);
         }
-        Some(Operator::Mul) if f.right(n).is_some_and(|r| is_lit(f, r, "2")) => {
+        Some(Operator::Mul) if f.right(n).is_some_and(|r| is_two(f, r)) => {
             let left = f.left(n).unwrap();
             set_op(f, n, Operator::Add);
             f.replace_operand(n, 1, left);
@@ -536,13 +606,13 @@ fn do_double_mul_two(f: &mut Forest, n: NodeIndex) {
 
 fn do_mul_neg_one_neg(f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
-        Some(Operator::Mul) if f.right(n).is_some_and(|r| is_lit(f, r, "-1")) => {
+        Some(Operator::Mul) if f.right(n).is_some_and(|r| is_neg_one(f, r)) => {
             set_op(f, n, Operator::Neg);
             f.remove_operand(n, 1);
         }
         Some(Operator::Neg) => {
             let ty = ret_of(f, n);
-            let neg_one = f.literal("-1".into(), ty);
+            let neg_one = make_neg_one(f, &ty);
             set_op(f, n, Operator::Mul);
             f.add_operand(n, 1, neg_one);
         }
@@ -554,7 +624,7 @@ fn do_mul_neg_one_neg(f: &mut Forest, n: NodeIndex) {
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#[inline]
+#[inline(always)]
 fn op_of(f: &Forest, n: NodeIndex) -> Option<Operator> {
     match &f.graph[n] {
         Node::Operator { op, .. } => Some(*op),
@@ -562,7 +632,7 @@ fn op_of(f: &Forest, n: NodeIndex) -> Option<Operator> {
     }
 }
 
-#[inline]
+#[inline(always)]
 fn ret_of(f: &Forest, n: NodeIndex) -> Type {
     match &f.graph[n] {
         Node::Operator { ret, .. } => ret.clone(),
@@ -570,48 +640,91 @@ fn ret_of(f: &Forest, n: NodeIndex) -> Type {
     }
 }
 
-#[inline]
+#[inline(always)]
 fn set_op(f: &mut Forest, n: NodeIndex, new_op: Operator) {
     if let Node::Operator { op, .. } = &mut f.graph[n] {
         *op = new_op;
     }
 }
 
-#[inline]
+#[inline(always)]
 fn redirect(f: &mut Forest, from: NodeIndex, to: NodeIndex) {
     let edges = f.incoming_edges(from);
     f.redirect_edges(from, to, &edges);
 }
 
-#[inline]
+#[inline(always)]
 fn is_lit(f: &Forest, n: NodeIndex, val: &str) -> bool {
     matches!(&f.graph[n], Node::Literal { value, .. } if value == val)
 }
 
-#[inline]
-fn is_one(f: &Forest, n: NodeIndex) -> bool {
-    matches!(&f.graph[n], Node::Literal { value, .. } if value == "1" || value == "true")
+/// Check if literal is 0 (numeric) or false (boolean) based on type
+#[inline(always)]
+fn is_zero(f: &Forest, n: NodeIndex) -> bool {
+    match &f.graph[n] {
+        Node::Literal { value, ty } => match ty {
+            Type::Boolean => value == "false",
+            Type::Field | Type::Integer(_) => {
+                value.starts_with("0i") || value.starts_with("0u") || value.starts_with("0Field")
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
-#[inline]
+/// Check if node has a signed type (Field or signed integer) - can apply negation
+#[inline(always)]
+fn is_signed_type(f: &Forest, n: NodeIndex) -> bool {
+    matches!(f.ty(n), Type::Field | Type::Integer(Integer { signed: true, .. }))
+}
+
+/// Check if literal is 1 (numeric) or true (boolean) based on type
+#[inline(always)]
+fn is_one(f: &Forest, n: NodeIndex) -> bool {
+    match &f.graph[n] {
+        Node::Literal { value, ty } => match ty {
+            Type::Boolean => value == "true",
+            Type::Field | Type::Integer(_) => {
+                value.starts_with("1i") || value.starts_with("1u") || value.starts_with("1Field")
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Check if literal is -1 (with or without type suffix)
+#[inline(always)]
+fn is_neg_one(f: &Forest, n: NodeIndex) -> bool {
+    matches!(&f.graph[n], Node::Literal { value, .. } if value == "-1" || value.starts_with("-1i") || value.starts_with("-1Field"))
+}
+
+/// Check if literal is 2 (with or without type suffix)
+#[inline(always)]
+fn is_two(f: &Forest, n: NodeIndex) -> bool {
+    matches!(&f.graph[n], Node::Literal { value, .. } if value == "2" || value.starts_with("2i") || value.starts_with("2u") || value.starts_with("2Field"))
+}
+
+#[inline(always)]
 fn is_identity(f: &Forest, n: NodeIndex, op: Operator) -> bool {
     match op {
-        Operator::Add | Operator::Sub | Operator::Xor | Operator::Or => is_lit(f, n, "0"),
+        Operator::Add | Operator::Sub | Operator::Xor | Operator::Or => is_zero(f, n),
         Operator::Mul | Operator::Div | Operator::And => is_one(f, n),
         _ => false,
     }
 }
 
-#[inline]
+#[inline(always)]
 fn is_absorbing(f: &Forest, n: NodeIndex, op: Operator) -> bool {
     match op {
-        Operator::Mul | Operator::And => is_lit(f, n, "0"),
+        Operator::Mul | Operator::And => is_zero(f, n),
         Operator::Or => is_one(f, n),
         _ => false,
     }
 }
 
-#[inline]
+#[inline(always)]
 fn is_numeric_or_bool(f: &Forest, n: NodeIndex) -> bool {
     matches!(f.ty(n), Type::Field | Type::Integer(_) | Type::Boolean)
 }
@@ -627,6 +740,7 @@ fn can_apply_unary(f: &Forest, node: Option<NodeIndex>, op: Operator) -> bool {
     })
 }
 
+#[inline(always)]
 fn negate_cmp(op: Operator) -> Option<Operator> {
     match op {
         Operator::Less => Some(Operator::GreaterOrEqual),
@@ -639,23 +753,56 @@ fn negate_cmp(op: Operator) -> Option<Operator> {
     }
 }
 
-#[inline]
-fn make_one(f: &mut Forest, ty: &Type) -> NodeIndex {
-    f.literal(if matches!(ty, Type::Boolean) { "true" } else { "1" }.into(), ty.clone())
+#[inline(always)]
+fn make_zero(f: &mut Forest, ty: &Type) -> NodeIndex {
+    f.literal(
+        if matches!(ty, Type::Boolean) { "false".to_string() } else { format!("0{}", ty) },
+        ty.clone(),
+    )
 }
 
-#[inline]
+#[inline(always)]
+fn make_one(f: &mut Forest, ty: &Type) -> NodeIndex {
+    f.literal(
+        if matches!(ty, Type::Boolean) { "true".to_string() } else { format!("1{}", ty) },
+        ty.clone(),
+    )
+}
+
+/// Create a -1 literal with proper type suffix (only for signed types)
+#[inline(always)]
+fn make_neg_one(f: &mut Forest, ty: &Type) -> NodeIndex {
+    let value = match ty {
+        Type::Field => "-1Field".to_string(),
+        Type::Integer(i) => format!("-1i{}", i.bits),
+        _ => "-1".to_string(), // shouldn't happen, rule is restricted to signed
+    };
+    f.literal(value, ty.clone())
+}
+
+/// Create a 2 literal with proper type suffix
+#[inline(always)]
+fn make_two(f: &mut Forest, ty: &Type) -> NodeIndex {
+    let value = match ty {
+        Type::Field => "2Field".to_string(),
+        Type::Integer(i) => format!("2{}{}", if i.signed { "i" } else { "u" }, i.bits),
+        _ => "2".to_string(),
+    };
+    f.literal(value, ty.clone())
+}
+
+#[inline(always)]
 fn make_identity(f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
     match op {
         Operator::Mul | Operator::Div => make_one(f, ty),
-        _ => f.literal("0".into(), ty.clone()),
+        _ => make_zero(f, ty),
     }
 }
 
-#[inline]
+#[inline(always)]
 fn make_absorbing(f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
     match op {
         Operator::Or => make_one(f, ty),
-        _ => f.literal("0".into(), ty.clone()),
+        _ => make_zero(f, ty),
     }
 }

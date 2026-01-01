@@ -1,7 +1,9 @@
 //! Implements the Noir IR types
 
 use crate::circuits::{
+    ast::forest::Forest,
     context::Context,
+    scope::Scope,
     utils::{bernoulli, random_field_element, random_string},
 };
 use rand::{seq::IndexedRandom, Rng};
@@ -124,17 +126,17 @@ impl Type {
         matches!(self.kind(), TypeKind::Unsigned)
     }
 
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         match self {
-            Type::Field => random_field_element(random, ctx, "bn254").to_string(),
+            Type::Field => format!("{}Field", random_field_element(random, ctx, "bn254")),
             Type::Integer(i) => i.random_value(random, ctx),
             Type::Boolean => random.random_bool(0.5).to_string(),
             Type::String(s) => s.random_value(random),
-            Type::Array(a) => a.random_value(random, ctx),
-            Type::Slice(s) => s.random_value(random, ctx),
-            Type::Tuple(t) => t.random_value(random, ctx),
-            Type::Struct(s) => s.random_value(random, ctx),
-            Type::Lambda(l) => l.random_value(),
+            Type::Array(a) => a.random_value(random, ctx, scope),
+            Type::Slice(s) => s.random_value(random, ctx, scope),
+            Type::Tuple(t) => t.random_value(random, ctx, scope),
+            Type::Struct(s) => s.random_value(random, ctx, scope),
+            Type::Lambda(l) => l.random_value(random, ctx, scope),
             Type::Empty => "()".to_string(),
         }
     }
@@ -174,6 +176,12 @@ impl Type {
             Type::Tuple(t) => t.elements.iter().any(|e| e.allows_slice()),
             Type::Struct(s) => s.fields.iter().any(|f| f.ty.allows_slice()),
         }
+    }
+
+    /// Returns whether this type can be declared as mutable.
+    /// Lambda and Empty types cannot be mutable.
+    pub fn can_be_mutable(&self) -> bool {
+        !matches!(self, Type::Lambda(_) | Type::Empty)
     }
 }
 
@@ -235,35 +243,38 @@ impl StringType {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Array {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let elems: Vec<_> = (0..self.size).map(|_| self.ty.random_value(random, ctx)).collect();
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+        let elems: Vec<_> =
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
 
         format!("[{}]", elems.join(", "))
     }
 }
 
 impl Slice {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let elems: Vec<_> = (0..self.size).map(|_| self.ty.random_value(random, ctx)).collect();
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+        let elems: Vec<_> =
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
 
         format!("&[{}]", elems.join(", "))
     }
 }
 
 impl Tuple {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let elems: Vec<_> = self.elements.iter().map(|e| e.random_value(random, ctx)).collect();
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+        let elems: Vec<_> =
+            self.elements.iter().map(|e| e.random_value(random, ctx, scope)).collect();
 
         format!("({})", elems.join(", "))
     }
 }
 
 impl Struct {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let fields: Vec<_> = self
             .fields
             .iter()
-            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx)))
+            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope)))
             .collect();
 
         format!("{} {{ {} }}", self.name, fields.join(", "))
@@ -271,15 +282,55 @@ impl Struct {
 }
 
 impl Lambda {
-    pub fn random_value(&self) -> String {
-        let params = self
-            .params
-            .iter()
-            .map(|(name, ty)| format!("{}: {}", name, ty))
-            .collect::<Vec<_>>()
-            .join(", ");
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+        let mut out = String::new();
+        let mut lambda_scope = scope.clone();
+        lambda_scope.inputs = self.params.clone();
 
-        format!("|{}| -> {}", params, self.ret)
+        let mut body = Forest::default();
+        for param in self.params.iter() {
+            body.input(param.0.clone(), param.1.clone());
+        }
+
+        body.random_with_bounds(
+            random,
+            ctx,
+            &lambda_scope,
+            ctx.min_lambda_body_size,
+            ctx.max_lambda_body_size,
+        );
+        let body_string = body.to_string();
+
+        out.push_str(
+            format!(
+                "|{}|",
+                self.params
+                    .iter()
+                    .map(|(name, ty)| format!("{}: {}", name, ty))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .as_str(),
+        );
+
+        if matches!(*self.ret, Type::Empty) {
+            out.push_str(" {\n");
+            out.push_str(&body_string);
+            out.push_str("}\n");
+        } else {
+            out.push_str(format!(" -> {} {{\n", self.ret).as_str());
+            let candidates: Vec<_> =
+                body.types.get(&self.ret).into_iter().flatten().copied().collect();
+            let ret_expr = if let Some(&idx) = candidates.choose(random) {
+                body.get_expr_for_node(idx)
+            } else {
+                self.ret.random_value(random, ctx, &lambda_scope)
+            };
+            out.push_str(&body_string);
+            out.push_str(format!("\n{}\n}}", ret_expr).as_str());
+        }
+
+        out
     }
 }
 
