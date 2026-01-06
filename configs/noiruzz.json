@@ -1,39 +1,41 @@
 {
-    "min_expression_count": 20,
-    "max_expression_count": 30,
+    "min_expression_count": 5,
+    "max_expression_count": 15,
 
-    "min_element_count": 1,
-    "max_element_count": 3,
+    "min_element_count": 0,
+    "max_element_count": 5,
 
-    "min_string_size": 1,
+    "min_string_size": 0,
     "max_string_size": 5,
 
-    "min_function_parameters_count": 0,
-    "max_function_parameters_count": 3,
+    "max_hashes_count": 3,
 
-    "min_struct_fields_count": 1,
-    "max_struct_fields_count": 3,
+    "min_function_parameters_count": 0,
+    "max_function_parameters_count": 5,
+
+    "min_struct_fields_count": 0,
+    "max_struct_fields_count": 5,
 
     "min_struct_count": 0,
-    "max_struct_count": 3,
+    "max_struct_count": 5,
 
     "min_globals_count": 0,
-    "max_globals_count": 3,
+    "max_globals_count": 5,
 
     "min_input_count": 0,
-    "max_input_count": 3,
+    "max_input_count": 2,
 
     "min_function_count": 0,
-    "max_function_count": 3,
+    "max_function_count": 2,
 
     "min_function_body_size": 0,
-    "max_function_body_size": 5,
+    "max_function_body_size": 10,
 
     "min_lambda_body_size": 0,
-    "max_lambda_body_size": 5,
+    "max_lambda_body_size": 10,
 
-    "min_rewrites_count": 1,
-    "max_rewrites_count": 10,
+    "min_rewrites_count": 10,
+    "max_rewrites_count": 50,
 
     "max_small_upper_bound": 5,
 
@@ -47,19 +49,20 @@
     "tuple_weight": 3,
     "struct_weight": 3,
     "lambda_weight": 1,
+    "empty_weight": 1,
 
-    "literal_weight": 3,
-    "variable_weight": 2,
-    "operator_weight": 4,
-    "index_weight": 2,
-    "tuple_index_weight": 2,
-    "field_access_weight": 2,
-    "call_weight": 3,
-    "cast_weight": 1,
-    "assignment_weight": 12,
-    "for_loop_weight": 2,
-    "if_weight": 5,
-    "assert_weight": 5,
+    "literal_weight": 5,
+    "variable_weight": 10,
+    "operator_weight": 5,
+    "index_weight": 3,
+    "tuple_index_weight": 3,
+    "field_access_weight": 3,
+    "call_weight": 2,
+    "cast_weight": 4,
+    "assignment_weight": 5,
+    "for_loop_weight": 1,
+    "if_weight": 1,
+    "assert_weight": 2,
 
     "min_for_loop_body_size": 1,
     "max_for_loop_body_size": 5,
@@ -72,14 +75,14 @@
 
     "else_probability": 0.5,
 
-    "boundary_value_probability": 0.1,
+    "boundary_value_probability": 0.25,
     "exclude_prime_probability": 0.1,
-    "small_upper_bound_probability": 0.1,
+    "small_upper_bound_probability": 0.25,
     "raw_string_probability": 0.2,
     "unary_probability": 0.15,
     "function_return_probability": 0.5,
-    "mutable_probability": 0.99,
-    "compound_assignment_probability": 0.5,
+    "mutable_probability": 0.6,
+    "compound_assignment_probability": 0.3,
     "assert_message_probability": 0.3,
 
     "max_type_depth": 2

@@ -143,13 +143,14 @@ impl Type {
             (TypeKind::String, ctx.string_weight),
             (TypeKind::Array, ctx.array_weight),
             (TypeKind::Tuple, ctx.tuple_weight),
+            (TypeKind::Empty, ctx.empty_weight),
         ];
 
         if location.allows_slice() {
             available.push((TypeKind::Slice, ctx.slice_weight));
         }
 
-        if location.allows_lambda() {
+        if location.allows_lambda(scope, ctx) {
             available.push((TypeKind::Lambda, ctx.lambda_weight));
         }
 
@@ -343,7 +344,79 @@ impl TypeLocation {
         *self == Self::Default || *self == Self::TupleElement
     }
 
-    fn allows_lambda(&self) -> bool {
-        *self != Self::Main
+    fn allows_lambda(&self, scope: &Scope, ctx: &Context) -> bool {
+        *self != Self::Main && scope.lambda_depth < ctx.max_type_depth
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::builders::CircuitBuilder;
+    use super::*;
+
+    #[test]
+    fn test_type_generation_default() {
+        let ctx = Context::default();
+        let mut random = rand::rng();
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        for _ in 0..25 {
+            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
+            println!("{}", ty);
+        }
+    }
+
+    #[test]
+    fn test_type_random_value() {
+        let ctx = Context::default();
+        let mut random = rand::rng();
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        for _ in 0..25 {
+            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
+            println!("{} = {}", ty, ty.random_value(&mut random, &ctx, &scope));
+        }
+    }
+
+    #[test]
+    fn test_type_generation_main() {
+        let ctx = Context::default();
+        let mut random = rand::rng();
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        for _ in 0..25 {
+            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Main);
+            println!("{}", ty);
+        }
+    }
+
+    #[test]
+    fn test_type_generation_complex() {
+        let ctx = Context::default();
+        let mut random = rand::rng();
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        for _ in 0..25 {
+            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Nested);
+            println!("{}", ty);
+        }
+
+        println!("\n");
+
+        for _ in 0..25 {
+            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::TupleElement);
+            println!("{}", ty);
+        }
+
+        println!("\n");
+
+        for _ in 0..25 {
+            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::TupleNested);
+            println!("{}", ty);
+        }
     }
 }

@@ -52,10 +52,8 @@ pub enum Node {
     Cast { target: Type },
 
     /// An assignment to a mutable variable or a component of it (e.g., `x = 5`, `arr[0] = 5`,
-    /// `s.field = 5`). Edge 0 points to the value expression. The `target` field stores the
-    /// NodeIndex of the variable or access chain being assigned to. After an assignment,
-    /// subsequent code should reference the Assignment node (not the original Variable) to get
-    /// the current value.
+    /// `s.field = 5`). Edge 0 points to the value expression and the `target` field stores the
+    /// NodeIndex of the variable or access chain being assigned to.
     /// If `op` is Some, this is a compound assignment (e.g., `x += 5`, `x -= 5`).
     Assignment { target: NodeIndex, op: Option<Operator> },
 
@@ -101,18 +99,18 @@ impl Node {
     #[inline(always)]
     pub fn color(&self) -> &'static str {
         match self {
-            Self::Input { .. } => "#d56b4bff",                       // red
-            Self::Literal { .. } => "#a0d8ef",                       // light blue
-            Self::Variable { .. } => "#98d98e",                      // light green
-            Self::Operator { op, .. } if op.is_unary() => "#ffa500", // orange for unary
-            Self::Operator { .. } => "#ffd700",                      // yellow for binary
-            Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#ffb6c1", /* light pink */
-            Self::Call { .. } => "#c8a2c8",       // lilac for calls
-            Self::Cast { .. } => "#dda0dd",       // plum for casts
-            Self::Assignment { .. } => "#ff6b6b", // coral red for assignments
-            Self::ForLoop { .. } => "#87ceeb",    // sky blue for for loops
-            Self::If { .. } => "#90ee90",         // light green for if statements
-            Self::Assert { .. } => "#ff4500",     // orange-red for assert
+            Self::Input { .. } => "#da542cff",
+            Self::Literal { .. } => "#69c5eaff",
+            Self::Variable { .. } => "#6bd85aff",
+            Self::Operator { op, .. } if op.is_unary() => "#ffa500",
+            Self::Operator { .. } => "#ffd700",
+            Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#825d63ff",
+            Self::Call { .. } => "#c874c8ff",
+            Self::Cast { .. } => "#4f47a6ff",
+            Self::Assignment { .. } => "#c1009bff",
+            Self::ForLoop { .. } => "#1ebfffff",
+            Self::If { .. } => "#005a00ff",
+            Self::Assert { .. } => "#a62c00ff",
         }
     }
 }
@@ -137,12 +135,8 @@ impl std::fmt::Display for Node {
                 let has_else = else_body.is_some();
                 write!(f, "if (+{} else if, else={})", else_if_count, has_else)
             }
-            Self::Assert { message, .. } => {
-                if message.is_some() {
-                    write!(f, "assert(.., msg)")
-                } else {
-                    write!(f, "assert(..)")
-                }
+            Self::Assert { .. } => {
+                 write!(f, "assert(...)")
             }
         }
     }

@@ -18,6 +18,7 @@ use std::{collections::HashMap, fmt::Write, path::Path};
 pub struct Forest {
     pub graph: StableDiGraph<Node, usize>,
     pub var_counter: usize,
+
     pub types: HashMap<Type, Vec<NodeIndex>>,
     pub type_kinds: HashMap<TypeKind, Vec<NodeIndex>>,
     pub nodes: HashMap<NodeKind, Vec<NodeIndex>>,

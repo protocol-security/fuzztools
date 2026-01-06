@@ -49,9 +49,13 @@ impl Forest {
             })
             .collect();
 
-        for _ in 0..random.random_range(min_expr..max_expr) {
+        for i in 0..random.random_range(min_expr..max_expr) {
             let has_nodes = self.graph.node_count() > 0;
-            let mut choices = vec![(NodeKind::Literal, ctx.literal_weight)];
+            let mut choices = vec![];
+
+            if i < 10 {
+                choices.push((NodeKind::Literal, ctx.literal_weight));
+            }
 
             if has_nodes {
                 choices.push((NodeKind::Variable, ctx.variable_weight));
@@ -77,6 +81,11 @@ impl Forest {
                 choices.push((NodeKind::Cast, ctx.cast_weight));
             }
             if self.has_mutable_variables() {
+                if i % 3 == 0 {
+                    // Short circuit to enforce assignements
+                    self.gen_assignment(random, ctx);
+                    continue;
+                }
                 choices.push((NodeKind::Assignment, ctx.assignment_weight));
             }
             // Only allow for loops and if statements with one level of nesting
@@ -111,7 +120,7 @@ impl Forest {
         self.assign_leaf_operators(false);
     }
 
-    fn assign_leaf_operators(&mut self, enforce_mutable: bool) {
+    pub fn assign_leaf_operators(&mut self, enforce_mutable: bool) {
         let assigned: HashSet<_> = self
             .nodes
             .get(&NodeKind::Variable)
@@ -137,19 +146,19 @@ impl Forest {
         for idx in unassigned {
             let ty = self.ty(idx);
             let name = self.next_var();
-            self.variable(name, ty.clone(), enforce_mutable, idx);
+            let var_idx = self.variable(name, ty.clone(), enforce_mutable, idx);
 
-            self.register(idx, NodeKind::Variable, &ty, None);
+            self.register(var_idx, NodeKind::Variable, &ty, None);
         }
     }
 
-    fn gen_literal(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
+    pub fn gen_literal(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
         let ty = Type::random(random, ctx, scope, TypeLocation::Default);
         let idx = self.literal(ty.random_value(random, ctx, scope), ty.clone());
         self.register(idx, NodeKind::Literal, &ty, None);
     }
 
-    fn gen_variable(&mut self, random: &mut impl Rng, ctx: &Context) {
+    pub fn gen_variable(&mut self, random: &mut impl Rng, ctx: &Context) {
         // We do this instead of using `node_indices().collect()choose(random)` because the first
         // one is O(n) and the second one is O(1)
         let source = NodeIndex::new(random.random_range(0..self.graph.node_count()));
@@ -161,7 +170,7 @@ impl Forest {
         self.register(idx, NodeKind::Variable, &ty, None);
     }
 
-    fn gen_operator(&mut self, random: &mut impl Rng, ctx: &Context) {
+    pub fn gen_operator(&mut self, random: &mut impl Rng, ctx: &Context) {
         // We do this instead of using `node_indices().collect()choose(random)` because the first
         // one is O(n) and the second one is O(1)
         let left = NodeIndex::new(random.random_range(0..self.graph.node_count()));
@@ -197,7 +206,7 @@ impl Forest {
         }
     }
 
-    fn gen_index(&mut self, random: &mut impl Rng) {
+    pub fn gen_index(&mut self, random: &mut impl Rng) {
         let parent = *self
             .type_kinds
             .get(&TypeKind::Array)
@@ -212,11 +221,11 @@ impl Forest {
             _ => unreachable!(),
         };
 
-        let idx = self.index(parent, random.random_range(0..size));
+        let idx = self.index(parent, if size > 0 { random.random_range(0..size) } else { 0 });
         self.register(idx, NodeKind::Index, &inner, None);
     }
 
-    fn gen_tuple_index(&mut self, random: &mut impl Rng) {
+    pub fn gen_tuple_index(&mut self, random: &mut impl Rng) {
         let parent = *self.type_kinds.get(&TypeKind::Tuple).and_then(|v| v.choose(random)).unwrap();
         let elements = match self.ty(parent) {
             Type::Tuple(Tuple { elements, .. }) => elements,
@@ -228,7 +237,7 @@ impl Forest {
         self.register(idx, NodeKind::TupleIndex, &elements[i], None);
     }
 
-    fn gen_field_access(&mut self, random: &mut impl Rng) {
+    pub fn gen_field_access(&mut self, random: &mut impl Rng) {
         let parent =
             *self.type_kinds.get(&TypeKind::Struct).and_then(|v| v.choose(random)).unwrap();
         let fields = match self.ty(parent) {
@@ -236,12 +245,14 @@ impl Forest {
             _ => unreachable!(),
         };
 
-        let field = fields.choose(random).unwrap();
-        let idx = self.field_access(parent, field.name.clone());
-        self.register(idx, NodeKind::FieldAccess, &field.ty, None);
+        if !fields.is_empty() {
+            let field = fields.choose(random).unwrap();
+            let idx = self.field_access(parent, field.name.clone());
+            self.register(idx, NodeKind::FieldAccess, &field.ty, None);
+        } 
     }
 
-    fn gen_call(&mut self, random: &mut impl Rng, functions: &[(String, Vec<Type>, Type)]) {
+    pub fn gen_call(&mut self, random: &mut impl Rng, functions: &[(String, Vec<Type>, Type)]) {
         let mut callables: Vec<(String, Vec<Type>, Type)> = Vec::new();
 
         for &lambda_idx in self.type_kinds.get(&TypeKind::Lambda).into_iter().flatten() {
@@ -281,7 +292,7 @@ impl Forest {
         self.register(idx, NodeKind::Call, ret, None);
     }
 
-    fn gen_cast(&mut self, random: &mut impl Rng) {
+    pub fn gen_cast(&mut self, random: &mut impl Rng) {
         const CASTABLE: [TypeKind; 4] =
             [TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned, TypeKind::Boolean];
 
@@ -309,14 +320,14 @@ impl Forest {
     }
 
     #[inline(always)]
-    fn has_castable_types(&self) -> bool {
+    pub fn has_castable_types(&self) -> bool {
         [TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned, TypeKind::Boolean]
             .into_iter()
             .any(|k| self.type_kinds.contains_key(&k))
     }
 
     #[inline(always)]
-    fn has_mutable_variables(&self) -> bool {
+    pub fn has_mutable_variables(&self) -> bool {
         // Check for mutable Variable nodes
         let has_mutable_vars = self.nodes.get(&NodeKind::Variable).map_or(false, |vars| {
             vars.iter().any(|&idx| matches!(&self.graph[idx], Node::Variable { mutable: true, .. }))
@@ -326,23 +337,23 @@ impl Forest {
     }
 
     #[inline(always)]
-    fn has_integer_types(&self) -> bool {
+    pub fn has_integer_types(&self) -> bool {
         self.type_kinds.contains_key(&TypeKind::Signed) ||
             self.type_kinds.contains_key(&TypeKind::Unsigned)
     }
 
-    fn has_boolean_types(&self) -> bool {
+    pub fn has_boolean_types(&self) -> bool {
         self.type_kinds.contains_key(&TypeKind::Boolean)
     }
 
-    fn has_comparison_operators(&self) -> bool {
+    pub fn has_comparison_operators(&self) -> bool {
         // Check if we have any comparison operators (which produce boolean results)
         self.operators.keys().any(|op| op.is_comparison())
     }
 
     /// Find the root variable of an access chain (Index, TupleIndex, FieldAccess)
     /// Also returns Input nodes that are mutable refs from parent scope
-    fn find_root_variable(&self, idx: NodeIndex) -> Option<NodeIndex> {
+    pub fn find_root_variable(&self, idx: NodeIndex) -> Option<NodeIndex> {
         let mut current = idx;
         loop {
             match &self.graph[current] {
@@ -363,7 +374,7 @@ impl Forest {
     }
 
     /// Check if a node is rooted in a mutable variable (including mutable refs)
-    fn is_rooted_in_mutable(&self, idx: NodeIndex) -> bool {
+    pub fn is_rooted_in_mutable(&self, idx: NodeIndex) -> bool {
         self.find_root_variable(idx)
             .map(|root| match &self.graph[root] {
                 Node::Variable { mutable: true, .. } => true,
@@ -373,7 +384,7 @@ impl Forest {
             .unwrap_or(false)
     }
 
-    fn gen_assignment(&mut self, random: &mut impl Rng, ctx: &Context) {
+    pub fn gen_assignment(&mut self, random: &mut impl Rng, ctx: &Context) {
         // Collect all valid assignment targets:
         // 1. Mutable variables directly
         // 2. Mutable refs from parent scope (for loop bodies)
@@ -429,7 +440,7 @@ impl Forest {
     }
 
     /// Returns compound assignment operators valid for the given type
-    fn get_compound_operators(&self, ty: &Type) -> Option<&'static [Operator]> {
+    pub fn get_compound_operators(&self, ty: &Type) -> Option<&'static [Operator]> {
         match ty {
             Type::Field => Some(Operator::compound_field()),
             Type::Integer(i) if i.signed => Some(Operator::compound_integer_signed()),
@@ -439,7 +450,7 @@ impl Forest {
         }
     }
 
-    fn gen_for_loop(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
+    pub fn gen_for_loop(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
         // Choose a random integer type for the loop variable
         let bits = *[8u8, 16, 32, 64].choose(random).unwrap();
         let signed = random.random_bool(0.5);
@@ -507,7 +518,7 @@ impl Forest {
         self.nodes.entry(NodeKind::ForLoop).or_default().push(idx);
     }
 
-    fn gen_if(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
+    pub fn gen_if(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
         // Get a boolean condition from existing nodes
         let Some(bool_nodes) = self.type_kinds.get(&TypeKind::Boolean) else { return };
         let Some(&condition) = bool_nodes.choose(random) else { return };
@@ -564,7 +575,7 @@ impl Forest {
         self.nodes.entry(NodeKind::If).or_default().push(idx);
     }
 
-    fn create_if_body(
+    pub fn create_if_body(
         &mut self,
         random: &mut impl Rng,
         ctx: &Context,
@@ -591,7 +602,7 @@ impl Forest {
         body
     }
 
-    fn gen_assert(&mut self, random: &mut impl Rng, ctx: &Context) {
+    pub fn gen_assert(&mut self, random: &mut impl Rng, ctx: &Context) {
         // Collect all valid boolean conditions:
         // 1. Boolean type nodes directly
         // 2. Comparison operator results (which are boolean)
@@ -620,5 +631,27 @@ impl Forest {
 
         let idx = self.graph.add_node(Node::Assert { condition, message });
         self.nodes.entry(NodeKind::Assert).or_default().push(idx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::builders::CircuitBuilder;
+
+    use super::*;
+
+    #[test]
+    pub fn test_random_forest() {
+        let ctx = Context::default();
+        let mut random = rand::rng();
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        let mut forest = Forest::default();
+        forest.random(&mut random, &ctx, &scope);
+
+        println!("{}", builder.format_circuit(&forest, &scope));
+
+        forest.save_as_dot(&std::env::current_dir().unwrap().join("test_random_forest.dot"));
     }
 }

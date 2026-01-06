@@ -1,6 +1,8 @@
+use std::fs;
+
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// Context that controls the generation of the program. It handles the probability of creating
 /// different types, maximum sizes of stuff, allow/disallow certain types, etc.
 pub struct Context {
@@ -15,6 +17,9 @@ pub struct Context {
     // This controls the size of any string type
     pub min_string_size: usize,
     pub max_string_size: usize,
+
+    // This controls the number of hashes in a raw string
+    pub max_hashes_count: usize,
 
     // This controls the number of parameters in any function
     pub min_function_parameters_count: usize,
@@ -66,6 +71,7 @@ pub struct Context {
     pub tuple_weight: usize,
     pub struct_weight: usize,
     pub lambda_weight: usize,
+    pub empty_weight: usize,
 
     // This controls the probability of creating each `Node`
     pub literal_weight: usize,
@@ -125,4 +131,11 @@ pub struct Context {
 
     // This controls the depth of the generated types
     pub max_type_depth: usize,
+}
+
+
+impl Default for Context {
+    fn default() -> Self {
+        serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap()
+    }
 }

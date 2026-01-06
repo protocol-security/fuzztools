@@ -5,5 +5,5 @@ pub mod contracts;
 mod circuit;
 mod transaction;
 
-pub use circuit::{CircuitBuilder, GeneratedCircuit};
+pub use circuit::CircuitBuilder;
 pub use transaction::TransactionBuilder;

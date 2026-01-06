@@ -24,6 +24,10 @@ It also contains a set of Solidity contracts to test on-chain, like sending tran
 
 Implements the Noir IR to generate random circuits.
 
+### TODO 
+
+- References, trait implementations, functions implementations for types and maybe std lib
+
 ## Mutations
 
 Provides the `Mutable` trait for the next types:

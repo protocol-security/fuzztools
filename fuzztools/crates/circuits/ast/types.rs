@@ -1,7 +1,5 @@
-//! Implements the Noir IR types
-
 use crate::circuits::{
-    ast::forest::Forest,
+    ast::{forest::Forest, nodes::{Node, NodeKind}},
     context::Context,
     scope::Scope,
     utils::{bernoulli, random_field_element, random_string},
@@ -24,7 +22,6 @@ pub enum TypeKind {
     Tuple,
     Struct,
     Lambda,
-    // @todo Reference
     Empty,
 }
 
@@ -102,6 +99,7 @@ pub struct Lambda {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Type {
+    #[inline(always)]
     pub fn kind(&self) -> TypeKind {
         match self {
             Type::Field => TypeKind::Field,
@@ -118,20 +116,28 @@ impl Type {
         }
     }
 
+    #[inline(always)]
     pub fn is_signed(&self) -> bool {
         matches!(self.kind(), TypeKind::Signed)
     }
 
+    #[inline(always)]
     pub fn is_unsigned(&self) -> bool {
         matches!(self.kind(), TypeKind::Unsigned)
     }
 
+    #[inline(always)]
+    pub fn can_be_mutable(&self) -> bool {
+        !matches!(self, Type::Lambda(_))
+    }
+
+    #[inline(always)]
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         match self {
             Type::Field => format!("{}Field", random_field_element(random, ctx, "bn254")),
             Type::Integer(i) => i.random_value(random, ctx),
             Type::Boolean => random.random_bool(0.5).to_string(),
-            Type::String(s) => s.random_value(random),
+            Type::String(s) => s.random_value(random, ctx),
             Type::Array(a) => a.random_value(random, ctx, scope),
             Type::Slice(s) => s.random_value(random, ctx, scope),
             Type::Tuple(t) => t.random_value(random, ctx, scope),
@@ -147,9 +153,10 @@ impl Type {
     /// - Arrays with a non-zero size and a valid sub-type
     /// - Tuples with a size greater than 1 (as otherwise they collapse to a single type) and a
     ///   valid sub-type
-    /// - Structs where all fields are valid public inputs @todo they allow empty structs wtf
+    /// - Structs where all fields are valid public inputs
     ///
     /// The rest are all invalid as public inputs.
+    #[inline(always)]
     pub fn is_valid_public_input(&self) -> bool {
         match self {
             Type::Field | Type::Integer(_) | Type::Boolean => true,
@@ -163,6 +170,7 @@ impl Type {
         }
     }
 
+    #[inline(always)]
     pub fn allows_slice(&self) -> bool {
         match self {
             Type::Field |
@@ -176,12 +184,6 @@ impl Type {
             Type::Tuple(t) => t.elements.iter().any(|e| e.allows_slice()),
             Type::Struct(s) => s.fields.iter().any(|f| f.ty.allows_slice()),
         }
-    }
-
-    /// Returns whether this type can be declared as mutable.
-    /// Lambda and Empty types cannot be mutable.
-    pub fn can_be_mutable(&self) -> bool {
-        !matches!(self, Type::Lambda(_) | Type::Empty)
     }
 }
 
@@ -226,12 +228,13 @@ impl Integer {
 }
 
 impl StringType {
-    pub fn random_value(&self, random: &mut impl Rng) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let value = random_string(random, self.size);
 
-        // @todo # and escape characters
         if self.is_raw {
-            format!("r\"{value}\"")
+            let hash_count = random.random_range(0..ctx.max_hashes_count);
+            let hashes = "#".repeat(hash_count);
+            format!("r{hashes}\"{value}\"{hashes}")
         } else {
             format!("\"{value}\"")
         }
@@ -241,6 +244,8 @@ impl StringType {
 // ────────────────────────────────────────────────────────────────────────────────
 // Complex types
 // ────────────────────────────────────────────────────────────────────────────────
+
+// @todo make it possible to create complex types from previous node expressions?
 
 impl Array {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
@@ -286,18 +291,36 @@ impl Lambda {
         let mut out = String::new();
         let mut lambda_scope = scope.clone();
         lambda_scope.inputs = self.params.clone();
+        lambda_scope.lambda_depth = scope.lambda_depth + 1;
 
         let mut body = Forest::default();
         for param in self.params.iter() {
-            body.input(param.0.clone(), param.1.clone());
+            let idx = body.input(param.0.clone(), param.1.clone());
+            body.register(idx, NodeKind::Input, &param.1, None);
+        }
+
+        // Boost weight of the return type so body nodes are more likely to match ret (and thus create more linked forest nodes)
+        let mut lambda_ctx = ctx.clone();
+        match self.ret.kind() {
+            TypeKind::Field => lambda_ctx.field_weight *= 100,
+            TypeKind::Unsigned => lambda_ctx.unsigned_weight *= 100,
+            TypeKind::Signed => lambda_ctx.signed_weight *= 100,
+            TypeKind::Boolean => lambda_ctx.boolean_weight *= 100,
+            TypeKind::String => lambda_ctx.string_weight *= 100,
+            TypeKind::Array => lambda_ctx.array_weight *= 100,
+            TypeKind::Slice => lambda_ctx.slice_weight *= 100,
+            TypeKind::Tuple => lambda_ctx.tuple_weight *= 100,
+            TypeKind::Struct => lambda_ctx.struct_weight *= 100,
+            TypeKind::Lambda => lambda_ctx.lambda_weight *= 100,
+            TypeKind::Empty => lambda_ctx.empty_weight *= 100,
         }
 
         body.random_with_bounds(
             random,
-            ctx,
+            &lambda_ctx,
             &lambda_scope,
-            ctx.min_lambda_body_size,
-            ctx.max_lambda_body_size,
+            lambda_ctx.min_lambda_body_size,
+            lambda_ctx.max_lambda_body_size,
         );
         let body_string = body.to_string();
 
@@ -319,8 +342,15 @@ impl Lambda {
             out.push_str("}\n");
         } else {
             out.push_str(format!(" -> {} {{\n", self.ret).as_str());
-            let candidates: Vec<_> =
-                body.types.get(&self.ret).into_iter().flatten().copied().collect();
+            // Only consider `Variable` and `Input` nodes as return candidates (if any)
+            let candidates: Vec<_> = body
+                .types
+                .get(&self.ret)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|&idx| matches!(body.graph[idx], Node::Variable { .. } | Node::Input { .. }))
+                .collect();
             let ret_expr = if let Some(&idx) = candidates.choose(random) {
                 body.get_expr_for_node(idx)
             } else {

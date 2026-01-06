@@ -19,9 +19,7 @@ pub enum Operator {
     Equal,
     NotEqual,
     Not,
-    Neg,
-    // @todo Ref
-    // @todo DeRef
+    Neg
 }
 
 impl Operator {
