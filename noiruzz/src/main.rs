@@ -23,6 +23,13 @@ struct Cli {
 
     #[arg(long, help = "Path to the crash directory")]
     crash_dir: Option<String>,
+
+    #[arg(
+        long,
+        default_value = "0.5",
+        help = "Target ratio for power schedule (T2/(T1+T2) < ratio to run prover/verifier stages)"
+    )]
+    target_ratio: f64,
 }
 
 fn main() -> Result<()> {
@@ -41,11 +48,12 @@ fn main() -> Result<()> {
         "{HEADER}\n{GREEN}INFO{RESET}      Seed:       {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Executions: {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Config:     {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Crash dir:  {RED}{}{RESET}\n\n",
-        cli.seed, cli.executions, config_path, crash_dir
+         {GREEN}INFO{RESET}      Crash dir:  {RED}{}{RESET}\n\
+         {GREEN}INFO{RESET}      Target p:   {RED}{}{RESET}\n\n",
+        cli.seed, cli.executions, config_path, crash_dir, cli.target_ratio
     );
 
-    let mut app = App::new(ctx, cli.executions, prelude, crash_dir)?;
+    let mut app = App::new(ctx, cli.executions, prelude, crash_dir, cli.target_ratio)?;
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
     if let Err(e) = app.run(&mut random) {

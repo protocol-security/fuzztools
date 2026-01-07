@@ -1,6 +1,6 @@
 use crate::circuits::ast::{forest::Forest, nodes::Node};
 use petgraph::{algo::toposort, graph::NodeIndex, visit::EdgeRef, Direction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl Forest {
     /// Build expression string for a node
@@ -51,86 +51,111 @@ impl Forest {
     }
 }
 
-impl std::fmt::Display for Forest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Forest {
+    /// Compute set of used (non-idle) variable nodes.
+    /// A variable is used if it has incoming edges from other nodes.
+    fn compute_used_nodes(&self) -> HashSet<NodeIndex> {
+        let mut used = HashSet::new();
+        let mut stack: Vec<NodeIndex> = Vec::new();
+
+        for idx in self.graph.node_indices() {
+            let is_root = matches!(
+                &self.graph[idx],
+                Node::ForLoop { .. } |
+                    Node::If { .. } |
+                    Node::Assert { .. } |
+                    Node::Assignment { .. }
+            ) || self.graph.edges_directed(idx, Direction::Incoming).next().is_some();
+            if is_root && used.insert(idx) {
+                stack.push(idx);
+            }
+        }
+
+        while let Some(idx) = stack.pop() {
+            for edge in self.graph.edges_directed(idx, Direction::Outgoing) {
+                if used.insert(edge.target()) {
+                    stack.push(edge.target());
+                }
+            }
+        }
+        used
+    }
+
+    /// Format forest body with specified indentation prefix
+    pub fn format_with_indent(&self, indent: &str) -> String {
         let sorted = toposort(&self.graph, None).unwrap();
         let mut expr: HashMap<usize, String> = HashMap::new();
+        let mut out = String::new();
+
+        // Compute used nodes when skip_idle_vars is enabled
+        let used_nodes =
+            if self.skip_idle_vars { self.compute_used_nodes() } else { HashSet::new() };
 
         for &idx in sorted.iter().rev() {
             match &self.graph[idx] {
                 Node::Variable { name, mutable, .. } => {
+                    // Skip idle variables when the flag is set
+                    if self.skip_idle_vars && !used_nodes.contains(&idx) {
+                        expr.insert(idx.index(), name.clone());
+                        continue;
+                    }
                     let src = &expr[&self.left(idx).unwrap().index()];
                     let mut_kw = if *mutable { "mut " } else { "" };
-                    writeln!(f, "    let {}{}: {} = {};", mut_kw, name, self.ty(idx), src)?;
+                    out.push_str(&format!(
+                        "{}let {}{}: {} = {};\n",
+                        indent,
+                        mut_kw,
+                        name,
+                        self.ty(idx),
+                        src
+                    ));
                     expr.insert(idx.index(), name.clone());
                 }
-                Node::Assignment { target, op } => {
-                    let target_expr = &expr[&target.index()];
-                    let value_expr = &expr[&self.left(idx).unwrap().index()];
-                    match op {
-                        Some(op) => writeln!(f, "    {} {}= {};", target_expr, op, value_expr)?,
-                        None => writeln!(f, "    {} = {};", target_expr, value_expr)?,
-                    }
-                    // After assignment, referencing this node gives the value
-                    expr.insert(idx.index(), value_expr.clone());
+                Node::Assignment { op } => {
+                    let (src, val) = (
+                        &expr[&self.left(idx).unwrap().index()],
+                        &expr[&self.right(idx).unwrap().index()],
+                    );
+                    let assign_op = op.map(|o| format!(" {o}")).unwrap_or_default();
+                    out.push_str(&format!("{indent}{src} {assign_op}= {val};\n"));
+                    expr.insert(idx.index(), src.clone());
                 }
                 Node::ForLoop { var, start, end, body, .. } => {
-                    // Noir for loops don't need type annotation: for tmp in START..END
-                    writeln!(f, "    for {} in {}..{} {{", var, start, end)?;
-                    // Format the body with extra indentation
-                    let body_str = body.to_string();
-                    for line in body_str.lines() {
-                        writeln!(f, "    {}", line)?;
-                    }
-                    writeln!(f, "    }}")?;
-                    // ForLoop produces unit type
+                    out.push_str(&format!("{}for {} in {}..{} {{\n", indent, var, start, end));
+                    let nested_indent = format!("{}    ", indent);
+                    out.push_str(&body.format_with_indent(&nested_indent));
+                    out.push_str(&format!("{}}}\n", indent));
                     expr.insert(idx.index(), "()".to_string());
                 }
                 Node::If { condition, then_body, else_ifs, else_body } => {
-                    // Format the if condition
                     let cond_expr = &expr[&condition.index()];
-                    writeln!(f, "    if {} {{", cond_expr)?;
-                    // Format the then body with extra indentation
-                    let then_str = then_body.to_string();
-                    for line in then_str.lines() {
-                        writeln!(f, "    {}", line)?;
-                    }
-                    write!(f, "    }}")?;
+                    out.push_str(&format!("{}if {} {{\n", indent, cond_expr));
+                    let nested_indent = format!("{}    ", indent);
+                    out.push_str(&then_body.format_with_indent(&nested_indent));
+                    out.push_str(&format!("{}}}", indent));
 
-                    // Format else-if branches
                     for (else_if_cond, else_if_body) in else_ifs {
                         let else_if_cond_expr = &expr[&else_if_cond.index()];
-                        writeln!(f, " else if {} {{", else_if_cond_expr)?;
-                        let else_if_str = else_if_body.to_string();
-                        for line in else_if_str.lines() {
-                            writeln!(f, "    {}", line)?;
-                        }
-                        write!(f, "    }}")?;
+                        out.push_str(&format!(" else if {} {{\n", else_if_cond_expr));
+                        out.push_str(&else_if_body.format_with_indent(&nested_indent));
+                        out.push_str(&format!("{}}}", indent));
                     }
 
-                    // Format else branch if present
                     if let Some(else_body) = else_body {
-                        writeln!(f, " else {{")?;
-                        let else_str = else_body.to_string();
-                        for line in else_str.lines() {
-                            writeln!(f, "    {}", line)?;
-                        }
-                        writeln!(f, "    }}")?;
+                        out.push_str(" else {\n");
+                        out.push_str(&else_body.format_with_indent(&nested_indent));
+                        out.push_str(&format!("{}}}\n", indent));
                     } else {
-                        writeln!(f)?;
+                        out.push('\n');
                     }
 
-                    // If produces unit type
                     expr.insert(idx.index(), "()".to_string());
                 }
                 Node::Assert { condition, message } => {
-                    let cond_expr = &expr[&condition.index()];
-                    match message {
-                        Some(msg) => writeln!(f, "    assert({}, {});", cond_expr, msg)?,
-                        None => writeln!(f, "    assert({});", cond_expr)?,
-                    }
-                    // Assert produces unit type
-                    expr.insert(idx.index(), "()".to_string());
+                    let cond = &expr[&condition.index()];
+                    let msg_part = message.as_ref().map(|m| format!(", {m}")).unwrap_or_default();
+                    out.push_str(&format!("{indent}assert({cond}{msg_part});\n"));
+                    expr.insert(idx.index(), "()".into());
                 }
                 _ => {
                     expr.insert(idx.index(), self.build_expr(idx, &expr));
@@ -138,6 +163,13 @@ impl std::fmt::Display for Forest {
             }
         }
 
-        Ok(())
+        out
+    }
+}
+
+impl std::fmt::Display for Forest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Default: no indentation (caller adds as needed)
+        write!(f, "{}", self.format_with_indent(""))
     }
 }

@@ -1,6 +1,3 @@
-//! This module provides a directed graph structure for representing a block of expressions, that
-//! is, the body of a function, the body of a loop, etc...
-
 use crate::circuits::ast::{
     nodes::{Node, NodeKind},
     operators::Operator,
@@ -15,6 +12,8 @@ use petgraph::{
 use std::{collections::HashMap, fmt::Write, path::Path};
 
 #[derive(Debug, Clone, Default)]
+/// This provides a directed graph structure for representing a block of expressions, that
+/// is, the body of a function, the body of a loop, etc...
 pub struct Forest {
     pub graph: StableDiGraph<Node, usize>,
     pub var_counter: usize,
@@ -25,6 +24,8 @@ pub struct Forest {
     pub operators: HashMap<Operator, Vec<NodeIndex>>,
     pub mutable_refs: HashMap<String, NodeIndex>,
     pub depth: usize,
+    pub exprs: HashMap<Type, Vec<String>>,
+    pub skip_idle_vars: bool,
 }
 
 impl Forest {
@@ -71,9 +72,10 @@ impl Forest {
         name: String,
         ty: Type,
         mutable: bool,
+        shadow: bool,
         value: NodeIndex,
     ) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Variable { name, ty, mutable });
+        let idx = self.graph.add_node(Node::Variable { name, ty, mutable, shadow });
         self.graph.add_edge(idx, value, 0);
 
         idx
@@ -145,21 +147,21 @@ impl Forest {
         idx
     }
 
-    /// Creates an assignment node for reassigning a mutable variable or a component of it.
-    /// - `target`: The variable or access chain (e.g., Variable, Index, TupleIndex, FieldAccess)
-    /// - `value`: The expression to assign
+    /// Creates an assignment node.
+    /// - `source`: The variable being assigned to (edge 0)
+    /// - `value`: The expression to assign (edge 1)
     ///
-    /// This represents statements like `x = 5`, `arr[0] = 5`, `s.field = 5`, `tuple.0 = 5`
     /// If `op` is Some, this is a compound assignment (e.g., `x += 5`)
     #[inline(always)]
     pub fn assignment(
         &mut self,
-        target: NodeIndex,
+        source: NodeIndex,
         value: NodeIndex,
         op: Option<Operator>,
     ) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Assignment { target, op });
-        self.graph.add_edge(idx, value, 0);
+        let idx = self.graph.add_node(Node::Assignment { op });
+        self.graph.add_edge(idx, source, 0); // source variable
+        self.graph.add_edge(idx, value, 1); // value expression
 
         idx
     }
@@ -317,6 +319,27 @@ impl Forest {
         if let Some(op) = op {
             self.operators.entry(op).or_default().push(idx);
         }
+
+        // Track expression strings for `Variable` and `Input` nodes (used in `Type::random_value`)
+        if matches!(kind, NodeKind::Variable | NodeKind::Input) {
+            let expr = self.get_expr_for_node(idx);
+            self.exprs.entry(ty.clone()).or_default().push(expr);
+        }
+    }
+
+    #[inline(always)]
+    pub fn find_return_candidate(&self, random: &mut impl rand::Rng, ret: &Type) -> Option<String> {
+        use rand::seq::IndexedRandom;
+        let candidates: Vec<_> = self
+            .types
+            .get(ret)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&idx| matches!(self.graph[idx], Node::Variable { .. } | Node::Input { .. }))
+            .collect();
+
+        candidates.choose(random).map(|&idx| self.get_expr_for_node(idx))
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
@@ -345,6 +368,7 @@ impl Forest {
                 Node::Operator { .. } if *e.weight() == 0 => "lhs".into(),
                 Node::Operator { .. } => "rhs".into(),
                 Node::Variable { .. } => "let".into(),
+                Node::Assignment { .. } if *e.weight() == 0 => "source".into(),
                 Node::Assignment { .. } => "value".into(),
                 Node::Call { .. } => format!("arg{}", e.weight()),
                 _ => String::new(),

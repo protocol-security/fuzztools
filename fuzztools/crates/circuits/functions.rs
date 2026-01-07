@@ -43,7 +43,7 @@ impl Function {
 impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{} {{", self.signature())?;
-        write!(f, "{}", self.body)?;
+        write!(f, "{}", self.body.format_with_indent("    "))?;
         if let Some(ret_expr) = &self.ret_expr {
             writeln!(f, "    {}", ret_expr)?;
         }

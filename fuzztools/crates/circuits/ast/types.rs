@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::circuits::{
-    ast::{forest::Forest, nodes::{Node, NodeKind}},
+    ast::{forest::Forest, nodes::NodeKind},
     context::Context,
     scope::Scope,
     utils::{bernoulli, random_field_element, random_string},
@@ -132,16 +134,22 @@ impl Type {
     }
 
     #[inline(always)]
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+    pub fn random_value(
+        &self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        exprs: &HashMap<Type, Vec<String>>,
+    ) -> String {
         match self {
             Type::Field => format!("{}Field", random_field_element(random, ctx, "bn254")),
             Type::Integer(i) => i.random_value(random, ctx),
             Type::Boolean => random.random_bool(0.5).to_string(),
             Type::String(s) => s.random_value(random, ctx),
-            Type::Array(a) => a.random_value(random, ctx, scope),
-            Type::Slice(s) => s.random_value(random, ctx, scope),
-            Type::Tuple(t) => t.random_value(random, ctx, scope),
-            Type::Struct(s) => s.random_value(random, ctx, scope),
+            Type::Array(a) => a.random_value(random, ctx, scope, exprs),
+            Type::Slice(s) => s.random_value(random, ctx, scope, exprs),
+            Type::Tuple(t) => t.random_value(random, ctx, scope, exprs),
+            Type::Struct(s) => s.random_value(random, ctx, scope, exprs),
             Type::Lambda(l) => l.random_value(random, ctx, scope),
             Type::Empty => "()".to_string(),
         }
@@ -183,6 +191,19 @@ impl Type {
             Type::Array(a) => a.ty.allows_slice(),
             Type::Tuple(t) => t.elements.iter().any(|e| e.allows_slice()),
             Type::Struct(s) => s.fields.iter().any(|f| f.ty.allows_slice()),
+        }
+    }
+
+    /// Returns true if this type contains any zero-sized arrays or slices.
+    /// Zero-sized arrays/slices in on-the-fly literals cause type inference failures in Noir.
+    #[inline(always)]
+    pub fn has_zero_sized(&self) -> bool {
+        match self {
+            Type::Array(a) => a.size == 0 || a.ty.has_zero_sized(),
+            Type::Slice(s) => s.size == 0 || s.ty.has_zero_sized(),
+            Type::Tuple(t) => t.elements.iter().any(|e| e.has_zero_sized()),
+            Type::Struct(s) => s.fields.iter().any(|f| f.ty.has_zero_sized()),
+            _ => false,
         }
     }
 }
@@ -229,7 +250,7 @@ impl Integer {
 
 impl StringType {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let value = random_string(random, self.size);
+        let value = random_string(random, self.size, self.is_raw);
 
         if self.is_raw {
             let hash_count = random.random_range(0..ctx.max_hashes_count);
@@ -245,41 +266,66 @@ impl StringType {
 // Complex types
 // ────────────────────────────────────────────────────────────────────────────────
 
-// @todo make it possible to create complex types from previous node expressions?
-
 impl Array {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+    pub fn random_value(
+        &self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        exprs: &HashMap<Type, Vec<String>>,
+    ) -> String {
         let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope, exprs)).collect();
 
         format!("[{}]", elems.join(", "))
     }
 }
 
 impl Slice {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+    pub fn random_value(
+        &self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        exprs: &HashMap<Type, Vec<String>>,
+    ) -> String {
         let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope, exprs)).collect();
 
         format!("&[{}]", elems.join(", "))
     }
 }
 
 impl Tuple {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        let elems: Vec<_> =
-            self.elements.iter().map(|e| e.random_value(random, ctx, scope)).collect();
+    pub fn random_value(
+        &self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        exprs: &HashMap<Type, Vec<String>>,
+    ) -> String {
+        let elems: Vec<_> = self
+            .elements
+            .iter()
+            .map(|elem_ty| elem_ty.random_value(random, ctx, scope, exprs))
+            .collect();
 
         format!("({})", elems.join(", "))
     }
 }
 
 impl Struct {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+    pub fn random_value(
+        &self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+        exprs: &HashMap<Type, Vec<String>>,
+    ) -> String {
         let fields: Vec<_> = self
             .fields
             .iter()
-            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope)))
+            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope, exprs)))
             .collect();
 
         format!("{} {{ {} }}", self.name, fields.join(", "))
@@ -288,79 +334,59 @@ impl Struct {
 
 impl Lambda {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        let mut out = String::new();
-        let mut lambda_scope = scope.clone();
-        lambda_scope.inputs = self.params.clone();
-        lambda_scope.lambda_depth = scope.lambda_depth + 1;
+        let lambda_scope = Scope {
+            inputs: self.params.iter().map(|(n, t)| (n.clone(), t.clone(), false)).collect(),
+            lambda_depth: scope.lambda_depth + 1,
+            ..scope.clone()
+        };
 
         let mut body = Forest::default();
-        for param in self.params.iter() {
-            let idx = body.input(param.0.clone(), param.1.clone());
-            body.register(idx, NodeKind::Input, &param.1, None);
+        for (name, ty) in &self.params {
+            let idx = body.input(name.clone(), ty.clone());
+            body.register(idx, NodeKind::Input, ty, None);
         }
 
-        // Boost weight of the return type so body nodes are more likely to match ret (and thus create more linked forest nodes)
-        let mut lambda_ctx = ctx.clone();
-        match self.ret.kind() {
-            TypeKind::Field => lambda_ctx.field_weight *= 100,
-            TypeKind::Unsigned => lambda_ctx.unsigned_weight *= 100,
-            TypeKind::Signed => lambda_ctx.signed_weight *= 100,
-            TypeKind::Boolean => lambda_ctx.boolean_weight *= 100,
-            TypeKind::String => lambda_ctx.string_weight *= 100,
-            TypeKind::Array => lambda_ctx.array_weight *= 100,
-            TypeKind::Slice => lambda_ctx.slice_weight *= 100,
-            TypeKind::Tuple => lambda_ctx.tuple_weight *= 100,
-            TypeKind::Struct => lambda_ctx.struct_weight *= 100,
-            TypeKind::Lambda => lambda_ctx.lambda_weight *= 100,
-            TypeKind::Empty => lambda_ctx.empty_weight *= 100,
-        }
+        // Boost return type weight
+        let mut lambda_ctx = *ctx;
+        boost_type_weight(&mut lambda_ctx, self.ret.kind());
 
         body.random_with_bounds(
             random,
             &lambda_ctx,
             &lambda_scope,
-            lambda_ctx.min_lambda_body_size,
-            lambda_ctx.max_lambda_body_size,
+            ctx.min_lambda_body_size,
+            ctx.max_lambda_body_size,
+            false,
         );
-        let body_string = body.to_string();
 
-        out.push_str(
-            format!(
-                "|{}|",
-                self.params
-                    .iter()
-                    .map(|(name, ty)| format!("{}: {}", name, ty))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-            .as_str(),
-        );
+        let params_str =
+            self.params.iter().map(|(n, t)| format!("{n}: {t}")).collect::<Vec<_>>().join(", ");
+        let body_str = body.format_with_indent("        ");
 
         if matches!(*self.ret, Type::Empty) {
-            out.push_str(" {\n");
-            out.push_str(&body_string);
-            out.push_str("}\n");
+            format!("|{params_str}| {{\n{body_str}}}")
         } else {
-            out.push_str(format!(" -> {} {{\n", self.ret).as_str());
-            // Only consider `Variable` and `Input` nodes as return candidates (if any)
-            let candidates: Vec<_> = body
-                .types
-                .get(&self.ret)
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|&idx| matches!(body.graph[idx], Node::Variable { .. } | Node::Input { .. }))
-                .collect();
-            let ret_expr = if let Some(&idx) = candidates.choose(random) {
-                body.get_expr_for_node(idx)
-            } else {
-                self.ret.random_value(random, ctx, &lambda_scope)
-            };
-            out.push_str(&body_string);
-            out.push_str(format!("\n{}\n}}", ret_expr).as_str());
+            let ret_expr = body
+                .find_return_candidate(random, &self.ret)
+                .unwrap_or_else(|| self.ret.random_value(random, ctx, &lambda_scope, &body.exprs));
+            format!("|{params_str}| -> {} {{\n{body_str}    {ret_expr}\n}}", self.ret)
         }
+    }
+}
 
-        out
+fn boost_type_weight(ctx: &mut Context, kind: TypeKind) {
+    match kind {
+        TypeKind::Field => ctx.field_weight *= 100,
+        TypeKind::Unsigned => ctx.unsigned_weight *= 100,
+        TypeKind::Signed => ctx.signed_weight *= 100,
+        TypeKind::Boolean => ctx.boolean_weight *= 100,
+        TypeKind::String => ctx.string_weight *= 100,
+        TypeKind::Array => ctx.array_weight *= 100,
+        TypeKind::Slice => ctx.slice_weight *= 100,
+        TypeKind::Tuple => ctx.tuple_weight *= 100,
+        TypeKind::Struct => ctx.struct_weight *= 100,
+        TypeKind::Lambda => ctx.lambda_weight *= 100,
+        TypeKind::Empty => ctx.empty_weight *= 100,
     }
 }
 

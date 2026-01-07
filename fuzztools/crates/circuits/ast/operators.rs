@@ -1,5 +1,3 @@
-//! Implements the Noir IR operators
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operator {
     Add,
@@ -19,7 +17,7 @@ pub enum Operator {
     Equal,
     NotEqual,
     Not,
-    Neg
+    Neg,
 }
 
 impl Operator {
@@ -105,7 +103,6 @@ impl Operator {
         matches!(self, Self::Neg | Self::Not)
     }
 
-    /// Returns true if this operator can be used in compound assignment (e.g., +=, -=)
     pub const fn is_compound_assignable(&self) -> bool {
         matches!(
             self,
@@ -122,12 +119,10 @@ impl Operator {
         )
     }
 
-    /// Returns compound assignment operators valid for Field type
     pub const fn compound_field() -> &'static [Operator] {
         &[Self::Add, Self::Sub, Self::Mul, Self::Div]
     }
 
-    /// Returns compound assignment operators valid for signed integers
     pub const fn compound_integer_signed() -> &'static [Operator] {
         &[
             Self::Add,
@@ -143,7 +138,6 @@ impl Operator {
         ]
     }
 
-    /// Returns compound assignment operators valid for unsigned integers
     pub const fn compound_integer_unsigned() -> &'static [Operator] {
         &[
             Self::Add,
@@ -159,7 +153,6 @@ impl Operator {
         ]
     }
 
-    /// Returns compound assignment operators valid for booleans
     pub const fn compound_boolean() -> &'static [Operator] {
         &[Self::And, Self::Or, Self::Xor]
     }

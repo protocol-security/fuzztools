@@ -29,41 +29,60 @@ pub fn bernoulli(random: &mut impl Rng, prob: f64) -> bool {
     random.random_range(0.0..1.0) < prob
 }
 
-/// The `boundary_value_probability` value indicates the probability of choosing
-/// a boundary value, i.e. `[0, 1]` or `[0, 1, Fp - 1]` if
-/// `exclude_prime` is `false`. The `small_upper_bound_probability` value indicates the
-/// probability of choosing a small integer, i.e. from the domain `[0..=small_upper_bound]`.
+/// Generate a random field element with configurable distribution:
+/// - `boundary_value_probability`: chance of [0, 1, Fp-1]
+/// - `small_value_probability`: chance of [0..max_small_value]
+/// - Otherwise: uniform random in [0..Fp-1]
 pub fn random_field_element(random: &mut impl Rng, ctx: &Context, curve: &str) -> U256 {
     let prime = curve_prime(curve);
-    let exclude_prime = bernoulli(random, ctx.exclude_prime_probability);
 
     // Choose from boundary values
     if bernoulli(random, ctx.boundary_value_probability) {
-        if exclude_prime {
-            // Choose from `[0, 1]`
-            *[U256::ZERO, U256::ONE].choose(random).unwrap()
-        } else {
-            // Choose from `[0, 1, Fp - 1]`
-            *[U256::ZERO, U256::ONE, prime - U256::ONE].choose(random).unwrap()
-        }
+        *[U256::ZERO, U256::ONE, prime - U256::ONE].choose(random).unwrap()
+    } else if bernoulli(random, ctx.small_value_probability) {
+        // Choose from small values
+        U256::from(random.random_range(0..=ctx.max_small_value))
     } else {
-        // Choose from `[0..=small_upper_bound]`
-        if bernoulli(random, ctx.small_upper_bound_probability) {
-            U256::from(random.random_range(0..=ctx.max_small_upper_bound))
-        } else {
-            // Choose from `[0..=Fp - 1]`
-            U256::random(random) % prime
-        }
+        // Uniform random in field
+        U256::random(random) % prime
     }
 }
 
 pub const CHARACTERS: [&str; 58] = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
     "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l",
-    "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "\r", "\n", "\t", "\0", "\"", "\\"
+    "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "\\r", "\\n", "\\t",
+    "\\0", "\\\"", "\\\\",
 ];
 
+/// Generate a random string of the given size.
+/// - If `is_raw` is true, escape sequences count as their actual length (2 chars for `\r`, `\n`,
+///   etc.)
+/// - If `is_raw` is false, escape sequences count as 1 character (representing a single logical
+///   char)
 #[inline(always)]
-pub fn random_string(rng: &mut impl Rng, size: usize) -> String {
-    (0..size).map(|_| *CHARACTERS.choose(rng).unwrap()).collect()
+pub fn random_string(rng: &mut impl Rng, size: usize, is_raw: bool) -> String {
+    if is_raw {
+        let mut result = String::new();
+        let mut actual_len = 0;
+        while actual_len < size {
+            let remaining = size - actual_len;
+            // If only 1 char remaining, only pick single-char options
+            let ch = if remaining == 1 {
+                CHARACTERS[rng.random_range(0..52)]
+            } else {
+                *CHARACTERS.choose(rng).unwrap()
+            };
+            result.push_str(ch);
+            actual_len += ch.len();
+        }
+        result
+    } else {
+        let mut result = String::new();
+        for _ in 0..size {
+            let ch = *CHARACTERS.choose(rng).unwrap();
+            result.push_str(ch);
+        }
+        result
+    }
 }

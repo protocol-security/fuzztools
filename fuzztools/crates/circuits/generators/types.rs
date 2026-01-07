@@ -53,11 +53,9 @@ impl Type {
     /// - Step 3: Generate(2) -> Field -> slots=[None, None, Some(Field), None]
     /// - Step 4: Generate(3) -> bool -> slots=[None, None, Some(Field), Some(bool)]
     /// - Step 5: FinalizeTuple(1) -> slots=[None, Some(Tuple), ...]
-    /// Step 6:
-    ///              FinalizeArray(0) -> slots=[Some(Array<Tuple>), ...]
+    /// - Step 6: FinalizeArray(0) -> slots=[Some(Array<Tuple>), ...]
     ///
-    /// Done!
-    ///              Return slots[0]
+    /// - Done! Return slots[0]
     ///
     /// If you do not understand something, just ask claude :D
     pub fn random(
@@ -143,8 +141,12 @@ impl Type {
             (TypeKind::String, ctx.string_weight),
             (TypeKind::Array, ctx.array_weight),
             (TypeKind::Tuple, ctx.tuple_weight),
-            (TypeKind::Empty, ctx.empty_weight),
         ];
+
+        // Empty (Unit) type is not valid for main inputs/returns
+        if location != TypeLocation::Main {
+            available.push((TypeKind::Empty, ctx.empty_weight));
+        }
 
         if location.allows_slice() {
             available.push((TypeKind::Slice, ctx.slice_weight));
@@ -166,7 +168,7 @@ impl Type {
             TypeKind::String => {
                 slots[slot] = Some(Type::String(StringType::random(random, ctx, location)))
             }
-            TypeKind::Array => {
+            kind @ (TypeKind::Array | TypeKind::Slice) => {
                 let inner = slots.len();
 
                 // Reserve a slot for the inner type
@@ -176,32 +178,18 @@ impl Type {
                     if location == TypeLocation::Main { 1 } else { ctx.min_element_count };
                 let size = random.random_range(min_size..ctx.max_element_count);
 
-                // So that we assemble the `Array` once we trigger this work item
-                work.push_front(WorkItem::FinalizeArray { slot, inner, size });
-
-                // But first, we need to generate the inner type
-                work.push_front(WorkItem::Generate {
-                    slot: inner,
-                    depth: depth + 1,
-                    location: location.transition_to_array_or_slice(),
+                // So that we assemble the `Array`/`Slice` once we trigger this work item
+                work.push_front(match kind {
+                    TypeKind::Array => WorkItem::FinalizeArray { slot, inner, size },
+                    TypeKind::Slice => WorkItem::FinalizeSlice { slot, inner, size },
+                    _ => unreachable!(),
                 });
-            }
-            TypeKind::Slice => {
-                let inner = slots.len();
-
-                // Reserve a slot for the inner type
-                slots.push(None);
-
-                let size = random.random_range(ctx.min_element_count..ctx.max_element_count);
-
-                // So that we assemble the `Slice` once we trigger this work item
-                work.push_front(WorkItem::FinalizeSlice { slot, inner, size });
 
                 // But first, we need to generate the inner type
                 work.push_front(WorkItem::Generate {
                     slot: inner,
                     depth: depth + 1,
-                    location: location.transition_to_array_or_slice(),
+                    location: location.into_nested(),
                 });
             }
             TypeKind::Tuple => {
@@ -209,22 +197,21 @@ impl Type {
                 let min_count = ctx.min_element_count.max(2);
                 let count =
                     random.random_range(min_count..ctx.max_element_count.max(min_count + 1));
-
                 let first = slots.len();
 
                 // Reserve slots for the inner types
-                let inners: Vec<usize> = (0..count).map(|i| first + i).collect();
-                slots.extend((0..count).map(|_| None));
+                let inners: Vec<usize> = (first..first + count).collect();
+                slots.resize(first + count, None);
 
                 // So that we assemble the `Tuple` once we trigger this work item
                 work.push_front(WorkItem::FinalizeTuple { slot, inners: inners.clone() });
 
                 // But first, we need to generate the inner types
-                for &i in &inners {
+                for i in inners {
                     work.push_front(WorkItem::Generate {
                         slot: i,
                         depth: depth + 1,
-                        location: location.transition_to_tuple(),
+                        location: location.into_tuple(),
                     });
                 }
             }
@@ -233,13 +220,11 @@ impl Type {
             }
             TypeKind::Lambda => {
                 let count = random.random_range(0..ctx.max_function_parameters_count);
-
                 let first = slots.len();
 
                 // Reserve slots for the parameter types
-                let inners: Vec<usize> = (0..count).map(|i| first + i).collect();
-                slots.extend((0..count).map(|_| None));
-
+                let inners: Vec<usize> = (first..first + count).collect();
+                slots.resize(first + count, None);
                 let ret = slots.len();
                 slots.push(None);
 
@@ -247,7 +232,7 @@ impl Type {
                 work.push_front(WorkItem::FinalizeLambda { slot, inners: inners.clone(), ret });
 
                 // But first, we need to generate the parameter types
-                for &i in &inners {
+                for i in inners {
                     work.push_front(WorkItem::Generate {
                         slot: i,
                         depth: depth + 1,
@@ -318,41 +303,41 @@ impl StructField {
 }
 
 impl TypeLocation {
-    fn transition_to_array_or_slice(&self) -> Self {
+    /// Transition when entering array/slice element type
+    #[inline(always)]
+    fn into_nested(self) -> Self {
         match self {
-            Self::Main => Self::Main,           // Main stays Main forever
-            Self::Default => Self::Nested,      // Default -> Nested
-            Self::Nested => Self::Nested,       // Stay Nested (can't re-enter)
-            Self::TupleElement => Self::Nested, // TupleElement -> Nested
-            Self::TupleNested => Self::Nested,  // One-time transition to Nested (can't re-enter)
+            Self::Main => Self::Main,
+            _ => Self::Nested,
         }
     }
 
-    /// Child location for tuple element types
-    fn transition_to_tuple(&self) -> Self {
+    /// Transition when entering tuple element type
+    #[inline(always)]
+    fn into_tuple(self) -> Self {
         match self {
-            Self::Main => Self::Main,                 // Main stays Main forever
-            Self::Default => Self::TupleElement,      // Default -> TupleElement
-            Self::Nested => Self::TupleNested,        // Nested -> TupleNested
-            Self::TupleElement => Self::TupleElement, /* TupleElement -> TupleElement (can't */
-            // re-enter)
-            Self::TupleNested => Self::TupleNested, // Stay TupleNested
+            Self::Main => Self::Main,
+            Self::Default => Self::TupleElement,
+            Self::Nested => Self::TupleNested,
+            other => other, // TupleElement/TupleNested stay the same
         }
     }
 
-    fn allows_slice(&self) -> bool {
-        *self == Self::Default || *self == Self::TupleElement
+    #[inline(always)]
+    fn allows_slice(self) -> bool {
+        matches!(self, Self::Default | Self::TupleElement)
     }
 
-    fn allows_lambda(&self, scope: &Scope, ctx: &Context) -> bool {
-        *self != Self::Main && scope.lambda_depth < ctx.max_type_depth
+    #[inline(always)]
+    fn allows_lambda(self, scope: &Scope, ctx: &Context) -> bool {
+        self != Self::Main && scope.lambda_depth < ctx.max_type_depth
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::builders::CircuitBuilder;
     use super::*;
+    use crate::builders::CircuitBuilder;
 
     #[test]
     fn test_type_generation_default() {
@@ -364,19 +349,6 @@ mod tests {
         for _ in 0..25 {
             let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
             println!("{}", ty);
-        }
-    }
-
-    #[test]
-    fn test_type_random_value() {
-        let ctx = Context::default();
-        let mut random = rand::rng();
-        let builder = CircuitBuilder::default();
-        let scope = builder.create_scope(&mut random, &ctx);
-
-        for _ in 0..25 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
-            println!("{} = {}", ty, ty.random_value(&mut random, &ctx, &scope));
         }
     }
 

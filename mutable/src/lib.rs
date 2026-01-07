@@ -7,10 +7,10 @@ use quote::quote;
 use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Type};
 
 fn is_option(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            return segment.ident == "Option";
-        }
+    if let Type::Path(type_path) = ty &&
+        let Some(segment) = type_path.path.segments.last()
+    {
+        return segment.ident == "Option";
     }
     false
 }

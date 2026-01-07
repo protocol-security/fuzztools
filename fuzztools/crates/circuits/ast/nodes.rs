@@ -28,7 +28,7 @@ pub enum Node {
     Input { name: String, ty: Type },
 
     /// A variable node, `a`, `b`, `c`, etc...
-    Variable { name: String, ty: Type, mutable: bool },
+    Variable { name: String, ty: Type, mutable: bool, shadow: bool },
 
     /// A literal value of the given type, `23`, `false`, `"hello"`, etc...
     Literal { value: String, ty: Type },
@@ -52,10 +52,13 @@ pub enum Node {
     Cast { target: Type },
 
     /// An assignment to a mutable variable or a component of it (e.g., `x = 5`, `arr[0] = 5`,
-    /// `s.field = 5`). Edge 0 points to the value expression and the `target` field stores the
-    /// NodeIndex of the variable or access chain being assigned to.
+    /// `s.field = 5`).
+    /// - Edge 0 points to the source variable being assigned to.
+    /// - Edge 1 points to the value expression.
+    ///
     /// If `op` is Some, this is a compound assignment (e.g., `x += 5`, `x -= 5`).
-    Assignment { target: NodeIndex, op: Option<Operator> },
+    /// After assignment, a new Variable node with the same name is created pointing to this node.
+    Assignment { op: Option<Operator> },
 
     /// A for loop statement: `for var in start..end { body }`.
     ForLoop { var: String, ty: Type, start: String, end: String, body: Box<Forest> },
@@ -99,16 +102,17 @@ impl Node {
     #[inline(always)]
     pub fn color(&self) -> &'static str {
         match self {
-            Self::Input { .. } => "#da542cff",
-            Self::Literal { .. } => "#69c5eaff",
-            Self::Variable { .. } => "#6bd85aff",
+            Self::Input { .. } => "#dc4e23ff",
+            Self::Literal { .. } => "#24b3ecff",
+            Self::Variable { shadow: false, .. } => "#6bd85aff",
+            Self::Variable { shadow: true, .. } => "#4a9640ff",
             Self::Operator { op, .. } if op.is_unary() => "#ffa500",
             Self::Operator { .. } => "#ffd700",
-            Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#825d63ff",
-            Self::Call { .. } => "#c874c8ff",
+            Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#fe8fa2ff",
+            Self::Call { .. } => "#e22be2ff",
             Self::Cast { .. } => "#4f47a6ff",
-            Self::Assignment { .. } => "#c1009bff",
-            Self::ForLoop { .. } => "#1ebfffff",
+            Self::Assignment { .. } => "#8a006dff",
+            Self::ForLoop { .. } => "#115976ff",
             Self::If { .. } => "#005a00ff",
             Self::Assert { .. } => "#a62c00ff",
         }
@@ -125,18 +129,16 @@ impl std::fmt::Display for Node {
             Self::Index { value } => write!(f, "[{}]", value),
             Self::TupleIndex { value } => write!(f, ".{}", value),
             Self::FieldAccess { name } => write!(f, ".{}", name),
-            Self::Call { name, ret } => write!(f, "{}(..) -> {}", name, ret),
+            Self::Call { name, .. } => write!(f, "{}()", name),
             Self::Cast { target } => write!(f, "as {}", target),
             Self::Assignment { op: Some(op), .. } => write!(f, "{}=", op),
             Self::Assignment { op: None, .. } => write!(f, "="),
-            Self::ForLoop { var, ty, .. } => write!(f, "for {}: {} in ..", var, ty),
-            Self::If { else_ifs, else_body, .. } => {
-                let else_if_count = else_ifs.len();
-                let has_else = else_body.is_some();
-                write!(f, "if (+{} else if, else={})", else_if_count, has_else)
+            Self::ForLoop { .. } => write!(f, "for"),
+            Self::If { .. } => {
+                write!(f, "if")
             }
             Self::Assert { .. } => {
-                 write!(f, "assert(...)")
+                write!(f, "assert")
             }
         }
     }
