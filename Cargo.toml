@@ -20,9 +20,9 @@ resolver = "2"
 # @todo rust.missing_debug_implementations = "warn"
 # @todo rust.missing_docs = "warn"
 rust.rust_2018_idioms = { level = "deny", priority = -1 }
+rust.rust_2024_incompatible_pat = "warn"
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
-rust.rust_2024_incompatible_pat = "warn"
 rustdoc.all = "warn"
 
 [workspace.lints.clippy]
@@ -69,9 +69,9 @@ option_as_ref_cloned = "warn"
 or_fun_call = "warn"
 path_buf_push_overwrite = "warn"
 read_zero_byte_vec = "warn"
-result_large_err = "allow"
 redundant_clone = "warn"
 redundant_else = "warn"
+result_large_err = "allow"
 single_char_pattern = "warn"
 string_lit_as_bytes = "warn"
 string_lit_chars_any = "warn"
@@ -94,11 +94,12 @@ while_float = "warn"
 zero_sized_map_values = "warn"
 
 # Mature lints, taken from https://github.com/paradigmxyz/reth/blob/main/Cargo.toml
-field_reassign_with_default = "allow"
 as_ptr_cast_mut = "allow"
 cognitive_complexity = "allow"
+collapsible_if = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
+field_reassign_with_default = "allow"
 future_not_send = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
@@ -106,7 +107,6 @@ redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
 too_long_first_doc_paragraph = "allow"
-collapsible_if = "allow"
 use_self = "allow"
 
 # Speed up compilation time for dev builds by reducing emitted debug info.
@@ -137,29 +137,29 @@ panic = "abort"
 codegen-units = 1
 
 [workspace.dependencies]
-rand = { version = "0.9.0" }
+afl = "*"
 alloy = { git = "https://github.com/alloy-rs/alloy.git", features = ["full"] }
-clap = { version = "4.5.48", features = ["derive"] }
-paste = { version = "1.0" }
 alloy-rlp = "0.3.12"
-hex = "0.4.3"
-tokio = { version = "1.0", features = ["full"] }
-thiserror = "2.0.17"
-futures = "0.3.31"
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy.git", features = ["secp256k1"] }
 anyhow = "1.0.100"
-syn = "2.0.107"
-quote = "1.0.41"
-rayon = "1.11.0"
-proc-macro2 = "1.0.101"
+clap = { version = "4.5.48", features = ["derive"] }
 crossbeam = "0.8"
-sha2 = "0.10"
-tempfile = "3.20"
+futures = "0.3.31"
+hex = "0.4.3"
+paste = { version = "1.0" }
+petgraph = { version = "0.8.3", features = ["rayon", "generate"] }
+proc-macro2 = "1.0.101"
+quote = "1.0.41"
+rand = { version = "0.9.0" }
+rayon = "1.11.0"
+reqwest = "0.12.25"
 serde = "1.0.228"
 serde_json = "1.0.145"
-reqwest = "0.12.25"
-petgraph = { version = "0.8.3", features = ["rayon", "generate"] }
-afl = "*"
-alloy-signer-local = { git = "https://github.com/alloy-rs/alloy.git", features = ["secp256k1"] }
+sha2 = "0.10"
+syn = "2.0.107"
+tempfile = "3.20"
+thiserror = "2.0.17"
+tokio = { version = "1.0", features = ["full"] }
 
 # Local dependencies
 fuzztools = { path = "fuzztools" }
