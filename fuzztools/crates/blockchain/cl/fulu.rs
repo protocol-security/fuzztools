@@ -6,7 +6,7 @@ use alloy::primitives::FixedBytes;
 use mutable::Mutable;
 use rand::Rng;
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,

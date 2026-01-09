@@ -10,10 +10,7 @@ use crate::circuits::{
     scope::Scope,
 };
 use petgraph::graph::NodeIndex;
-use rand::{
-    seq::{IndexedRandom, IteratorRandom},
-    Rng,
-};
+use rand::{seq::IndexedRandom, Rng};
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Forest generation
@@ -29,6 +26,8 @@ impl Forest {
             ctx.max_expression_count,
             false,
         );
+
+        self.set_return_expression(random, ctx, scope);
     }
 
     pub fn random_with_bounds(
@@ -46,11 +45,7 @@ impl Forest {
             .functions
             .iter()
             .map(|f| {
-                (
-                    f.name.clone(),
-                    f.params.iter().map(|(_, ty)| ty.clone()).collect(),
-                    f.ret.clone().unwrap_or(Type::Empty),
-                )
+                (f.name.clone(), f.params.iter().map(|(_, ty)| ty.clone()).collect(), f.ret.clone())
             })
             .collect();
 
@@ -67,9 +62,7 @@ impl Forest {
             choices.push((StatementKind::Expression, ctx.operator_weight * 2));
 
             // Allow function/lambda calls if we have callables
-            if has_nodes &&
-                (!functions.is_empty() || self.type_kinds.contains_key(&TypeKind::Lambda))
-            {
+            if has_nodes && (!functions.is_empty() || !self.callables.is_empty()) {
                 choices.push((StatementKind::Call, ctx.call_weight));
             }
             // Allow assignments if we have mutable variables
@@ -117,10 +110,9 @@ impl Forest {
     // ────────────────────────────────────────────────────────────────────────────────
 
     /// Generate a complete expression tree and assign it to a variable
+    /// If `scope.type_bias` is set, generation is biased towards those types
     pub fn gen_expression(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        let ctx = if self.type_kinds.get(&TypeKind::Lambda).map(|l| l.len()).unwrap_or_default() <
-            ctx.max_lambda_count
-        {
+        let ctx = if self.callables.len() < ctx.max_lambda_count {
             *ctx
         } else {
             let mut ctx = *ctx;
@@ -128,8 +120,26 @@ impl Forest {
             ctx
         };
 
-        let ty = Type::random(random, &ctx, scope, TypeLocation::Default);
-        let expr_idx = self.build_expr_tree(random, &ctx, scope, &ty, ctx.max_expr_depth);
+        // If we have bias and existing nodes of biased types, sometimes pick one directly
+        let ty = if scope.type_bias.is_empty() {
+            Type::random(random, &ctx, scope, TypeLocation::Default)
+        } else {
+            // Try to pick an existing biased type we already have nodes for
+            let biased_types: Vec<_> = self
+                .types
+                .keys()
+                .filter(|t| scope.type_bias.contains(&t.kind()))
+                .cloned()
+                .collect();
+
+            if let Some(ty) = biased_types.choose(random) {
+                ty.clone()
+            } else {
+                Type::random(random, &ctx, scope, TypeLocation::Default)
+            }
+        };
+
+        let expr_idx = self.build_expr_tree(random, &ctx, scope, &ty, 0);
 
         let name = self.next_var();
         let var_idx = self.variable(
@@ -139,7 +149,7 @@ impl Forest {
             false,
             expr_idx,
         );
-        self.register(var_idx, NodeKind::Variable, &ty, None);
+        self.register(random, var_idx, NodeKind::Variable, &ty, None);
     }
 
     /// Build an expression tree of the given type
@@ -151,8 +161,8 @@ impl Forest {
         ty: &Type,
         depth: usize,
     ) -> NodeIndex {
-        // At depth 0 or with leaf probability, generate a leaf
-        if depth == 0 || random.random_bool(ctx.leaf_probability) {
+        // We limit the depth of the expression tree to avoid infinite recursion
+        if depth >= ctx.max_expr_depth || random.random_bool(ctx.leaf_probability) {
             return self.build_leaf(random, ctx, scope, ty);
         }
 
@@ -167,15 +177,12 @@ impl Forest {
         }
 
         // Operators for primitive types
-        match ty.kind() {
-            TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned | TypeKind::Boolean => {
-                choices.push((
-                    ExprKind::UnaryOp,
-                    (ctx.operator_weight as f64 * ctx.unary_probability) as usize,
-                ));
-                choices.push((ExprKind::BinaryOp, ctx.operator_weight));
-            }
-            _ => {}
+        if self.is_primitive(ty) {
+            choices.push((
+                ExprKind::UnaryOp,
+                (ctx.operator_weight as f64 * ctx.unary_probability) as usize,
+            ));
+            choices.push((ExprKind::BinaryOp, ctx.operator_weight));
         }
 
         // Index/TupleIndex/FieldAccess/Cast for primitive types without zero-sized components
@@ -185,7 +192,7 @@ impl Forest {
             choices.push((ExprKind::FieldAccess, ctx.field_access_weight));
         }
 
-        // Cast only for Field/Integer targets (Bool → Field/Integer, Field → Integer)
+        // Cast only for Field/Integer targets (Field ← unsigned/bool, Integer ← int/Field/bool)
         if matches!(ty, Type::Field | Type::Integer(_)) {
             choices.push((ExprKind::Cast, ctx.cast_weight));
         }
@@ -217,7 +224,7 @@ impl Forest {
         }
 
         // Generate a new literal (don't register in types - literals are not for reuse)
-        self.literal(ty.random_value(random, ctx, scope, &self.exprs), ty.clone())
+        self.literal(ty.random_value(random, ctx, scope), ty.clone())
     }
 
     /// Get nodes of a type that can be reused (only Variable and Input nodes)
@@ -254,9 +261,9 @@ impl Forest {
         };
 
         let op = *ops.choose(random).unwrap();
-        let inner = self.build_expr_tree(random, ctx, scope, ty, depth - 1);
+        let inner = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
         let idx = self.operator(op, ty.clone(), inner, None);
-        self.register(idx, NodeKind::Operator, ty, Some(op));
+        self.register(random, idx, NodeKind::Operator, ty, Some(op));
         idx
     }
 
@@ -294,19 +301,19 @@ impl Forest {
         // Try to use mixed types with casts
         if depth > 0 && random.random_bool(ctx.mixed_types_probability) {
             if let Some((left, right)) =
-                self.build_mixed_operands(random, ctx, scope, ty, depth - 1)
+                self.build_mixed_operands(random, ctx, scope, ty, depth + 1)
             {
                 let idx = self.operator(op, ty.clone(), left, Some(right));
-                self.register(idx, NodeKind::Operator, ty, Some(op));
+                self.register(random, idx, NodeKind::Operator, ty, Some(op));
                 return idx;
             }
         }
 
         // Fall back to same-type operands
-        let left = self.build_expr_tree(random, ctx, scope, ty, depth - 1);
-        let right = self.build_expr_tree(random, ctx, scope, ty, depth - 1);
+        let left = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
+        let right = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
         let idx = self.operator(op, ty.clone(), left, Some(right));
-        self.register(idx, NodeKind::Operator, ty, Some(op));
+        self.register(random, idx, NodeKind::Operator, ty, Some(op));
         idx
     }
 
@@ -319,61 +326,73 @@ impl Forest {
         target_ty: &Type,
         depth: usize,
     ) -> Option<(NodeIndex, NodeIndex)> {
-        let castable = self.get_types_castable_to(target_ty);
-        if castable.is_empty() {
+        let castable_kinds = self.get_type_kinds_castable_to(target_ty);
+        if castable_kinds.is_empty() {
             return None;
         }
 
-        let left = self.build_operand_maybe_cast(random, ctx, scope, target_ty, &castable, depth);
-        let right = self.build_operand_maybe_cast(random, ctx, scope, target_ty, &castable, depth);
+        let left =
+            self.build_operand_maybe_cast(random, ctx, scope, target_ty, &castable_kinds, depth);
+        let right =
+            self.build_operand_maybe_cast(random, ctx, scope, target_ty, &castable_kinds, depth);
         Some((left, right))
     }
 
-    #[inline(always)]
     fn build_operand_maybe_cast(
         &mut self,
         random: &mut impl Rng,
         ctx: &Context,
         scope: &Scope,
         target_ty: &Type,
-        castable: &[Type],
+        castable_kinds: &[TypeKind],
         depth: usize,
     ) -> NodeIndex {
-        let ty = if random.random_bool(0.5) {
-            target_ty.clone()
+        if let Some(kind) = castable_kinds.choose(random) {
+            // Pick a random existing type of this kind
+            let ty = self
+                .type_kinds
+                .get(kind)
+                .and_then(|indices| indices.choose(random))
+                .map(|&idx| self.ty(idx))
+                .unwrap_or_else(|| target_ty.clone());
+
+            let expr = self.build_expr_tree(random, ctx, scope, &ty, depth);
+            if ty == *target_ty {
+                expr
+            } else {
+                let cast_idx = self.cast(expr, target_ty.clone());
+                self.register(random, cast_idx, NodeKind::Cast, target_ty, None);
+                cast_idx
+            }
         } else {
-            castable.choose(random).cloned().unwrap_or_else(|| target_ty.clone())
-        };
-        let expr = self.build_expr_tree(random, ctx, scope, &ty, depth);
-        if ty == *target_ty {
-            expr
-        } else {
-            let cast_idx = self.cast(expr, target_ty.clone());
-            self.register(cast_idx, NodeKind::Cast, target_ty, None);
-            cast_idx
+            self.build_expr_tree(random, ctx, scope, target_ty, depth)
         }
     }
 
-    /// Get types that can be safely cast to the target type
-    /// Rules: Field → any Integer, Bool → Field/Integer
-    fn get_types_castable_to(&self, target: &Type) -> Vec<Type> {
-        let mut result = Vec::new();
+    /// - Field ← unsigned integers, bool
+    /// - Integer ← other integers, Field, bool
+    /// - Bool cannot be cast to
+    fn get_type_kinds_castable_to(&self, target: &Type) -> Vec<TypeKind> {
+        let mut result = vec![];
 
         match target {
             Type::Field => {
-                // Bool can be cast to Field
-                result.push(Type::Boolean);
+                // Field ← unsigned integers, bool
+                result.push(TypeKind::Boolean);
+                result.push(TypeKind::Unsigned);
             }
             Type::Integer(_) => {
-                // Field and Bool can be cast to any Integer
-                result.push(Type::Field);
-                result.push(Type::Boolean);
+                // Integer ← other integers, Field, bool
+                result.push(TypeKind::Field);
+                result.push(TypeKind::Boolean);
+                result.push(TypeKind::Signed);
+                result.push(TypeKind::Unsigned);
             }
             _ => {}
         }
 
         // Keep only types we have nodes for
-        result.retain(|ty| self.types.contains_key(ty));
+        result.retain(|kind| self.type_kinds.contains_key(kind));
         result
     }
 
@@ -387,9 +406,7 @@ impl Forest {
     ) -> NodeIndex {
         // Choose a comparable type
         let cmp_types = [TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned];
-        let Some(&kind) = cmp_types.choose(random) else {
-            return self.build_leaf(random, ctx, scope, &Type::Boolean);
-        };
+        let kind = *cmp_types.choose(random).unwrap();
 
         let operand_ty = match kind {
             TypeKind::Field => Type::Field,
@@ -398,17 +415,16 @@ impl Forest {
             _ => return self.build_leaf(random, ctx, scope, &Type::Boolean),
         };
 
-        // Get comparison operators (from binary field ops, filtered)
+        // Get comparison operators
         let cmp_ops: Vec<_> =
             Operator::binary_field().iter().filter(|op| op.is_comparison()).copied().collect();
-        let Some(&op) = cmp_ops.choose(random) else {
-            return self.build_leaf(random, ctx, scope, &Type::Boolean);
-        };
+        let op = *cmp_ops.choose(random).unwrap();
 
-        let left = self.build_expr_tree(random, ctx, scope, &operand_ty, depth - 1);
-        let right = self.build_expr_tree(random, ctx, scope, &operand_ty, depth - 1);
+        let left = self.build_expr_tree(random, ctx, scope, &operand_ty, depth + 1);
+        let right = self.build_expr_tree(random, ctx, scope, &operand_ty, depth + 1);
+
         let idx = self.operator(op, Type::Boolean, left, Some(right));
-        self.register(idx, NodeKind::Operator, &Type::Boolean, Some(op));
+        self.register(random, idx, NodeKind::Operator, &Type::Boolean, Some(op));
         idx
     }
 
@@ -421,18 +437,51 @@ impl Forest {
         ty: &Type,
         depth: usize,
     ) -> NodeIndex {
-        // Find or create an array/slice with this element type
-        let size = random.random_range(ctx.min_element_count..ctx.max_element_count).max(1);
-        let arr_ty = if random.random_bool(ctx.array_vs_slice_probability) {
-            Type::Array(Array { ty: Box::new(ty.clone()), size })
+        // Try to find an existing array/slice variable with this element type
+        let existing: Vec<_> = self
+            .types
+            .iter()
+            .filter_map(|(t, indices)| match t {
+                Type::Array(arr) if arr.ty.as_ref() == ty && arr.size > 0 => {
+                    Some((t.clone(), arr.size, indices))
+                }
+                Type::Slice(slice) if slice.ty.as_ref() == ty && slice.size > 0 => {
+                    Some((t.clone(), slice.size, indices))
+                }
+                _ => None,
+            })
+            .flat_map(|(t, size, indices)| {
+                indices
+                    .iter()
+                    .filter(|&&idx| {
+                        matches!(
+                            self.graph.node_weight(idx),
+                            Some(Node::Variable { .. } | Node::Input { .. })
+                        )
+                    })
+                    .map(move |&idx| (t.clone(), size, idx))
+            })
+            .collect();
+
+        // Either use existing or create on-the-fly
+        let (arr_idx, size) = if !existing.is_empty() && random.random_bool(0.5) {
+            let (_, size, idx) = existing.choose(random).unwrap();
+            (*idx, *size)
         } else {
-            Type::Slice(Slice { ty: Box::new(ty.clone()), size })
+            // Create on-the-fly
+            let size = random.random_range(ctx.min_element_count..=ctx.max_element_count).max(1);
+            let arr_ty = if random.random_bool(ctx.array_vs_slice_probability) {
+                Type::Array(Array { ty: Box::new(ty.clone()), size })
+            } else {
+                Type::Slice(Slice { ty: Box::new(ty.clone()), size })
+            };
+            let idx = self.build_expr_tree(random, ctx, scope, &arr_ty, depth + 1);
+            (idx, size)
         };
 
-        let arr_idx = self.build_expr_tree(random, ctx, scope, &arr_ty, depth - 1);
-        let index_val = if size > 0 { random.random_range(0..size) } else { 0 };
+        let index_val = random.random_range(0..size);
         let idx = self.index(arr_idx, index_val);
-        self.register(idx, NodeKind::Index, ty, None);
+        self.register(random, idx, NodeKind::Index, ty, None);
         idx
     }
 
@@ -445,28 +494,71 @@ impl Forest {
         ty: &Type,
         depth: usize,
     ) -> NodeIndex {
-        // Create a tuple with at least one element of the target type
-        let target_pos = random.random_range(0..3);
+        // Try to find an existing tuple variable with an element of the target type
+        let existing: Vec<_> = self
+            .types
+            .iter()
+            .filter_map(|(t, indices)| {
+                if let Type::Tuple(tuple) = t {
+                    // Find positions where element matches target type
+                    let positions: Vec<_> = tuple
+                        .elements
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, elem)| *elem == ty)
+                        .map(|(i, _)| i)
+                        .collect();
 
-        // For on-the-fly literals in expressions, don't allow zero-sized arrays/slices
-        // as they cause type inference failures in Noir
-        let mut expr_ctx = *ctx;
-        expr_ctx.min_element_count = expr_ctx.min_element_count.max(1);
-
-        let elements: Vec<Type> = (0..3)
-            .map(|i| {
-                if i == target_pos {
-                    ty.clone()
+                    (!positions.is_empty()).then(|| (t.clone(), positions, indices))
                 } else {
-                    Type::random(random, &expr_ctx, scope, TypeLocation::Default)
+                    None
                 }
+            })
+            .flat_map(|(t, positions, indices)| {
+                indices
+                    .iter()
+                    .filter(|&&idx| {
+                        matches!(
+                            self.graph.node_weight(idx),
+                            Some(Node::Variable { .. } | Node::Input { .. })
+                        )
+                    })
+                    .map(move |&idx| (t.clone(), positions.clone(), idx))
             })
             .collect();
 
-        let tuple_ty = Type::Tuple(Tuple { elements });
-        let tuple_idx = self.build_expr_tree(random, ctx, scope, &tuple_ty, depth - 1);
+        // Either use existing or create on-the-fly
+        let (tuple_idx, target_pos) = if !existing.is_empty() && random.random_bool(0.5) {
+            let (_, positions, idx) = existing.choose(random).unwrap();
+            let pos = *positions.choose(random).unwrap();
+            (*idx, pos)
+        } else {
+            // Create on-the-fly
+            // Tuples need at least 2 elements (1-element is just parenthesized expression)
+            let mut expr_ctx = *ctx;
+            expr_ctx.min_element_count = expr_ctx.min_element_count.max(2);
+            let elements_count =
+                random.random_range(expr_ctx.min_element_count..expr_ctx.max_element_count.max(3));
+
+            let target_pos = random.random_range(0..elements_count);
+
+            let elements: Vec<Type> = (0..elements_count)
+                .map(|i| {
+                    if i == target_pos {
+                        ty.clone()
+                    } else {
+                        Type::random(random, &expr_ctx, scope, TypeLocation::Default)
+                    }
+                })
+                .collect();
+
+            let tuple_ty = Type::Tuple(Tuple { elements });
+            let idx = self.build_expr_tree(random, ctx, scope, &tuple_ty, depth + 1);
+            (idx, target_pos)
+        };
+
         let idx = self.tuple_index(tuple_idx, target_pos);
-        self.register(idx, NodeKind::TupleIndex, ty, None);
+        self.register(random, idx, NodeKind::TupleIndex, ty, None);
         idx
     }
 
@@ -479,15 +571,58 @@ impl Forest {
         ty: &Type,
         depth: usize,
     ) -> NodeIndex {
-        // Find a struct with a field of the target type
+        // Try to find an existing struct variable with a field of the target type
+        let existing: Vec<_> = self
+            .types
+            .iter()
+            .filter_map(|(t, indices)| {
+                if let Type::Struct(s) = t {
+                    // Find fields that match target type
+                    let fields: Vec<_> = s
+                        .fields
+                        .iter()
+                        .filter(|f| f.ty.as_ref() == ty)
+                        .map(|f| f.name.clone())
+                        .collect();
+
+                    (!fields.is_empty()).then(|| (t.clone(), fields, indices))
+                } else {
+                    None
+                }
+            })
+            .flat_map(|(t, fields, indices)| {
+                indices
+                    .iter()
+                    .filter(|&&idx| {
+                        matches!(
+                            self.graph.node_weight(idx),
+                            Some(Node::Variable { .. } | Node::Input { .. })
+                        )
+                    })
+                    .map(move |&idx| (t.clone(), fields.clone(), idx))
+            })
+            .collect();
+
+        // Either use existing or create on-the-fly
+        if !existing.is_empty() && random.random_bool(0.5) {
+            let (_, fields, struct_idx) = existing.choose(random).unwrap();
+            let field_name = fields.choose(random).unwrap().clone();
+
+            let idx = self.field_access(*struct_idx, field_name);
+            self.register(random, idx, NodeKind::FieldAccess, ty, None);
+            return idx;
+        }
+
+        // Create on-the-fly: find a struct definition with the target field type
         for struct_def in &scope.structs {
             for field in &struct_def.fields {
                 if &*field.ty == ty {
                     let struct_ty = Type::Struct(struct_def.clone());
                     let struct_idx =
-                        self.build_expr_tree(random, ctx, scope, &struct_ty, depth - 1);
+                        self.build_expr_tree(random, ctx, scope, &struct_ty, depth + 1);
+
                     let idx = self.field_access(struct_idx, field.name.clone());
-                    self.register(idx, NodeKind::FieldAccess, ty, None);
+                    self.register(random, idx, NodeKind::FieldAccess, ty, None);
                     return idx;
                 }
             }
@@ -498,7 +633,10 @@ impl Forest {
     }
 
     /// Build a cast expression that produces the target type
-    /// Rules: Field → any Integer, Bool → Field/Integer
+    /// Rules:
+    /// - Field ← unsigned integers, bool
+    /// - Integer ← other integers, Field, bool
+    /// - Bool cannot be cast to
     fn build_cast_expr(
         &mut self,
         random: &mut impl Rng,
@@ -509,20 +647,32 @@ impl Forest {
     ) -> NodeIndex {
         // Find a source type that can cast to the target
         let source_ty = match ty {
-            Type::Field => Type::Boolean,
-            Type::Integer(_) => {
-                if random.random_bool(ctx.cast_source_field_probability) {
-                    Type::Field
-                } else {
+            Type::Field => {
+                // Field ← unsigned or bool
+                if random.random_bool(0.5) {
                     Type::Boolean
+                } else {
+                    Type::Integer(Integer::random(random, false))
+                }
+            }
+            Type::Integer(_) => {
+                // Integer ← other integers, Field, or bool
+                match random.random_range(0..3) {
+                    0 => Type::Field,
+                    1 => Type::Boolean,
+                    _ => {
+                        let signed = random.random_bool(0.5);
+                        let source_int = Integer::random(random, signed);
+                        Type::Integer(source_int)
+                    }
                 }
             }
             _ => return self.build_leaf(random, ctx, scope, ty),
         };
 
-        let source_idx = self.build_expr_tree(random, ctx, scope, &source_ty, depth - 1);
+        let source_idx = self.build_expr_tree(random, ctx, scope, &source_ty, depth + 1);
         let idx = self.cast(source_idx, ty.clone());
-        self.register(idx, NodeKind::Cast, ty, None);
+        self.register(random, idx, NodeKind::Cast, ty, None);
         idx
     }
 
@@ -531,7 +681,7 @@ impl Forest {
     // ────────────────────────────────────────────────────────────────────────────────
 
     #[inline(always)]
-    fn is_primitive(&self, ty: &Type) -> bool {
+    const fn is_primitive(&self, ty: &Type) -> bool {
         matches!(
             ty.kind(),
             TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned | TypeKind::Boolean
@@ -542,45 +692,6 @@ impl Forest {
     fn can_build_complex_expr(&self, ty: &Type) -> bool {
         !ty.has_zero_sized() && self.is_primitive(ty)
     }
-
-    // ────────────────────────────────────────────────────────────────────────────────
-    // Call generation
-    // ────────────────────────────────────────────────────────────────────────────────
-
-    pub fn gen_call(&mut self, random: &mut impl Rng, functions: &[(String, Vec<Type>, Type)]) {
-        // Build iterator over all callables (lambdas + functions)
-        let lambdas =
-            self.nodes.get(&NodeKind::Variable).into_iter().flatten().filter_map(|&idx| {
-                let Node::Variable { name, .. } = &self.graph[idx] else { return None };
-                let Type::Lambda(l) = self.ty(self.left(idx)?) else { return None };
-                Some((
-                    name.clone(),
-                    l.params.iter().map(|(_, t)| t.clone()).collect(),
-                    (*l.ret).clone(),
-                ))
-            });
-
-        // Pick a random callable we have args for
-        let Some((name, params, ret)) = lambdas.chain(functions.iter().cloned()).choose(random)
-        else {
-            return;
-        };
-        let Some(args) = params.iter().map(|ty| self.types.get(ty)?.first().copied()).collect()
-        else {
-            return;
-        };
-
-        let call_idx = self.call(name, ret.clone(), args);
-        self.register(call_idx, NodeKind::Call, &ret, None);
-
-        let var_name = self.next_var();
-        let var_idx = self.variable(var_name, ret.clone(), false, false, call_idx);
-        self.register(var_idx, NodeKind::Variable, &ret, None);
-    }
-
-    // ────────────────────────────────────────────────────────────────────────────────
-    // Assignment generation
-    // ────────────────────────────────────────────────────────────────────────────────
 
     #[inline(always)]
     fn has_type_kind(&self, kind: TypeKind) -> bool {
@@ -611,53 +722,57 @@ impl Forest {
         self.operators.keys().any(|op| op.is_comparison())
     }
 
-    pub fn find_root_variable(&self, idx: NodeIndex) -> Option<NodeIndex> {
-        let mut current = idx;
-        loop {
-            match &self.graph[current] {
-                Node::Variable { .. } => return Some(current),
-                Node::Input { name, .. } => {
-                    if self.mutable_refs.contains_key(name) {
-                        return Some(current);
-                    }
-                    return None;
-                }
-                Node::Index { .. } | Node::TupleIndex { .. } | Node::FieldAccess { .. } => {
-                    current = self.left(current)?;
-                }
-                _ => return None,
-            }
+    // ────────────────────────────────────────────────────────────────────────────────
+    // Call generation
+    // ────────────────────────────────────────────────────────────────────────────────
+
+    pub fn gen_call(
+        &mut self,
+        random: &mut impl Rng,
+        functions: &[(String, Vec<Type>, Type)],
+    ) {
+        let callables: Vec<_> =
+            self.callables.iter().cloned().chain(functions.iter().cloned()).collect();
+        if callables.is_empty() {
+            return;
         }
+        let (name, params, ret) = callables.choose(random).unwrap().clone();
+
+        // Collect arguments for each parameter type, skipping if any is missing
+        let mut args = Vec::with_capacity(params.len());
+        for ty in &params {
+            let Some(types) = self.types.get(ty) else { return };
+            let Some(&idx) = types.choose(random) else { return };
+            args.push(idx);
+        }
+
+        let call_idx = self.call(name, ret.clone(), args);
+        self.register(random, call_idx, NodeKind::Call, &ret, None);
+
+        let var_name = self.next_var();
+        let var_idx = self.variable(var_name, ret.clone(), false, false, call_idx);
+        self.register(random, var_idx, NodeKind::Variable, &ret, None);
     }
 
-    pub fn is_rooted_in_mutable(&self, idx: NodeIndex) -> bool {
-        self.find_root_variable(idx)
-            .map(|root| match &self.graph[root] {
-                Node::Variable { mutable: true, .. } => true,
-                Node::Input { name, .. } => self.mutable_refs.contains_key(name),
-                _ => false,
-            })
-            .unwrap_or(false)
-    }
+    // ────────────────────────────────────────────────────────────────────────────────
+    // Assignment generation
+    // ────────────────────────────────────────────────────────────────────────────────
 
     pub fn gen_assignment(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        // Prefer mutable refs, otherwise pick from local mutable variables
-        let source_idx = if !self.mutable_refs.is_empty() &&
-            random.random_bool(ctx.prefer_mutable_refs_probability)
-        {
-            *self.mutable_refs.values().choose(random).unwrap()
-        } else {
-            let local_muts =
-                self.nodes.get(&NodeKind::Variable).into_iter().flatten().copied().filter(|&idx| {
-                    matches!(&self.graph[idx], Node::Variable { mutable: true, .. })
-                });
-            let Some(idx) = self.mutable_refs.values().copied().chain(local_muts).choose(random)
-            else {
-                return;
-            };
-            idx
-        };
+        let candidates: Vec<_> =
+            self.mutable_refs
+                .values()
+                .copied()
+                .chain(self.nodes.get(&NodeKind::Variable).into_iter().flatten().copied().filter(
+                    |&idx| matches!(&self.graph[idx], Node::Variable { mutable: true, .. }),
+                ))
+                .collect();
 
+        if candidates.is_empty() {
+            return;
+        }
+
+        let source_idx = *candidates.choose(random).unwrap();
         let source_ty = self.ty(source_idx);
 
         // Build an expression with operations instead of just picking existing variables
@@ -670,16 +785,24 @@ impl Forest {
             })
             .flatten();
 
+        // Prevent self-assignment without operator (a = a), but allow compound (a op= a)
+        if compound_op.is_none() && source_idx == value_idx {
+            return;
+        }
+
         let assign_idx = self.assignment(source_idx, value_idx, compound_op);
-        self.register(assign_idx, NodeKind::Assignment, &source_ty, None);
+        self.register(random, assign_idx, NodeKind::Assignment, &source_ty, None); // @todo should
+                                                                                   // this be compound_op
+                                                                                   // instead of
+                                                                                   // None?
     }
 
-    pub fn get_compound_operators(&self, ty: &Type) -> Option<&'static [Operator]> {
-        match ty {
-            Type::Field => Some(Operator::compound_field()),
-            Type::Integer(i) if i.signed => Some(Operator::compound_integer_signed()),
-            Type::Integer(_) => Some(Operator::compound_integer_unsigned()),
-            Type::Boolean => Some(Operator::compound_boolean()),
+    #[inline(always)]
+    const fn get_compound_operators(&self, ty: &Type) -> Option<&'static [Operator]> {
+        match ty.kind() {
+            TypeKind::Field => Some(Operator::compound_field()),
+            TypeKind::Signed | TypeKind::Unsigned => Some(Operator::compound_integer()),
+            TypeKind::Boolean => Some(Operator::compound_boolean()),
             _ => None,
         }
     }
@@ -690,148 +813,134 @@ impl Forest {
 
     /// Create a nested body forest with outer variables as inputs
     fn create_nested_body(
-        &mut self,
+        &self,
         random: &mut impl Rng,
         ctx: &Context,
         scope: &Scope,
         min_size: usize,
         max_size: usize,
     ) -> Forest {
-        let mut body =
-            Forest { var_counter: self.var_counter, depth: self.depth + 1, ..Default::default() };
+        let mut body = Forest::default();
+        body.depth = self.depth + 1;
+        body.var_counter = self.var_counter;
 
         // Register outer variables as inputs in the nested body
         for &idx in self.nodes.get(&NodeKind::Variable).into_iter().flatten() {
-            let Node::Variable { name, ty, mutable, .. } = &self.graph[idx] else { continue };
-            let input_idx = body.input(name.clone(), ty.clone());
-            body.register(input_idx, NodeKind::Input, ty, None);
-            if *mutable {
-                body.mutable_refs.insert(name.clone(), input_idx);
+            if let Node::Variable { name, ty, mutable, .. } = &self.graph[idx] {
+                let input_idx = body.input(name.clone(), ty.clone());
+                body.register(random, input_idx, NodeKind::Input, ty, None);
+
+                if *mutable {
+                    body.mutable_refs.insert(name.clone(), input_idx);
+                }
             }
         }
 
-        let body_ctx = if body.mutable_refs.is_empty() {
-            *ctx
-        } else {
-            Context {
-                assignment_weight: ctx.assignment_weight * 10,
-                operator_weight: ctx.operator_weight / 2,
-                ..*ctx
-            }
-        };
+        body.random_with_bounds(random, ctx, scope, min_size, max_size, self.skip_idle_vars);
 
-        body.random_with_bounds(random, &body_ctx, scope, min_size, max_size, self.skip_idle_vars);
-        self.var_counter = body.var_counter;
         body
     }
 
     pub fn gen_for_loop(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        let (bits, signed) = (
-            *[8u8, 16, 32, 64].choose(random).unwrap(),
-            random.random_bool(ctx.signed_loop_probability),
-        );
-        let loop_ty = Type::Integer(Integer { bits, signed });
-        let ty_suffix = if signed { format!("i{bits}") } else { format!("u{bits}") };
+        // @todo use different integer types
+        let a = random.random_range(-5..5);
+        let b = random.random_range(-5..5);
 
-        let start: i64 =
-            if signed { random.random_range(-5..=5) } else { random.random_range(0..=5) };
-        let end = start + random.random_range(1i64..=10);
+        // Ensure valid range: if equal, make at least one iteration
+        let (start, end) = if a < b { (a, b) } else { (b, if a == b { a + 1 } else { a }) };
+        let ty = Type::Integer(Integer { bits: 32, signed: true });
+        let suffix = ty.to_string();
 
-        let mut body = self.create_nested_body(
+        let mut scope = scope.clone();
+        scope.inputs.push(("tmp".into(), ty.clone(), false));
+
+        // @todo add bias here?
+
+        let body = self.create_nested_body(
             random,
             ctx,
-            scope,
+            &scope,
             ctx.min_for_loop_body_size,
             ctx.max_for_loop_body_size,
         );
-        let loop_var_idx = body.input("tmp".into(), loop_ty.clone());
-        body.register(loop_var_idx, NodeKind::Input, &loop_ty, None);
 
         let idx = self.graph.add_node(Node::ForLoop {
             var: "tmp".into(),
-            ty: loop_ty,
-            start: format!("{start}{ty_suffix}"),
-            end: format!("{end}{ty_suffix}"),
+            ty,
+            start: format!("{start}{suffix}"),
+            end: format!("{end}{suffix}"),
             body: Box::new(body),
         });
         self.nodes.entry(NodeKind::ForLoop).or_default().push(idx);
     }
 
     pub fn gen_if(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        let Some(&condition) =
-            self.type_kinds.get(&TypeKind::Boolean).and_then(|n| n.choose(random))
-        else {
-            return
-        };
+        let mut conditions = self.collect_boolean_nodes();
 
-        let then_body = Box::new(self.create_nested_body(
-            random,
-            ctx,
-            scope,
-            ctx.min_if_body_size,
-            ctx.max_if_body_size,
-        ));
+        if !conditions.is_empty() {
+            let condition = *conditions.choose(random).unwrap();
 
-        let else_if_count = random.random_range(ctx.min_else_if_count..=ctx.max_else_if_count);
-        let else_ifs: Vec<_> = (0..else_if_count)
-            .filter_map(|_| {
-                let cond = *self.type_kinds.get(&TypeKind::Boolean)?.choose(random)?;
-                Some((
-                    cond,
-                    Box::new(self.create_nested_body(
-                        random,
-                        ctx,
-                        scope,
-                        ctx.min_if_body_size,
-                        ctx.max_if_body_size,
-                    )),
-                ))
-            })
-            .collect();
+            // We do not remove `condition` yet as a way to increase coverage where it is possible
+            // to have two if branches with the same condition
 
-        let else_body = random.random_bool(ctx.else_probability).then(|| {
-            Box::new(self.create_nested_body(
+            let then_body = Box::new(self.create_nested_body(
                 random,
                 ctx,
                 scope,
                 ctx.min_if_body_size,
                 ctx.max_if_body_size,
-            ))
-        });
+            ));
 
-        let idx = self.graph.add_node(Node::If { condition, then_body, else_ifs, else_body });
-        self.nodes.entry(NodeKind::If).or_default().push(idx);
+            let else_if_count = random.random_range(ctx.min_else_if_count..=ctx.max_else_if_count);
+            let mut else_ifs: Vec<_> = vec![];
+
+            for _ in 0..else_if_count {
+                // To avoid using `choose` and then finding the idx, we do a little trick here to
+                // achive O(1) instead O(N)
+                let idx = random.random_range(0..conditions.len());
+                let condition = conditions[idx];
+                conditions.swap_remove(idx);
+
+                let body = self.create_nested_body(
+                    random,
+                    ctx,
+                    scope,
+                    ctx.min_if_body_size,
+                    ctx.max_if_body_size,
+                );
+
+                else_ifs.push((condition, Box::new(body)));
+            }
+
+            let else_body = random.random_bool(ctx.else_probability).then(|| {
+                Box::new(self.create_nested_body(
+                    random,
+                    ctx,
+                    scope,
+                    ctx.min_if_body_size,
+                    ctx.max_if_body_size,
+                ))
+            });
+
+            let idx = self.graph.add_node(Node::If { condition, then_body, else_ifs, else_body });
+            self.nodes.entry(NodeKind::If).or_default().push(idx);
+        }
     }
 
     pub fn gen_assert(&mut self, random: &mut impl Rng, ctx: &Context) {
-        // Collect all valid boolean conditions:
-        // 1. Boolean type nodes directly
-        // 2. Comparison operator results (which are boolean)
-        let mut conditions: Vec<NodeIndex> = Vec::new();
+        let conditions = self.collect_boolean_nodes();
 
-        // Add boolean type nodes
-        if let Some(bool_nodes) = self.type_kinds.get(&TypeKind::Boolean) {
-            conditions.extend(bool_nodes.iter().copied());
+        if !conditions.is_empty() {
+            let condition = *conditions.choose(random).unwrap();
+
+            // Optionally generate a message
+            let message = random
+                .random_bool(ctx.assert_message_probability)
+                .then(|| "\"assertion failed\"".to_string()); // @audit should we use a random message?
+
+            let idx = self.graph.add_node(Node::Assert { condition, message });
+            self.nodes.entry(NodeKind::Assert).or_default().push(idx);
         }
-
-        // Add comparison operator results
-        for (op, indices) in &self.operators {
-            if op.is_comparison() {
-                conditions.extend(indices.iter().copied());
-            }
-        }
-
-        let Some(&condition) = conditions.choose(random) else { return };
-
-        // Optionally generate a message
-        let message = if random.random_bool(ctx.assert_message_probability) {
-            Some("\"assertion failed\"".to_string())
-        } else {
-            None
-        };
-
-        let idx = self.graph.add_node(Node::Assert { condition, message });
-        self.nodes.entry(NodeKind::Assert).or_default().push(idx);
     }
 }
 
@@ -863,18 +972,27 @@ enum ExprKind {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use crate::builders::CircuitBuilder;
 
     use super::*;
 
     #[test]
-    pub fn test_random_forest() {
-        let ctx = Context::default();
+    fn test_random_forest() {
+        let ctx =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
         let builder = CircuitBuilder::default();
         let scope = builder.create_scope(&mut random, &ctx);
 
         let mut forest = Forest::default();
+
+        for (name, ty, _) in &scope.inputs {
+            let idx = forest.input(name.clone(), ty.clone());
+            forest.register(&mut random, idx, NodeKind::Input, ty, None);
+        }
+
         forest.random(&mut random, &ctx, &scope);
 
         forest.save_as_dot(&std::env::current_dir().unwrap().join("test_random_forest.dot"));

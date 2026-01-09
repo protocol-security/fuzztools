@@ -1,18 +1,17 @@
 use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, CLEAR_SCREEN, GREEN, RED, RESET};
 use alloy::{
-    eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder,
-    signers::local::PrivateKeySigner,
+    eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder, signers::SignerSync,
 };
+use alloy_signer_local::Secp256k1Signer;
 use anyhow::Result;
 use fuzztools::{
     builders::{contracts::AccessListTarget, TransactionBuilder},
     mutations::Mutable,
     rpc::RpcClient,
     transactions::{SignedTransaction, Transaction},
-    utils::Signer,
 };
 use rand::Rng;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -25,8 +24,8 @@ use std::{
 };
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-#[derive(Serialize, Deserialize)]
-pub struct Context {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(crate) struct Context {
     pub rpc_timeout: u64,
     pub tx_channel_capacity: usize,
     pub completion_channel_capacity: usize,
@@ -36,7 +35,7 @@ pub struct Context {
     pub screen_update_interval: u128,
 }
 
-pub struct App {
+pub(crate) struct App {
     /// Header being displayed on the screen
     prelude: String,
     /// Context of the application
@@ -50,9 +49,9 @@ pub struct App {
     /// Transaction builder
     builder: TransactionBuilder,
     /// Transaction signer
-    signer: Arc<Signer>,
+    signer: Arc<Secp256k1Signer>,
     /// Authorization signer
-    auth_signer: Arc<Signer>,
+    auth_signer: Arc<Secp256k1Signer>,
 
     /// Channel to send transactions to the dispatcher
     tx_sender: Sender<Vec<String>>,
@@ -68,7 +67,7 @@ pub struct App {
 }
 
 impl App {
-    pub async fn new(
+    pub(crate) async fn new(
         tx_type: TransactionType,
         key: String,
         url: String,
@@ -85,10 +84,10 @@ impl App {
 
         // Then, create the needed signers
         let key_bytes = hex::decode(&key)?;
-        let signer = Signer::new(&key_bytes)?;
-        let deployer_signer = PrivateKeySigner::from_slice(&key_bytes)?;
+        let signer = Secp256k1Signer::from_slice(&key_bytes)?;
+        let deployer_signer = Secp256k1Signer::from_slice(&key_bytes)?;
         let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
-        let auth_signer = Signer::new(&auth_key_bytes)?;
+        let auth_signer = Secp256k1Signer::from_slice(&auth_key_bytes)?;
 
         // Then, deploy the target contracts
         let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(url.as_str()).await?;
@@ -125,7 +124,7 @@ impl App {
         })
     }
 
-    pub async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
+    pub(crate) async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
         // This will spawn a thread that will be listening for incoming transactions and will
         // broadcast them in chunks to the RPC client
         self.spawn_dispatcher();
@@ -174,24 +173,16 @@ impl App {
 
             // Mutate if fuzzing is enabled
             if self.fuzzing {
-                txs.iter_mut().for_each(|tx| {
+                for tx in &mut txs {
                     tx.mutate(random);
-                });
+                }
             }
 
             // Sign in parallel
             let signer = self.signer.clone();
             let auth_signer = self.auth_signer.clone();
-            let txs_to_sign = txs.clone();
-
-            let signed = tokio::task::spawn_blocking(move || {
-                let signed: Vec<String> = txs_to_sign
-                    .par_iter()
-                    .map(|tx| Self::sign_and_encode(tx.clone(), &signer, &auth_signer))
-                    .collect();
-                signed
-            })
-            .await?;
+            let signed: Vec<String> =
+                txs.par_iter().map(|tx| Self::sign_and_encode(tx, &signer, &auth_signer)).collect();
 
             // Send the signed transactions to the dispatcher
             if self.tx_sender.send(signed).await.is_err() {
@@ -258,23 +249,30 @@ impl App {
         }
     }
 
-    fn sign_and_encode(mut tx: Transaction, signer: &Signer, auth_signer: &Signer) -> String {
-        tx.signed_authorization_list = tx.authorization_list.as_ref().map(|auths| {
-            auths
-                .iter()
-                .map(|auth| {
-                    let sig = auth_signer.sign_hash(&auth.signature_hash()).unwrap();
-                    SignedAuthorization::new_unchecked(
-                        auth.clone(),
-                        sig.v() as u8,
-                        sig.r(),
-                        sig.s(),
-                    )
-                })
-                .collect()
-        });
+    fn sign_and_encode(
+        tx: &Transaction,
+        signer: &Secp256k1Signer,
+        auth_signer: &Secp256k1Signer,
+    ) -> String {
+        let mut tx = tx.clone();
+        if let Some(auths) = tx.authorization_list.as_ref() {
+            tx.signed_authorization_list = Some(
+                auths
+                    .par_iter()
+                    .map(|auth| {
+                        let sig = auth_signer.sign_hash_sync(&auth.signature_hash()).unwrap();
+                        SignedAuthorization::new_unchecked(
+                            auth.clone(),
+                            sig.v() as u8,
+                            sig.r(),
+                            sig.s(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
 
-        let sig = signer.sign_hash(&tx.signing_hash()).unwrap();
+        let sig = signer.sign_hash_sync(&tx.signing_hash()).unwrap();
         format!("0x{}", hex::encode(SignedTransaction { transaction: tx, signature: sig }.encode()))
     }
 

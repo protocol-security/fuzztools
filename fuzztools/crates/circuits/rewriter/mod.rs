@@ -7,6 +7,10 @@ use petgraph::{graph::NodeIndex, visit::EdgeRef, Direction};
 use rand::Rng;
 use rules::{Rule, RuleKind, RULES};
 use std::collections::HashMap;
+use Operator::{
+    Add, And, Div, Equal, Greater, GreaterOrEqual, Less, LessOrEqual, Mod, Mul, Neg, Not, NotEqual,
+    Or, Shl, Shr, Sub, Xor,
+};
 
 pub mod rules;
 
@@ -20,9 +24,9 @@ pub struct Rewriter {
 // Rewriter implementation
 // ────────────────────────────────────────────────────────────────────────────────
 
-impl Rewriter {
+impl Default for Rewriter {
     /// Build rule indices once at construction time
-    pub fn new() -> Self {
+    fn default() -> Self {
         let mut op_rules: HashMap<Operator, Vec<usize>> = HashMap::new();
         let mut type_rules: HashMap<TypeKind, Vec<usize>> = HashMap::new();
 
@@ -37,8 +41,10 @@ impl Rewriter {
 
         Self { rules: RULES, op_rules, type_rules }
     }
+}
 
-    /// O(n), is the best i can do for now
+impl Rewriter {
+    /// Randomly select a rule, then apply it to ALL matching instances in the forest
     pub fn apply_random(
         &self,
         random: &mut impl Rng,
@@ -46,54 +52,67 @@ impl Rewriter {
         ctx: &Context,
         scope: &Scope,
     ) {
-        let mut choice: Option<(NodeIndex, usize)> = None;
-        let mut count = 0u32;
+        // Collect all (node, rule_index) pairs that match
+        let mut matches: Vec<_> = vec![];
 
         // 1. Operator-specific rules
         for (&op, nodes) in &forest.operators {
-            let Some(rules) = self.op_rules.get(&op) else { continue };
-            for &n in nodes {
-                // Skip nodes that are assignment LHS (would produce invalid code)
-                if is_assignment_lhs(forest, n) {
-                    continue;
-                }
-                let (left, right) = (forest.left(n), forest.right(n));
-                for &i in rules {
-                    if matches_rule(forest, Some(op), left, right, &self.rules[i].kind) {
-                        count += 1;
-                        if random.random_ratio(1, count) {
-                            choice = Some((n, i));
+            if let Some(rules) = self.op_rules.get(&op) {
+                for &n in nodes {
+                    if is_assignment_lhs(forest, n) {
+                        continue;
+                    }
+                    let (left, right) = (forest.left(n), forest.right(n));
+                    for &i in rules {
+                        if matches_rule(forest, Some(op), left, right, &self.rules[i].kind) {
+                            matches.push((n, i));
                         }
                     }
                 }
             }
         }
 
-        // 2. Type-based inject rules
+        // 2. Type-based inject rules (for terminal nodes like literals/variables)
         for (&ty_kind, nodes) in &forest.type_kinds {
-            let Some(rules) = self.type_rules.get(&ty_kind) else { continue };
-            for &n in nodes {
-                if op_of(forest, n).is_some() {
-                    continue
-                }
-                // Skip nodes that are assignment LHS (would produce invalid code)
-                if is_assignment_lhs(forest, n) {
-                    continue;
-                }
-                let (left, right) = (forest.left(n), forest.right(n));
-                for &i in rules {
-                    if matches_rule(forest, None, left, right, &self.rules[i].kind) {
-                        count += 1;
-                        if random.random_ratio(1, count) {
-                            choice = Some((n, i));
+            if let Some(rules) = self.type_rules.get(&ty_kind) {
+                for &n in nodes {
+                    if op_of(forest, n).is_some() {
+                        continue;
+                    }
+                    if is_assignment_lhs(forest, n) {
+                        continue;
+                    }
+                    if forest.graph.edges_directed(n, Direction::Incoming).next().is_none() {
+                        continue;
+                    }
+                    for &i in rules {
+                        if matches_rule(forest, None, Some(n), None, &self.rules[i].kind) {
+                            matches.push((n, i));
                         }
                     }
                 }
             }
         }
 
-        if let Some((node, idx)) = choice {
-            self.apply(random, forest, node, &self.rules[idx].kind, ctx, scope);
+        if matches.is_empty() {
+            return;
+        }
+
+        // Randomly select which rule to apply
+        let selected_rule_idx = matches[random.random_range(0..matches.len())].1;
+
+        // Collect all nodes that match this specific rule
+        let nodes_for_rule: Vec<NodeIndex> = matches
+            .iter()
+            .filter(|(_, rule_idx)| *rule_idx == selected_rule_idx)
+            .map(|(n, _)| *n)
+            .collect();
+
+        // Apply to all matching nodes (check node still exists - graph may change during rewrites)
+        for node in nodes_for_rule {
+            if forest.graph.contains_node(node) {
+                self.apply(random, forest, node, &self.rules[selected_rule_idx].kind, ctx, scope);
+            }
         }
     }
 
@@ -198,13 +217,17 @@ fn matches_rule(
             is_binary && (left_op == Some(Operator::Sub) || right_op == Some(Operator::Add))
         }
 
-        // ((a / b) * c) or (a * (c / b))
+        // ((a / b) * c) ↔ (a * (c / b)) - only valid for Field (not integer division!)
         (RuleKind::AssociateDiv, Some(Operator::Mul)) => {
-            is_binary && (left_op == Some(Operator::Div) || right_op == Some(Operator::Div))
+            is_binary &&
+                left.is_some_and(|l| matches!(f.ty(l), Type::Field)) &&
+                (left_op == Some(Operator::Div) || right_op == Some(Operator::Div))
         }
 
-        // (a / b) → ((1 / b) * a)
-        (RuleKind::DivCommute, Some(Operator::Div)) => is_binary,
+        // (a / b) → ((1 / b) * a) - only valid for Field (not integer division!)
+        (RuleKind::DivCommute, Some(Operator::Div)) => {
+            is_binary && left.is_some_and(|l| matches!(f.ty(l), Type::Field))
+        }
 
         (RuleKind::Distribute { outer, inner }, Some(o)) => {
             (o == *outer && left_op == Some(*inner)) ||
@@ -217,12 +240,30 @@ fn matches_rule(
         (RuleKind::Identity { op: rule_op, identity_right }, Some(o))
             if o == *rule_op && is_binary =>
         {
+            // a & 1 = a is only correct for booleans (for integers, a & 1 keeps only LSB)
+            // a | 0 = a is correct for all types
+            if o == Operator::And && !left.is_some_and(|l| matches!(f.ty(l), Type::Boolean)) {
+                return false;
+            }
             let check = if *identity_right { right } else { left };
             check.is_some_and(|c| is_identity(f, c, o))
         }
-        (RuleKind::Identity { .. }, _) => left.is_some_and(|l| is_numeric_or_bool(f, l)),
+        (RuleKind::Identity { op, .. }, _) => {
+            // For And injection (a -> a & 1), only apply to booleans
+            // For Or injection (a -> a | 0), apply to all integer types
+            if *op == Operator::And {
+                left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
+            } else {
+                left.is_some_and(|l| is_numeric_or_bool(f, l))
+            }
+        }
 
         (RuleKind::Absorb { op: rule_op }, Some(o)) => {
+            // a & 0 = 0 is correct for all types
+            // a | 1 = 1 is only correct for booleans (for integers, a | 1 sets only LSB)
+            if o == Operator::Or && !left.is_some_and(|l| matches!(f.ty(l), Type::Boolean)) {
+                return false;
+            }
             o == *rule_op &&
                 is_binary &&
                 (left.is_some_and(|l| is_absorbing(f, l, o)) ||
@@ -230,7 +271,18 @@ fn matches_rule(
         }
 
         (RuleKind::SelfInverse { op: rule_op }, Some(o)) => {
-            o == *rule_op && is_binary && left == right
+            if o != *rule_op || !is_binary || left != right {
+                return false;
+            }
+            // For Div, a / a = 1 only if a != 0. Only apply to known non-zero literals.
+            if o == Operator::Div {
+                left.is_some_and(|l| {
+                    matches!(&f.graph[l], Node::Literal { value, .. }
+                        if !value.starts_with('0') && !value.starts_with("-0") && value != "false")
+                })
+            } else {
+                true
+            }
         }
 
         (RuleKind::Idempotent { op: rule_op }, Some(o)) => {
@@ -293,8 +345,14 @@ fn matches_rule(
             left_op == Some(Operator::Not) && right_op == Some(Operator::Not)
         }
 
-        (RuleKind::ComplementXor, Some(Operator::Not)) => is_unary,
-        (RuleKind::ComplementXor, Some(Operator::Xor)) => right.is_some_and(|r| is_one(f, r)),
+        // !a ↔ a ^ true only works for booleans (for integers, !a is bitwise NOT ≠ a ^ 1)
+        (RuleKind::ComplementXor, Some(Operator::Not)) => {
+            is_unary && left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
+        }
+        (RuleKind::ComplementXor, Some(Operator::Xor)) => {
+            right.is_some_and(|r| is_one(f, r)) &&
+                left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
+        }
 
         // (a ^ b) ↔ ((!a & b) | (a & !b))
         (RuleKind::XorToAndOr, Some(Operator::Xor)) => {
@@ -315,9 +373,9 @@ fn matches_rule(
         // a % 1 → 0
         (RuleKind::ModOne, Some(Operator::Mod)) => right.is_some_and(|r| is_one(f, r)),
         // 0 → r % 1 (injection)
-        (RuleKind::ModOne, _) => left.is_some_and(|l| {
-            is_zero(f, l) && matches!(f.ty(l), Type::Integer(_))
-        }),
+        (RuleKind::ModOne, _) => {
+            left.is_some_and(|l| is_zero(f, l) && matches!(f.ty(l), Type::Integer(_)))
+        }
 
         // a & 1 ↔ a % 2
         (RuleKind::AndToMod, Some(Operator::And)) => {
@@ -350,10 +408,10 @@ fn matches_rule(
         }
 
         // ─────────────────────────────────────────────────────────────────────────
-        // Injection rules (obfuscation)
+        // Injection rules (obfuscation) - only for Field to avoid integer overflow issues
         // ─────────────────────────────────────────────────────────────────────────
         (RuleKind::InjectAddSub | RuleKind::InjectSubAdd | RuleKind::InjectMulDiv, _) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Field | Type::Integer(_)))
+            left.is_some_and(|l| matches!(f.ty(l), Type::Field))
         }
 
         (RuleKind::InjectXorXor, _) => {
@@ -366,14 +424,10 @@ fn matches_rule(
         }
 
         // a → a | 0 (for integers)
-        (RuleKind::InjectOrZero, _) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
-        }
+        (RuleKind::InjectOrZero, _) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
 
         // a → a & a (for integers)
-        (RuleKind::InjectAndSelf, _) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
-        }
+        (RuleKind::InjectAndSelf, _) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
 
         _ => false,
     }
@@ -381,7 +435,6 @@ fn matches_rule(
 
 /// Get all operators that a rule can target (for building the index)
 fn operators_for_rule(kind: &RuleKind) -> Vec<Operator> {
-    use Operator::*;
     match kind {
         RuleKind::SwapOperands { ops } | RuleKind::Associate { ops } => ops.to_vec(),
         RuleKind::AssociateSub => vec![Sub],
@@ -420,8 +473,9 @@ fn operators_for_rule(kind: &RuleKind) -> Vec<Operator> {
 /// Get all type kinds that an inject rule can target (for building the index)
 fn types_for_inject_rule(kind: &RuleKind) -> Vec<TypeKind> {
     match kind {
+        // AddSub/SubAdd/MulDiv only for Field to avoid integer overflow issues
         RuleKind::InjectAddSub | RuleKind::InjectSubAdd | RuleKind::InjectMulDiv => {
-            vec![TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned]
+            vec![TypeKind::Field]
         }
         RuleKind::InjectXorXor => vec![TypeKind::Signed, TypeKind::Unsigned, TypeKind::Boolean],
         RuleKind::InjectDivDiv => vec![TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned],
@@ -438,7 +492,10 @@ fn types_for_inject_rule(kind: &RuleKind) -> Vec<TypeKind> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn do_associate(f: &mut Forest, n: NodeIndex) {
-    let Some(op) = op_of(f, n) else { return };
+    let op = match op_of(f, n) {
+        Some(op) => op,
+        None => return,
+    };
     let ret = ret_of(f, n);
     let (left, right) = (f.left(n), f.right(n));
 
@@ -514,8 +571,10 @@ fn do_div_commute(f: &mut Forest, n: NodeIndex) {
     if op_of(f, n) != Some(Operator::Div) {
         return;
     }
-    let Some(a) = f.left(n) else { return };
-    let Some(b) = f.right(n) else { return };
+    let (a, b) = match (f.left(n), f.right(n)) {
+        (Some(a), Some(b)) => (a, b),
+        _ => return,
+    };
 
     let ty = ret_of(f, n);
     let one = make_one(f, &ty);
@@ -529,7 +588,10 @@ fn do_distribute(f: &mut Forest, n: NodeIndex, outer: Operator, inner: Operator)
     if op_of(f, n) != Some(outer) {
         return;
     }
-    let Some(left) = f.left(n).filter(|&l| op_of(f, l) == Some(inner)) else { return };
+    let left = match f.left(n).filter(|&l| op_of(f, l) == Some(inner)) {
+        Some(l) => l,
+        None => return,
+    };
 
     let ret = ret_of(f, n);
     let (a, b, c) = (f.left(left).unwrap(), f.right(left).unwrap(), f.right(n).unwrap());
@@ -816,8 +878,12 @@ fn do_xor_to_and_or(f: &mut Forest, n: NodeIndex) {
                     let b_from_right = f.left(rr).unwrap();
                     if a_from_left == a_from_right && b_from_left == b_from_right {
                         let edges = f.incoming_edges(n);
-                        let new =
-                            f.operator(Operator::Xor, Type::Boolean, a_from_left, Some(b_from_left));
+                        let new = f.operator(
+                            Operator::Xor,
+                            Type::Boolean,
+                            a_from_left,
+                            Some(b_from_left),
+                        );
                         f.redirect_edges(n, new, &edges);
                     }
                 }
@@ -889,7 +955,7 @@ fn do_inject(
 ) {
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
-    let r = f.literal(ty.random_value(random, ctx, scope, &f.exprs), ty.clone());
+    let r = f.literal(ty.random_value(random, ctx, scope), ty.clone());
     let first = f.operator(op1, ty.clone(), n, Some(r));
     let second = f.operator(op2, ty, first, Some(r));
     f.redirect_edges(n, second, &edges);
@@ -903,7 +969,7 @@ fn do_inject_nonzero(
     scope: &Scope,
 ) {
     let ty = f.ty(n);
-    let value = ty.random_value(random, ctx, scope, &f.exprs);
+    let value = ty.random_value(random, ctx, scope);
     // Skip if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
         return;
@@ -927,7 +993,7 @@ fn do_inject_div_div(
         return;
     }
     let ty = f.ty(n);
-    let value = ty.random_value(random, ctx, scope, &f.exprs);
+    let value = ty.random_value(random, ctx, scope);
     // Skip if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
         return;
@@ -1039,20 +1105,22 @@ fn is_lit(f: &Forest, n: NodeIndex, val: &str) -> bool {
 /// Check if node is a literal with numeric value (handles bool/field/int)
 #[inline(always)]
 fn is_numeric_literal(f: &Forest, n: NodeIndex, num: i8) -> bool {
-    let Node::Literal { value, ty } = &f.graph[n] else { return false };
-    match (num, ty) {
-        (0, Type::Boolean) => value == "false",
-        (1, Type::Boolean) => value == "true",
-        (0, _) => {
-            value.starts_with("0i") || value.starts_with("0u") || value.starts_with("0Field")
-        }
-        (1, _) => {
-            value.starts_with("1i") || value.starts_with("1u") || value.starts_with("1Field")
-        }
-        (-1, _) => value == "-1" || value.starts_with("-1i") || value.starts_with("-1Field"),
-        (2, _) => {
-            value.starts_with("2i") || value.starts_with("2u") || value.starts_with("2Field")
-        }
+    match &f.graph[n] {
+        Node::Literal { value, ty } => match (num, ty) {
+            (0, Type::Boolean) => value == "false",
+            (1, Type::Boolean) => value == "true",
+            (0, _) => {
+                value.starts_with("0i") || value.starts_with("0u") || value.starts_with("0Field")
+            }
+            (1, _) => {
+                value.starts_with("1i") || value.starts_with("1u") || value.starts_with("1Field")
+            }
+            (-1, _) => value == "-1" || value.starts_with("-1i") || value.starts_with("-1Field"),
+            (2, _) => {
+                value.starts_with("2i") || value.starts_with("2u") || value.starts_with("2Field")
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -1122,7 +1190,11 @@ fn can_apply_unary(f: &Forest, node: Option<NodeIndex>, op: Operator) -> bool {
 #[inline(always)]
 fn is_identity(f: &Forest, n: NodeIndex, op: Operator) -> bool {
     match op {
-        Operator::Add | Operator::Sub | Operator::Xor | Operator::Or | Operator::Shl |
+        Operator::Add |
+        Operator::Sub |
+        Operator::Xor |
+        Operator::Or |
+        Operator::Shl |
         Operator::Shr => is_zero(f, n),
         Operator::Mul | Operator::Div | Operator::And => is_one(f, n),
         _ => false,
@@ -1139,8 +1211,7 @@ fn is_absorbing(f: &Forest, n: NodeIndex, op: Operator) -> bool {
 }
 
 #[inline(always)]
-fn negate_cmp(op: Operator) -> Option<Operator> {
-    use Operator::*;
+const fn negate_cmp(op: Operator) -> Option<Operator> {
     match op {
         Less => Some(GreaterOrEqual),
         Greater => Some(LessOrEqual),
@@ -1205,5 +1276,125 @@ fn make_absorbing(f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
         make_one(f, ty)
     } else {
         make_zero(f, ty)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use crate::{builders::CircuitBuilder, circuits::ast::nodes::NodeKind};
+
+    use super::*;
+
+    /// ANSI color codes for terminal output
+    const RED: &str = "\x1b[31m";
+    const GREEN: &str = "\x1b[32m";
+    const RESET: &str = "\x1b[0m";
+
+    /// Find common prefix length between two strings
+    fn common_prefix_len(a: &str, b: &str) -> usize {
+        a.chars().zip(b.chars()).take_while(|(ca, cb)| ca == cb).count()
+    }
+
+    /// Find common suffix length between two strings (after prefix)
+    fn common_suffix_len(a: &str, b: &str, prefix_len: usize) -> usize {
+        let a_remaining: Vec<char> = a.chars().skip(prefix_len).collect();
+        let b_remaining: Vec<char> = b.chars().skip(prefix_len).collect();
+        a_remaining
+            .iter()
+            .rev()
+            .zip(b_remaining.iter().rev())
+            .take_while(|(ca, cb)| ca == cb)
+            .count()
+    }
+
+    /// Highlight only the differing part of a line
+    fn highlight_diff(line: &str, other: &str, color: &str) -> String {
+        let prefix_len = common_prefix_len(line, other);
+        let suffix_len = common_suffix_len(line, other, prefix_len);
+
+        let line_chars: Vec<char> = line.chars().collect();
+        let diff_end = line_chars.len().saturating_sub(suffix_len);
+
+        if prefix_len >= diff_end {
+            return line.to_string();
+        }
+
+        let prefix: String = line_chars[..prefix_len].iter().collect();
+        let diff: String = line_chars[prefix_len..diff_end].iter().collect();
+        let suffix: String = line_chars[diff_end..].iter().collect();
+
+        format!("{prefix}{color}{diff}{RESET}{suffix}")
+    }
+
+    /// Compare two strings line by line and print differences with colors
+    fn print_diff(before: &str, after: &str) {
+        let before_lines: Vec<&str> = before.lines().collect();
+        let after_lines: Vec<&str> = after.lines().collect();
+
+        println!("\n{}", "=".repeat(80));
+        println!("CIRCUIT COMPARISON (red = removed, green = added)");
+        println!("{}\n", "=".repeat(80));
+
+        let max_lines = before_lines.len().max(after_lines.len());
+
+        for i in 0..max_lines {
+            let before_line = before_lines.get(i).copied().unwrap_or("");
+            let after_line = after_lines.get(i).copied().unwrap_or("");
+
+            if before_line == after_line {
+                println!("  {before_line}");
+            } else {
+                if !before_line.is_empty() {
+                    let highlighted = highlight_diff(before_line, after_line, RED);
+                    println!("- {highlighted}");
+                }
+                if !after_line.is_empty() {
+                    let highlighted = highlight_diff(after_line, before_line, GREEN);
+                    println!("+ {highlighted}");
+                }
+            }
+        }
+
+        println!("\n{}", "=".repeat(80));
+    }
+
+    #[test]
+    fn test_rewriter() {
+        let ctx =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
+        let mut random = rand::rng();
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        let mut forest = Forest::default();
+        let rewriter = Rewriter::default();
+
+        for (name, ty, _) in &scope.inputs {
+            let idx = forest.input(name.clone(), ty.clone());
+            forest.register(&mut random, idx, NodeKind::Input, ty, None);
+        }
+        for (name, ty, _) in &scope.globals {
+            let idx = forest.input(name.clone(), ty.clone());
+            forest.register(&mut random, idx, NodeKind::Input, ty, None);
+        }
+
+        forest.random(&mut random, &ctx, &scope);
+
+        // Clone forest before rewriting to compare
+        let forest_before = forest.clone();
+
+        // Format circuit before rewriting (with fixed return)
+        let before = builder.format_circuit(&scope, &forest_before);
+
+        // Apply rewriter
+        rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
+
+        // Format circuit after rewriting (with same fixed return)
+        let after = builder.format_circuit(&scope, &forest);
+
+        // Print diff with colors
+        print_diff(&before, &after);
     }
 }

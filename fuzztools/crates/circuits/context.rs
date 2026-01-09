@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 /// Context that controls the generation of the program.
@@ -110,7 +109,7 @@ pub struct Context {
     pub small_value_probability: f64,
 
     /// Max value for "small" numbers
-    pub max_small_value: usize,
+    pub max_small_value: i128,
 
     /// Probability of raw strings
     pub raw_string_probability: f64,
@@ -148,9 +147,6 @@ pub struct Context {
     /// Probability of Field (vs Boolean) as cast source to Integer
     pub cast_source_field_probability: f64,
 
-    /// Probability of preferring mutable refs over local mutable vars in assignments
-    pub prefer_mutable_refs_probability: f64,
-
     /// Probability of signed vs unsigned loop variable in for loops
     pub signed_loop_probability: f64,
 
@@ -177,10 +173,7 @@ pub struct Context {
 
     /// Probability of reusing existing variable vs new literal
     pub reuse_variable_probability: f64,
-}
 
-impl Default for Context {
-    fn default() -> Self {
-        serde_json::from_str(&fs::read_to_string("./configs/noiruzz.json").unwrap()).unwrap() // @todo .. must be changed when executing vs tests
-    }
+    /// Multiplier for type weights when `type_bias` is set (higher = stronger bias)
+    pub type_bias_multiplier: usize,
 }

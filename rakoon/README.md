@@ -39,3 +39,8 @@ geth --dev \
 | EIP-7702         | No              | 4,505,711           | 30s         | 150,190       |
 
 running on a MacBook Pro 2023, M3 Max and 36 GB of RAM.
+
+## Fast commands
+
+- `make geth-testnet` -> `cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xb71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291`
+- `make reth-testnet` -> `cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97`

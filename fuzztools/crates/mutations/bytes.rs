@@ -63,15 +63,13 @@ impl Mutable for Vec<u8> {
             8 => {
                 // set_all_pattern
                 check_not_empty!(self);
-                let mut i = 0;
-                self.iter_mut().for_each(|byte| {
+                for (i, byte) in self.iter_mut().enumerate() {
                     if i % 2 == 0 {
                         *byte = 0x00;
                     } else {
                         *byte = 0xff;
                     }
-                    i += 1;
-                });
+                }
             }
             9 => {
                 // set_all_random

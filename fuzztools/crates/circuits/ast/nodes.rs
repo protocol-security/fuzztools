@@ -27,11 +27,11 @@ pub enum Node {
     /// Input node in case of main/functions/lambdas
     Input { name: String, ty: Type },
 
-    /// A variable node, `a`, `b`, `c`, etc...
-    Variable { name: String, ty: Type, mutable: bool, shadow: bool },
-
     /// A literal value of the given type, `23`, `false`, `"hello"`, etc...
     Literal { value: String, ty: Type },
+
+    /// A variable node, `a`, `b`, `c`, etc...
+    Variable { name: String, ty: Type, mutable: bool, shadow: bool },
 
     /// An operator node, `+`, `-`, `*`, `/`, `%`, etc...
     Operator { op: Operator, ret: Type },
@@ -81,7 +81,7 @@ pub enum Node {
 
 impl Node {
     #[inline(always)]
-    pub fn kind(&self) -> NodeKind {
+    pub const fn kind(&self) -> NodeKind {
         match self {
             Self::Input { .. } => NodeKind::Input,
             Self::Variable { .. } => NodeKind::Variable,
@@ -100,14 +100,24 @@ impl Node {
     }
 
     #[inline(always)]
-    pub fn color(&self) -> &'static str {
+    pub const fn color(&self) -> &'static str {
         match self {
             Self::Input { .. } => "#dc4e23ff",
             Self::Literal { .. } => "#24b3ecff",
-            Self::Variable { shadow: false, .. } => "#6bd85aff",
-            Self::Variable { shadow: true, .. } => "#4a9640ff",
-            Self::Operator { op, .. } if op.is_unary() => "#ffa500",
-            Self::Operator { .. } => "#ffd700",
+            Self::Variable { shadow, .. } => {
+                if *shadow {
+                    "#6bd85aff"
+                } else {
+                    "#4a9640ff"
+                }
+            }
+            Self::Operator { op, .. } => {
+                if op.is_unary() {
+                    "#ffa500"
+                } else {
+                    "#ffd700"
+                }
+            }
             Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#fe8fa2ff",
             Self::Call { .. } => "#e22be2ff",
             Self::Cast { .. } => "#4f47a6ff",

@@ -3,69 +3,61 @@ use petgraph::{algo::toposort, graph::NodeIndex, visit::EdgeRef, Direction};
 use std::collections::{HashMap, HashSet};
 
 impl Forest {
-    /// Build expression string for a node
-    fn build_expr(&self, idx: NodeIndex, expr: &HashMap<usize, String>) -> String {
-        let left = |this: &Self| expr[&this.left(idx).unwrap().index()].clone();
+    fn build_expr(&self, idx: NodeIndex, exprs: &HashMap<usize, String>) -> String {
+        let left = || &exprs[&self.left(idx).unwrap().index()];
 
         match &self.graph[idx] {
             Node::Input { name, .. } |
             Node::Literal { value: name, .. } |
             Node::Variable { name, .. } => name.clone(),
             Node::Operator { op, .. } => match self.right(idx) {
-                Some(r) => format!("({} {} {})", left(self), op, &expr[&r.index()]),
-                None => format!("({}{})", op, left(self)),
+                Some(r) => format!("({} {} {})", left(), op, exprs[&r.index()]),
+                None => format!("({}{})", op, left()),
             },
-            Node::Index { value } => format!("{}[{}]", left(self), value),
-            Node::TupleIndex { value } => format!("{}.{}", left(self), value),
-            Node::FieldAccess { name } => format!("{}.{}", left(self), name),
+            Node::Index { value } => format!("{}[{}]", left(), value),
+            Node::TupleIndex { value } => format!("{}.{}", left(), value),
+            Node::FieldAccess { name } => format!("{}.{}", left(), name),
+            Node::Cast { target } => format!("({} as {})", left(), target),
+            Node::Assignment { .. } => left().clone(),
             Node::Call { name, .. } => {
                 let mut args: Vec<_> = self
                     .graph
                     .edges_directed(idx, Direction::Outgoing)
-                    .map(|e| (*e.weight(), e.target().index()))
+                    .map(|e| (*e.weight(), &exprs[&e.target().index()]))
                     .collect();
-                args.sort_by_key(|(pos, _)| *pos);
-
+                args.sort_by_key(|(p, _)| *p);
                 format!(
                     "{}({})",
                     name,
-                    args.iter().map(|(_, i)| &expr[i]).cloned().collect::<Vec<_>>().join(", ")
+                    args.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join(", ")
                 )
             }
-            Node::Cast { target } => format!("({} as {})", left(self), target),
-            Node::Assignment { .. } => left(self),
-            Node::ForLoop { .. } | Node::If { .. } | Node::Assert { .. } => "()".to_string(),
+            _ => "()".to_string(),
         }
     }
 
-    /// Get the expression string for a specific node
     pub fn get_expr_for_node(&self, target: NodeIndex) -> String {
         let sorted = toposort(&self.graph, None).unwrap();
-        let mut expr: HashMap<usize, String> = HashMap::new();
-
+        let mut exprs = HashMap::new();
         for &idx in sorted.iter().rev() {
-            expr.insert(idx.index(), self.build_expr(idx, &expr));
+            exprs.insert(idx.index(), self.build_expr(idx, &exprs));
         }
-
-        expr[&target.index()].clone()
+        exprs[&target.index()].clone()
     }
-}
 
-impl Forest {
-    /// Compute set of used (non-idle) variable nodes.
-    /// A variable is used if it has incoming edges from other nodes.
     fn compute_used_nodes(&self) -> HashSet<NodeIndex> {
         let mut used = HashSet::new();
-        let mut stack: Vec<NodeIndex> = Vec::new();
+        let mut stack = vec![];
 
         for idx in self.graph.node_indices() {
             let is_root = matches!(
-                &self.graph[idx],
+                self.graph[idx],
                 Node::ForLoop { .. } |
                     Node::If { .. } |
                     Node::Assert { .. } |
                     Node::Assignment { .. }
             ) || self.graph.edges_directed(idx, Direction::Incoming).next().is_some();
+
             if is_root && used.insert(idx) {
                 stack.push(idx);
             }
@@ -81,86 +73,79 @@ impl Forest {
         used
     }
 
-    /// Format forest body with specified indentation prefix
     pub fn format_with_indent(&self, indent: &str) -> String {
-        let sorted = toposort(&self.graph, None).unwrap();
-        let mut expr: HashMap<usize, String> = HashMap::new();
+        let mut exprs = HashMap::new();
         let mut out = String::new();
+        let used = if self.skip_idle_vars { self.compute_used_nodes() } else { HashSet::new() };
+        let next_indent = format!("{indent}    ");
 
-        // Compute used nodes when skip_idle_vars is enabled
-        let used_nodes =
-            if self.skip_idle_vars { self.compute_used_nodes() } else { HashSet::new() };
+        let fmt_block = |body: &Forest| body.format_with_indent(&next_indent);
 
-        for &idx in sorted.iter().rev() {
+        for &idx in toposort(&self.graph, None).unwrap().iter().rev() {
             match &self.graph[idx] {
                 Node::Variable { name, mutable, .. } => {
-                    // Skip idle variables when the flag is set
-                    if self.skip_idle_vars && !used_nodes.contains(&idx) {
-                        expr.insert(idx.index(), name.clone());
+                    if self.skip_idle_vars && !used.contains(&idx) {
+                        exprs.insert(idx.index(), name.clone());
                         continue;
                     }
-                    let src = &expr[&self.left(idx).unwrap().index()];
-                    let mut_kw = if *mutable { "mut " } else { "" };
+                    let val = &exprs[&self.left(idx).unwrap().index()];
                     out.push_str(&format!(
-                        "{}let {}{}: {} = {};\n",
-                        indent,
-                        mut_kw,
+                        "{indent}let {}{}: {} = {val};\n",
+                        if *mutable { "mut " } else { "" },
                         name,
-                        self.ty(idx),
-                        src
+                        self.ty(idx)
                     ));
-                    expr.insert(idx.index(), name.clone());
+                    exprs.insert(idx.index(), name.clone());
                 }
                 Node::Assignment { op } => {
                     let (src, val) = (
-                        &expr[&self.left(idx).unwrap().index()],
-                        &expr[&self.right(idx).unwrap().index()],
+                        &exprs[&self.left(idx).unwrap().index()],
+                        &exprs[&self.right(idx).unwrap().index()],
                     );
-                    let assign_op = op.map(|o| format!(" {o}")).unwrap_or_default();
-                    out.push_str(&format!("{indent}{src} {assign_op}= {val};\n"));
-                    expr.insert(idx.index(), src.clone());
+                    let op_str = op.map(|o| o.to_string()).unwrap_or_default();
+                    out.push_str(&format!("{indent}{src} {op_str}= {val};\n"));
+                    exprs.insert(idx.index(), src.clone());
                 }
                 Node::ForLoop { var, start, end, body, .. } => {
-                    out.push_str(&format!("{}for {} in {}..{} {{\n", indent, var, start, end));
-                    let nested_indent = format!("{}    ", indent);
-                    out.push_str(&body.format_with_indent(&nested_indent));
-                    out.push_str(&format!("{}}}\n", indent));
-                    expr.insert(idx.index(), "()".to_string());
+                    out.push_str(&format!(
+                        "{indent}for {var} in {start}..{end} {{\n{}{indent}}}\n",
+                        fmt_block(body)
+                    ));
+                    exprs.insert(idx.index(), "()".into());
                 }
                 Node::If { condition, then_body, else_ifs, else_body } => {
-                    let cond_expr = &expr[&condition.index()];
-                    out.push_str(&format!("{}if {} {{\n", indent, cond_expr));
-                    let nested_indent = format!("{}    ", indent);
-                    out.push_str(&then_body.format_with_indent(&nested_indent));
-                    out.push_str(&format!("{}}}", indent));
-
-                    for (else_if_cond, else_if_body) in else_ifs {
-                        let else_if_cond_expr = &expr[&else_if_cond.index()];
-                        out.push_str(&format!(" else if {} {{\n", else_if_cond_expr));
-                        out.push_str(&else_if_body.format_with_indent(&nested_indent));
-                        out.push_str(&format!("{}}}", indent));
+                    out.push_str(&format!(
+                        "{indent}if {} {{\n{}{indent}}}",
+                        exprs[&condition.index()],
+                        fmt_block(then_body)
+                    ));
+                    for (cond, body) in else_ifs {
+                        out.push_str(&format!(
+                            " else if {} {{\n{}{indent}}}",
+                            exprs[&cond.index()],
+                            fmt_block(body)
+                        ));
                     }
-
-                    if let Some(else_body) = else_body {
-                        out.push_str(" else {\n");
-                        out.push_str(&else_body.format_with_indent(&nested_indent));
-                        out.push_str(&format!("{}}}\n", indent));
+                    if let Some(body) = else_body {
+                        out.push_str(&format!(" else {{\n{}{indent}}}\n", fmt_block(body)));
                     } else {
                         out.push('\n');
                     }
-
-                    expr.insert(idx.index(), "()".to_string());
+                    exprs.insert(idx.index(), "()".into());
                 }
                 Node::Assert { condition, message } => {
-                    let cond = &expr[&condition.index()];
-                    let msg_part = message.as_ref().map(|m| format!(", {m}")).unwrap_or_default();
-                    out.push_str(&format!("{indent}assert({cond}{msg_part});\n"));
-                    expr.insert(idx.index(), "()".into());
+                    let msg = message.as_ref().map(|m| format!(", {m}")).unwrap_or_default();
+                    out.push_str(&format!("{indent}assert({}{msg});\n", exprs[&condition.index()]));
+                    exprs.insert(idx.index(), "()".into());
                 }
                 _ => {
-                    expr.insert(idx.index(), self.build_expr(idx, &expr));
+                    exprs.insert(idx.index(), self.build_expr(idx, &exprs));
                 }
             }
+        }
+
+        if let Some(return_expr) = &self.return_expr {
+            out.push_str(&format!("{indent}{}\n", return_expr));
         }
 
         out
@@ -169,7 +154,6 @@ impl Forest {
 
 impl std::fmt::Display for Forest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Default: no indentation (caller adds as needed)
-        write!(f, "{}", self.format_with_indent(""))
+        f.write_str(&self.format_with_indent(""))
     }
 }

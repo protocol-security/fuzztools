@@ -12,7 +12,7 @@ use rand::{
 
 impl<T, const N: usize> Mutable for [T; N]
 where
-    T: Mutable + Copy,
+    T: Mutable,
 {
     #[inline(always)]
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
@@ -67,11 +67,9 @@ where
                     let max_idx = idx1.max(idx2);
                     let len = random.random_range(0..=N - max_idx);
 
-                    let slice1 = self[idx1..idx1 + len].to_vec();
-                    let slice2 = self[idx2..idx2 + len].to_vec();
-
-                    self[idx1..idx1 + len].copy_from_slice(&slice2);
-                    self[idx2..idx2 + len].copy_from_slice(&slice1);
+                    for i in 0..len {
+                        self.swap(idx1 + i, idx2 + i);
+                    }
                 }
             }
             // slice_mutate

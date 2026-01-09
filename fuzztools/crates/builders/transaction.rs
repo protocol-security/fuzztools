@@ -18,8 +18,9 @@ pub struct TransactionBuilder {
 }
 
 impl TransactionBuilder {
-    /// Creates a new TransactionBuilder from raw values (no provider needed)
-    pub fn from_values(
+    /// Creates a new `TransactionBuilder` from raw values
+    #[inline(always)]
+    pub const fn from_values(
         access_list_target: Address,
         chain_id: u64,
         gas_price: u128,
@@ -41,20 +42,20 @@ impl TransactionBuilder {
 
     /// Updates gas prices directly
     #[inline(always)]
-    pub fn set_gas_prices(&mut self, gas_price: u128, priority_fee: u128) {
+    pub const fn set_gas_prices(&mut self, gas_price: u128, priority_fee: u128) {
         self.gas_price = gas_price;
         self.priority_fee = priority_fee;
     }
 
     /// Handy method to compute `max_fee_per_gas`
     #[inline(always)]
-    fn max_fee_per_gas(&self) -> u128 {
+    const fn max_fee_per_gas(&self) -> u128 {
         self.gas_price.saturating_mul(2).saturating_add(self.priority_fee)
     }
 
     /// Bumps `self.signer_nonce` and returns the previous value
     #[inline(always)]
-    fn next_signer_nonce(&mut self) -> u64 {
+    const fn next_signer_nonce(&mut self) -> u64 {
         let nonce = self.signer_nonce;
         self.signer_nonce += 1;
         nonce
@@ -62,7 +63,7 @@ impl TransactionBuilder {
 
     /// Bumps `self.auth_nonce` and returns the previous value
     #[inline(always)]
-    fn next_auth_nonce(&mut self) -> u64 {
+    const fn next_auth_nonce(&mut self) -> u64 {
         let nonce = self.auth_nonce;
         self.auth_nonce += 1;
         nonce

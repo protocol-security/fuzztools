@@ -5,16 +5,19 @@ authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 alloy.workspace = true
+alloy-signer-local.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
-futures.workspace = true
 fuzztools.workspace = true
 rand.workspace = true
-rayon.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+rayon.workspace = true

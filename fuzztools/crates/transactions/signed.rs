@@ -77,7 +77,7 @@ impl SignedTransaction {
 
     // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html
     #[inline(always)]
-    fn to_eip155_value(&self, y_parity: bool, chain_id: Option<u64>) -> u128 {
+    const fn to_eip155_value(&self, y_parity: bool, chain_id: Option<u64>) -> u128 {
         match chain_id {
             Some(id) => 35 + id as u128 * 2 + y_parity as u128,
             None => 27 + y_parity as u128,

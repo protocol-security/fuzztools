@@ -9,10 +9,8 @@ rust-version.workspace = true
 alloy.workspace = true
 alloy-rlp.workspace = true
 rand.workspace = true
-rayon.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-secp256k1.workspace = true
 anyhow.workspace = true
 mutable.workspace = true
 serde.workspace = true
@@ -20,6 +18,10 @@ serde_json.workspace = true
 reqwest.workspace = true
 petgraph.workspace = true
 tempfile.workspace = true
+arbitrary = { version = "1.4.2", features = ["derive"] }
+
+[lints]
+workspace = true
 
 [lib]
 path = "crates/lib.rs"

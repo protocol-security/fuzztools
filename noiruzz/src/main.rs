@@ -6,6 +6,8 @@ use std::{fs, path::Path};
 
 mod app;
 mod constants;
+mod scheduler;
+mod commands;
 use crate::app::App;
 use constants::{GREEN, HEADER, RED, RESET};
 
@@ -15,7 +17,7 @@ struct Cli {
     #[arg(long, default_value = "0", help = "Seed for the random generator")]
     seed: u64,
 
-    #[arg(long, default_value = "0", help = "Number of executions per circuit")]
+    #[arg(long, default_value = "10", help = "Number of executions per circuit")]
     executions: usize,
 
     #[arg(long, help = "Path to the config file")]
@@ -32,7 +34,8 @@ struct Cli {
     target_ratio: f64,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let crash_dir = cli.crash_dir.unwrap_or_else(|| "./crashes/".into());
@@ -56,7 +59,7 @@ fn main() -> Result<()> {
     let mut app = App::new(ctx, cli.executions, prelude, crash_dir, cli.target_ratio)?;
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
-    if let Err(e) = app.run(&mut random) {
+    if let Err(e) = app.run(&mut random).await {
         eprintln!("\n\n\x1b[1;31m[!] Error: {e}\x1b[0m");
     }
 

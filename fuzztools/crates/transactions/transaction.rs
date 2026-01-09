@@ -12,7 +12,7 @@ use alloy_rlp::{BufMut, Encodable, Header};
 use mutable::Mutable;
 use rand::Rng;
 
-#[derive(Clone, Default, Mutable)]
+#[derive(Debug, Clone, Default, Mutable)]
 /// A wrapper around all possible fields an Ethereum transaction can have
 pub struct Transaction {
     // Transaction type

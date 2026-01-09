@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::circuits::{
     ast::{forest::Forest, nodes::NodeKind},
     context::Context,
@@ -43,7 +41,7 @@ pub enum Type {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Integer {
-    pub bits: u8,
+    pub bits: u32,
     pub signed: bool,
 }
 
@@ -102,7 +100,7 @@ pub struct Lambda {
 
 impl Type {
     #[inline(always)]
-    pub fn kind(&self) -> TypeKind {
+    pub const fn kind(&self) -> TypeKind {
         match self {
             Type::Field => TypeKind::Field,
             Type::Integer(i) if i.signed => TypeKind::Signed,
@@ -119,37 +117,31 @@ impl Type {
     }
 
     #[inline(always)]
-    pub fn is_signed(&self) -> bool {
+    pub const fn is_signed(&self) -> bool {
         matches!(self.kind(), TypeKind::Signed)
     }
 
     #[inline(always)]
-    pub fn is_unsigned(&self) -> bool {
+    pub const fn is_unsigned(&self) -> bool {
         matches!(self.kind(), TypeKind::Unsigned)
     }
 
     #[inline(always)]
-    pub fn can_be_mutable(&self) -> bool {
+    pub const fn can_be_mutable(&self) -> bool {
         !matches!(self, Type::Lambda(_))
     }
 
     #[inline(always)]
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        exprs: &HashMap<Type, Vec<String>>,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         match self {
             Type::Field => format!("{}Field", random_field_element(random, ctx, "bn254")),
             Type::Integer(i) => i.random_value(random, ctx),
             Type::Boolean => random.random_bool(0.5).to_string(),
             Type::String(s) => s.random_value(random, ctx),
-            Type::Array(a) => a.random_value(random, ctx, scope, exprs),
-            Type::Slice(s) => s.random_value(random, ctx, scope, exprs),
-            Type::Tuple(t) => t.random_value(random, ctx, scope, exprs),
-            Type::Struct(s) => s.random_value(random, ctx, scope, exprs),
+            Type::Array(a) => a.random_value(random, ctx, scope),
+            Type::Slice(s) => s.random_value(random, ctx, scope),
+            Type::Tuple(t) => t.random_value(random, ctx, scope),
+            Type::Struct(s) => s.random_value(random, ctx, scope),
             Type::Lambda(l) => l.random_value(random, ctx, scope),
             Type::Empty => "()".to_string(),
         }
@@ -159,8 +151,8 @@ impl Type {
     /// - Primitive types: `Field`, `Integer`, `Boolean`
     /// - Strings with a non-zero size
     /// - Arrays with a non-zero size and a valid sub-type
-    /// - Tuples with a size greater than 1 (as otherwise they collapse to a single type) and a
-    ///   valid sub-type
+    /// - Tuples with a size greater than 1 (as otherwise they collapse to a single type) and valid
+    ///   sub-types
     /// - Structs where all fields are valid public inputs
     ///
     /// The rest are all invalid as public inputs.
@@ -179,7 +171,7 @@ impl Type {
     }
 
     #[inline(always)]
-    pub fn allows_slice(&self) -> bool {
+    pub fn has_slice(&self) -> bool {
         match self {
             Type::Field |
             Type::Integer(_) |
@@ -188,9 +180,9 @@ impl Type {
             Type::Lambda(_) |
             Type::Empty => false,
             Type::Slice(_) => true,
-            Type::Array(a) => a.ty.allows_slice(),
-            Type::Tuple(t) => t.elements.iter().any(|e| e.allows_slice()),
-            Type::Struct(s) => s.fields.iter().any(|f| f.ty.allows_slice()),
+            Type::Array(a) => a.ty.has_slice(),
+            Type::Tuple(t) => t.elements.iter().any(|e| e.has_slice()),
+            Type::Struct(s) => s.fields.iter().any(|f| f.ty.has_slice()),
         }
     }
 
@@ -216,32 +208,34 @@ impl Integer {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let ty = format!("{}{}", if self.signed { "i" } else { "u" }, self.bits);
 
-        // Special cases
-        if self.bits == 1 {
-            return format!("{}{}", if random.random_bool(0.5) { "1" } else { "0" }, ty);
+        // This is a helper macro, dont mind it
+        macro_rules! pick {
+            ($min:expr, $max:expr, $boundaries:expr) => {
+                if bernoulli(random, ctx.boundary_value_probability) {
+                    *$boundaries.choose(random).unwrap()
+                } else if bernoulli(random, ctx.small_value_probability) {
+                    let small_limit = (ctx.max_small_value as u128).min($max as u128);
+                    random.random_range(0..=small_limit as _)
+                } else {
+                    random.random_range($min..=$max)
+                }
+            };
         }
 
-        if self.bits == 128 {
-            return format!("{}{}", random.random_range(0..=u128::MAX), ty);
+        // Short circuit if `u1`
+        if self.bits == 1 {
+            return format!("{}{}", random.random_bool(0.5) as u8, ty);
         }
 
         let value = if self.signed {
-            let half = 1i128 << (self.bits - 1);
-            let (min, max) = (-half, half - 1);
+            let half = 1i128.checked_shl(self.bits - 1);
+            let (min, max) = half.map(|h| (-h, h - 1)).unwrap_or((i128::MIN, i128::MAX));
 
-            if bernoulli(random, ctx.boundary_value_probability) {
-                *[0, 1, -1, min, max].choose(random).unwrap()
-            } else {
-                random.random_range(min..=max)
-            }
+            pick!(min, max, [0, 1, -1, min, max]).to_string()
         } else {
-            let max = (1 << self.bits) - 1;
+            let max = 1u128.checked_shl(self.bits).map(|m| m - 1).unwrap_or(u128::MAX);
 
-            if bernoulli(random, ctx.boundary_value_probability) {
-                *[0, 1, max].choose(random).unwrap()
-            } else {
-                random.random_range(0..=max)
-            }
+            pick!(0, max, [0, 1, max]).to_string()
         };
 
         format!("{}{}", value, ty)
@@ -253,7 +247,7 @@ impl StringType {
         let value = random_string(random, self.size, self.is_raw);
 
         if self.is_raw {
-            let hash_count = random.random_range(0..ctx.max_hashes_count);
+            let hash_count = random.random_range(0..=ctx.max_hashes_count);
             let hashes = "#".repeat(hash_count);
             format!("r{hashes}\"{value}\"{hashes}")
         } else {
@@ -267,65 +261,38 @@ impl StringType {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Array {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        exprs: &HashMap<Type, Vec<String>>,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope, exprs)).collect();
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
 
         format!("[{}]", elems.join(", "))
     }
 }
 
 impl Slice {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        exprs: &HashMap<Type, Vec<String>>,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope, exprs)).collect();
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
 
         format!("&[{}]", elems.join(", "))
     }
 }
 
 impl Tuple {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        exprs: &HashMap<Type, Vec<String>>,
-    ) -> String {
-        let elems: Vec<_> = self
-            .elements
-            .iter()
-            .map(|elem_ty| elem_ty.random_value(random, ctx, scope, exprs))
-            .collect();
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+        let elems: Vec<_> =
+            self.elements.iter().map(|elem_ty| elem_ty.random_value(random, ctx, scope)).collect();
 
         format!("({})", elems.join(", "))
     }
 }
 
 impl Struct {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        exprs: &HashMap<Type, Vec<String>>,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let fields: Vec<_> = self
             .fields
             .iter()
-            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope, exprs)))
+            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope)))
             .collect();
 
         format!("{} {{ {} }}", self.name, fields.join(", "))
@@ -334,59 +301,42 @@ impl Struct {
 
 impl Lambda {
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        let lambda_scope = Scope {
-            inputs: self.params.iter().map(|(n, t)| (n.clone(), t.clone(), false)).collect(),
-            lambda_depth: scope.lambda_depth + 1,
-            ..scope.clone()
-        };
+        // Compute bias from param types and return type
+        let mut bias = self.params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+        bias.push((*self.ret).clone());
+
+        let mut scope = scope.clone();
+        scope.lambda_depth += 1;
+        scope.ret = Some(((*self.ret).clone(), false));
+        scope.type_bias = Scope::compute_type_bias(&bias);
+        scope.inputs = self.params.iter().cloned().map(|(name, ty)| (name, ty, false)).collect();
 
         let mut body = Forest::default();
-        for (name, ty) in &self.params {
-            let idx = body.input(name.clone(), ty.clone());
-            body.register(idx, NodeKind::Input, ty, None);
-        }
-
-        // Boost return type weight
-        let mut lambda_ctx = *ctx;
-        boost_type_weight(&mut lambda_ctx, self.ret.kind());
+        self.params.iter().for_each(|(n, t)| {
+            let idx = body.input(n.clone(), t.clone());
+            body.register(random, idx, NodeKind::Input, t, None);
+        });
 
         body.random_with_bounds(
             random,
-            &lambda_ctx,
-            &lambda_scope,
+            ctx,
+            &scope,
             ctx.min_lambda_body_size,
             ctx.max_lambda_body_size,
             false,
         );
 
-        let params_str =
+        body.set_return_expression(random, ctx, &scope);
+
+        let indent = "    ".repeat(scope.lambda_depth);
+        let params =
             self.params.iter().map(|(n, t)| format!("{n}: {t}")).collect::<Vec<_>>().join(", ");
-        let body_str = body.format_with_indent("        ");
 
-        if matches!(*self.ret, Type::Empty) {
-            format!("|{params_str}| {{\n{body_str}}}")
-        } else {
-            let ret_expr = body
-                .find_return_candidate(random, &self.ret)
-                .unwrap_or_else(|| self.ret.random_value(random, ctx, &lambda_scope, &body.exprs));
-            format!("|{params_str}| -> {} {{\n{body_str}    {ret_expr}\n}}", self.ret)
-        }
-    }
-}
-
-fn boost_type_weight(ctx: &mut Context, kind: TypeKind) {
-    match kind {
-        TypeKind::Field => ctx.field_weight *= 100,
-        TypeKind::Unsigned => ctx.unsigned_weight *= 100,
-        TypeKind::Signed => ctx.signed_weight *= 100,
-        TypeKind::Boolean => ctx.boolean_weight *= 100,
-        TypeKind::String => ctx.string_weight *= 100,
-        TypeKind::Array => ctx.array_weight *= 100,
-        TypeKind::Slice => ctx.slice_weight *= 100,
-        TypeKind::Tuple => ctx.tuple_weight *= 100,
-        TypeKind::Struct => ctx.struct_weight *= 100,
-        TypeKind::Lambda => ctx.lambda_weight *= 100,
-        TypeKind::Empty => ctx.empty_weight *= 100,
+        format!(
+            "|{params}| -> {} {{\n{}{indent}}}",
+            self.ret,
+            body.format_with_indent(&format!("{indent}    "))
+        )
     }
 }
 
@@ -397,35 +347,23 @@ fn boost_type_weight(ctx: &mut Context, kind: TypeKind) {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Field => f.write_str("Field"),
-            Type::Integer(i) => write!(f, "{}{}", if i.signed { "i" } else { "u" }, i.bits),
-            Type::Boolean => f.write_str("bool"),
-            Type::String(s) => write!(f, "str<{}>", s.size),
-            Type::Array(a) => write!(f, "[{}; {}]", a.ty, a.size),
-            Type::Slice(s) => write!(f, "[{}]", s.ty),
-            Type::Tuple(t) => write!(
-                f,
-                "({})",
-                t.elements.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
-            ),
-            Type::Struct(s) => write!(f, "{}", s.name),
-            Type::Lambda(l) => write!(
-                f,
-                "fn({}) -> {}",
-                l.params.iter().map(|(_, ty)| ty.to_string()).collect::<Vec<_>>().join(", "),
-                l.ret
-            ),
-            Type::Empty => f.write_str("()"),
-        }
-    }
-}
-
-impl std::fmt::Display for Visibility {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Visibility::Public => f.write_str("pub "),
-            Visibility::PublicCrate => f.write_str("pub(crate) "),
-            Visibility::Private => f.write_str(""),
+            Self::Field => f.write_str("Field"),
+            Self::Boolean => f.write_str("bool"),
+            Self::Empty => f.write_str("()"),
+            Self::Integer(i) => write!(f, "{}{}", if i.signed { "i" } else { "u" }, i.bits),
+            Self::String(s) => write!(f, "str<{}>", s.size),
+            Self::Array(a) => write!(f, "[{}; {}]", a.ty, a.size),
+            Self::Slice(s) => write!(f, "[{}]", s.ty),
+            Self::Struct(s) => f.write_str(&s.name),
+            Self::Tuple(t) => {
+                let elems = t.elements.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
+                write!(f, "({elems})")
+            }
+            Self::Lambda(l) => {
+                let args =
+                    l.params.iter().map(|(_, t)| t.to_string()).collect::<Vec<_>>().join(", ");
+                write!(f, "fn({args}) -> {}", l.ret)
+            }
         }
     }
 }
@@ -434,8 +372,8 @@ impl std::fmt::Display for Struct {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "struct {} {{", self.name)?;
 
-        for field in self.fields.iter() {
-            writeln!(f, "    {}{}: {},", field.visibility, field.name, field.ty)?;
+        for field in &self.fields {
+            writeln!(f, "    {}: {},", field.name, field.ty)?;
         }
 
         writeln!(f, "}}")?;

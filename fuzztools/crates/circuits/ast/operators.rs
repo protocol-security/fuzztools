@@ -21,15 +21,15 @@ pub enum Operator {
 }
 
 impl Operator {
-    pub const fn binary_field() -> &'static [Operator] {
+    pub const fn binary_field() -> &'static [Self] {
         &[Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Equal, Self::NotEqual]
     }
 
-    pub const fn unary_field() -> &'static [Operator] {
+    pub const fn unary_field() -> &'static [Self] {
         &[Self::Neg]
     }
 
-    pub const fn binary_integer_signed() -> &'static [Operator] {
+    pub const fn binary_integer_signed() -> &'static [Self] {
         &[
             Self::Add,
             Self::Sub,
@@ -50,11 +50,11 @@ impl Operator {
         ]
     }
 
-    pub const fn unary_integer_signed() -> &'static [Operator] {
+    pub const fn unary_integer_signed() -> &'static [Self] {
         &[Self::Neg, Self::Not]
     }
 
-    pub const fn binary_integer_unsigned() -> &'static [Operator] {
+    pub const fn binary_integer_unsigned() -> &'static [Self] {
         &[
             Self::Add,
             Self::Sub,
@@ -75,15 +75,15 @@ impl Operator {
         ]
     }
 
-    pub const fn unary_integer_unsigned() -> &'static [Operator] {
+    pub const fn unary_integer_unsigned() -> &'static [Self] {
         &[Self::Not]
     }
 
-    pub const fn binary_boolean() -> &'static [Operator] {
+    pub const fn binary_boolean() -> &'static [Self] {
         &[Self::And, Self::Or, Self::Xor, Self::Equal, Self::NotEqual]
     }
 
-    pub const fn unary_boolean() -> &'static [Operator] {
+    pub const fn unary_boolean() -> &'static [Self] {
         &[Self::Not]
     }
 
@@ -119,11 +119,11 @@ impl Operator {
         )
     }
 
-    pub const fn compound_field() -> &'static [Operator] {
+    pub const fn compound_field() -> &'static [Self] {
         &[Self::Add, Self::Sub, Self::Mul, Self::Div]
     }
 
-    pub const fn compound_integer_signed() -> &'static [Operator] {
+    pub const fn compound_integer() -> &'static [Self] {
         &[
             Self::Add,
             Self::Sub,
@@ -138,22 +138,7 @@ impl Operator {
         ]
     }
 
-    pub const fn compound_integer_unsigned() -> &'static [Operator] {
-        &[
-            Self::Add,
-            Self::Sub,
-            Self::Mul,
-            Self::Div,
-            Self::Mod,
-            Self::And,
-            Self::Or,
-            Self::Xor,
-            Self::Shl,
-            Self::Shr,
-        ]
-    }
-
-    pub const fn compound_boolean() -> &'static [Operator] {
+    pub const fn compound_boolean() -> &'static [Self] {
         &[Self::And, Self::Or, Self::Xor]
     }
 }
@@ -166,7 +151,7 @@ impl std::fmt::Display for Operator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Add => write!(f, "+"),
-            Self::Sub => write!(f, "-"),
+            Self::Sub | Self::Neg => write!(f, "-"),
             Self::Mul => write!(f, "*"),
             Self::Div => write!(f, "/"),
             Self::Mod => write!(f, "%"),
@@ -182,7 +167,6 @@ impl std::fmt::Display for Operator {
             Self::Equal => write!(f, "=="),
             Self::NotEqual => write!(f, "!="),
             Self::Not => write!(f, "!"),
-            Self::Neg => write!(f, "-"),
         }
     }
 }

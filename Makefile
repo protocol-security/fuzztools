@@ -17,14 +17,19 @@ rm-testnet:
 	kurtosis enclave rm testnet --force
 
 geth-testnet:
-	geth --dev --dev.period 12 --ipcpath /tmp/geth.ipc --datadir ./tmp/geth-db
+	geth --dev \
+		--dev.period 12 \
+		--datadir ./tmp/geth-db \
+		--http \
+		--http.addr "127.0.0.1" \
+		--http.port 8545 \
+		--http.api "eth,net,web3,debug"
 
 reth-testnet:
 	reth node \
 		--dev \
 		--dev.block-time 12s \
 		--datadir ./tmp/reth-db \
-		--ipcpath /tmp/reth.ipc \
 
 # These are commands for building
 build:

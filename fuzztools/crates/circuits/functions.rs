@@ -1,5 +1,5 @@
 use crate::circuits::{
-    ast::{forest::Forest, types::Type},
+    ast::{forest::Forest, nodes::NodeKind, types::Type},
     context::Context,
     generators::types::TypeLocation,
     scope::Scope,
@@ -10,43 +10,62 @@ use rand::Rng;
 pub struct Function {
     pub name: String,
     pub params: Vec<(String, Type)>,
-    pub ret: Option<Type>,
+    pub ret: Type,
     pub body: Forest,
-    pub ret_expr: Option<String>,
 }
 
 impl Function {
     pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, name: String) -> Self {
-        let param_count = random
-            .random_range(ctx.min_function_parameters_count..ctx.max_function_parameters_count);
-        let params: Vec<(String, Type)> = (0..param_count)
+        // First, generate function arguments
+        let count = random
+            .random_range(ctx.min_function_parameters_count..=ctx.max_function_parameters_count);
+        let params: Vec<_> = (0..count)
             .map(|i| (format!("p{}", i), Type::random(random, ctx, scope, TypeLocation::Default)))
             .collect();
 
-        let ret = random
-            .random_bool(ctx.function_return_probability)
-            .then(|| Type::random(random, ctx, scope, TypeLocation::Default));
+        // Generate return type
+        let ret = Type::random(random, ctx, scope, TypeLocation::Default);
 
-        let body = Forest::default();
+        // Then, bias generation towards them
+        let mut bias: Vec<_> = params.iter().map(|(_, t)| t.clone()).collect();
+        bias.push(ret.clone());
 
-        Self { name, params, ret, body, ret_expr: None }
-    }
+        let mut scope = scope.clone();
+        scope.ret = Some((ret.clone(), false));
+        scope.inputs = params.iter().cloned().map(|(n, t)| (n, t, false)).collect();
+        scope.type_bias = Scope::compute_type_bias(&bias);
 
-    pub fn signature(&self) -> String {
-        let params =
-            self.params.iter().map(|(n, t)| format!("{}: {}", n, t)).collect::<Vec<_>>().join(", ");
-        let ret = self.ret.as_ref().map(|t| format!(" -> {}", t)).unwrap_or_default();
-        format!("fn {}({}){}", self.name, params, ret)
+        let mut body = Forest::default();
+
+        // Make arguments as inputs into the forest
+        for (n, t) in &params {
+            let idx = body.input(n.clone(), t.clone());
+            body.register(random, idx, NodeKind::Input, t, None);
+        }
+
+        // Generate
+        body.random_with_bounds(
+            random,
+            ctx,
+            &scope,
+            ctx.min_function_body_size,
+            ctx.max_function_body_size,
+            false,
+        );
+
+        body.set_return_expression(random, ctx, &scope);
+
+        Self { name, params, ret, body }
     }
 }
 
 impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{} {{", self.signature())?;
-        write!(f, "{}", self.body.format_with_indent("    "))?;
-        if let Some(ret_expr) = &self.ret_expr {
-            writeln!(f, "    {}", ret_expr)?;
-        }
+        let params =
+            self.params.iter().map(|(n, t)| format!("{}: {}", n, t)).collect::<Vec<_>>().join(", ");
+
+        writeln!(f, "fn {}({}) -> {} {{", self.name, params, self.ret)?;
+        writeln!(f, "{}", self.body.format_with_indent("    "))?;
         writeln!(f, "}}")
     }
 }

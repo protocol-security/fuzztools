@@ -36,7 +36,7 @@ pub const EPOCHS_PER_SYNC_COMMITTEE_PERIOD: u64 = 256;
 pub const INACTIVITY_SCORE_BIAS: u64 = 4;
 pub const INACTIVITY_SCORE_RECOVERY_RATE: u64 = 16;
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -50,7 +50,7 @@ pub struct BeaconBlockBody {
     pub sync_aggregate: SyncAggregate,
 }
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,
@@ -83,13 +83,13 @@ pub struct BeaconState {
     pub next_sync_committee: SyncCommittee,
 }
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct SyncAggregate {
     pub sync_committee_bits: [u8; SYNC_COMMITTEE_SIZE as usize],
     pub sync_committee_signature: BLSSignature,
 }
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct SyncCommittee {
     pub pubkeys: [BLSPubkey; SYNC_COMMITTEE_SIZE as usize],
     pub aggregate_pubkey: BLSPubkey,

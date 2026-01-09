@@ -5,3 +5,5 @@ Cargo.lock
 *.dot
 /.vscode
 *.svg
+/circuzz
+/tmp

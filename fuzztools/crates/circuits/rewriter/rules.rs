@@ -10,14 +10,17 @@ pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Structural transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Swap operands for commutative operators: (a op b) ↔ (b op a)
     /// Covers: comm-add, comm-mul, comm-and, comm-or, comm-xor, commutativity-equ
-    SwapOperands { ops: &'static [Operator] },
+    SwapOperands {
+        ops: &'static [Operator],
+    },
 
     /// Re-associate operators: ((a op b) op c) ↔ (a op (b op c))
     /// Covers: assoc-add, assoc-mul, assoc-and, assoc-or, assoc-xor, assoc-lor, assoc-land
-    Associate { ops: &'static [Operator] },
+    Associate {
+        ops: &'static [Operator],
+    },
 
     /// Subtraction associativity: ((a - b) - c) ↔ (a - (b + c))
     /// Covers: inv-assoc-neg2pos, inv-assoc-pos2neg
@@ -25,44 +28,61 @@ pub enum RuleKind {
 
     /// Division associativity: ((a / b) * c) ↔ (a * (c / b))
     /// Covers: assoc-div, assoc-div-rev
+    /// NOTE: Only valid for Field types (integer division has different semantics)
     AssociateDiv,
 
     /// Division commutativity: (a / b) → ((1 / b) * a)
     /// Covers: comm-div
+    /// NOTE: Only valid for Field types (integer division truncates 1/b to 0)
     DivCommute,
 
     /// Distribute operators: ((a inner b) outer c) ↔ ((a outer c) inner (b outer c))
     /// Covers: dist-mul-add, dist-add-mul, dist-lor-land, dist-land-lor
-    Distribute { outer: Operator, inner: Operator },
+    Distribute {
+        outer: Operator,
+        inner: Operator,
+    },
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Identity and absorbing element rules
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Remove/inject identity element: (a op identity) ↔ a
     /// Covers: zero-add-des/con, zero-or-rev/con, zero-xor-rev/con, one-mul-des/con,
     ///         one-div-des/con, inv-zero-add-des/con, zero-lor-des/con, zero-land-des/con
-    Identity { op: Operator, identity_right: bool },
+    /// NOTE: For And (a & 1 = a), only valid for booleans (for integers, a & 1 keeps only LSB)
+    Identity {
+        op: Operator,
+        identity_right: bool,
+    },
 
     /// Replace with absorbing element: (a op absorbing) → absorbing
     /// Covers: and-zero, mul-zero, taut-lor, contra-land
-    Absorb { op: Operator },
+    /// NOTE: For Or (a | 1 = 1), only valid for booleans (for integers, a | 1 sets only LSB)
+    Absorb {
+        op: Operator,
+    },
 
     /// Self inverse: (a op a) → identity
     /// Covers: inv-xor (a ^ a → 0), inv-add-des (a - a → 0), inv-div-des (a / a → 1)
-    SelfInverse { op: Operator },
+    /// NOTE: For Div, only applied to known non-zero literals (a / a is UB if a = 0)
+    SelfInverse {
+        op: Operator,
+    },
 
     /// Idempotent: (a op a) ↔ a
     /// Covers: idem-and, idem-or, double-land-des/con, double-lor-des/con
-    Idempotent { op: Operator },
+    Idempotent {
+        op: Operator,
+    },
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Unary and negation transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Double unary cancellation: op(op(a)) ↔ a
     /// Covers: double-negation-des/con, double-negation-add-des/con
-    DoubleUnary { op: Operator },
+    DoubleUnary {
+        op: Operator,
+    },
 
     /// Addition to negation: (a - b) ↔ (a + (-b))
     /// Covers: inv-addition-inl, inv-addition-exp
@@ -75,7 +95,6 @@ pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Comparison transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Flip comparison by swapping operands: (a < b) ↔ (b > a)
     /// Covers: relation-geq-to-leq, relation-leq-to-geq
     FlipComparison,
@@ -91,13 +110,12 @@ pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Boolean logic transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// De Morgan's laws: !(a && b) ↔ (!a || !b), !(a || b) ↔ (!a && !b)
     /// Covers: de-morgan-land-con/des, de-morgan-lor-con/des
     DeMorgan,
 
-    /// Complement via XOR: !a ↔ (a ^ 1)
-    /// Covers: (useful for boolean/integer not transformations)
+    /// Complement via XOR: !a ↔ (a ^ true)
+    /// NOTE: Only valid for booleans (for integers, !a is bitwise NOT ≠ a ^ 1)
     ComplementXor,
 
     /// XOR to AND/OR expansion: (a ^ b) ↔ ((!a & b) | (a & !b))
@@ -107,7 +125,6 @@ pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Modulo transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Modulo by one: (a % 1) ↔ 0
     /// Covers: rem-of-one-des, rem-of-one-con
     ModOne,
@@ -119,20 +136,20 @@ pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Shift transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Shift by zero identity: (a << 0) → a, (a >> 0) → a
     ShiftZero,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Obfuscation (inject balanced operations)
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Inject add/sub pair: a → ((a + r) - r) or a → ((a - r) + r)
     /// Covers: add-sub-random-value
+    /// NOTE: Only for Field types (integer overflow breaks equivalence)
     InjectAddSub,
     InjectSubAdd,
 
     /// Inject mul/div pair: a → ((a * r) / r)
+    /// NOTE: Only for Field types (integer overflow breaks equivalence)
     InjectMulDiv,
 
     /// Inject xor pair: a → ((a ^ r) ^ r)
@@ -154,7 +171,6 @@ pub enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Simplification / strength reduction
     // ═══════════════════════════════════════════════════════════════════════════════
-
     /// Double to multiply by two: (a + a) ↔ (a * 2)
     DoubleMulTwo,
 

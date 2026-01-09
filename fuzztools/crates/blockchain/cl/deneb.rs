@@ -15,7 +15,7 @@ pub const MAX_BLOB_COMMITMENTS_PER_BLOCK: u64 = 4096;
 pub const MAX_BLOBS_PER_BLOCK: u64 = 6;
 pub const MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT: u64 = 8;
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct BeaconBlockBody {
     pub randao_reveal: BLSSignature,
     pub eth1_data: Eth1Data,
@@ -34,7 +34,7 @@ pub struct BeaconBlockBody {
     pub blob_kzg_commitments: [KZGCommitment; MAX_BLOB_COMMITMENTS_PER_BLOCK as usize],
 }
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct ExecutionPayload {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -57,7 +57,7 @@ pub struct ExecutionPayload {
     pub excess_blob_gas: u64,
 }
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct ExecutionPayloadHeader {
     pub parent_hash: Hash32,
     pub fee_recipient: ExecutionAddress,
@@ -80,7 +80,7 @@ pub struct ExecutionPayloadHeader {
     pub excess_blob_gas: u64,
 }
 
-#[derive(Clone, Copy, Mutable)]
+#[derive(Mutable)]
 pub struct BeaconState {
     pub genesis_time: u64,
     pub genesis_validators_root: Root,
