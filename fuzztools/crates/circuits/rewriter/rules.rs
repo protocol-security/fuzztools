@@ -184,6 +184,44 @@ impl Rule {
     }
 }
 
+impl RuleKind {
+    pub fn name(&self) -> String {
+        match self {
+            Self::SwapOperands { .. } => "SwapOperands".into(),
+            Self::Associate { .. } => "Associate".into(),
+            Self::AssociateSub => "AssociateSub".into(),
+            Self::AssociateDiv => "AssociateDiv".into(),
+            Self::DivCommute => "DivCommute".into(),
+            Self::Distribute { outer, inner } => format!("Distribute({outer},{inner})"),
+            Self::Identity { op, .. } => format!("Identity({op})"),
+            Self::Absorb { op } => format!("Absorb({op})"),
+            Self::SelfInverse { op } => format!("SelfInverse({op})"),
+            Self::Idempotent { op } => format!("Idempotent({op})"),
+            Self::DoubleUnary { op } => format!("DoubleUnary({op})"),
+            Self::AddNegSub => "AddNegSub".into(),
+            Self::NegZeroSub => "NegZeroSub".into(),
+            Self::FlipComparison => "FlipComparison".into(),
+            Self::NegateComparison => "NegateComparison".into(),
+            Self::ExpandComparison => "ExpandComparison".into(),
+            Self::DeMorgan => "DeMorgan".into(),
+            Self::ComplementXor => "ComplementXor".into(),
+            Self::XorToAndOr => "XorToAndOr".into(),
+            Self::ModOne => "ModOne".into(),
+            Self::AndToMod => "AndToMod".into(),
+            Self::ShiftZero => "ShiftZero".into(),
+            Self::InjectAddSub => "InjectAddSub".into(),
+            Self::InjectSubAdd => "InjectSubAdd".into(),
+            Self::InjectMulDiv => "InjectMulDiv".into(),
+            Self::InjectXorXor => "InjectXorXor".into(),
+            Self::InjectDivDiv => "InjectDivDiv".into(),
+            Self::InjectOrZero => "InjectOrZero".into(),
+            Self::InjectAndSelf => "InjectAndSelf".into(),
+            Self::DoubleMulTwo => "DoubleMulTwo".into(),
+            Self::MulNegOneNeg => "MulNegOneNeg".into(),
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // RULE CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════

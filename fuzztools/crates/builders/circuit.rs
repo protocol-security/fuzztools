@@ -70,7 +70,7 @@ impl CircuitBuilder {
         // Create globals (can be used in functions or main)
         for i in 0..random.random_range(ctx.min_globals_count..=ctx.max_globals_count) {
             let ty = Type::random(random, ctx, &scope, TypeLocation::Default);
-            let value = ty.random_value(random, ctx, &scope);
+            let value = ty.random_value(random, ctx, &scope, true);
             scope.globals.push((format!("global{i}"), ty, value));
         }
 
@@ -157,7 +157,7 @@ impl CircuitBuilder {
         scope
             .inputs
             .iter()
-            .map(|(name, ty, _)| format!("{name} = {}", ty.random_value(random, ctx, scope)))
+            .map(|(name, ty, _)| format!("{name} = {}", ty.random_value(random, ctx, scope, false)))
             .collect::<Vec<_>>()
             .join("\n")
     }

@@ -1,5 +1,7 @@
-use std::{sync::atomic::{AtomicU64, Ordering}, time::Duration};
-
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 pub(crate) struct PowerScheduler {
     t1: AtomicU64,

@@ -226,6 +226,30 @@ impl Forest {
             return;
         }
 
+        // Check if this node is used as a condition in any `If` or `Assert`. As we remove dangling
+        // nodes when rewriting, we need to check if the node is used as a condition in any `If` or
+        // `Assert`, otherwise it will be removed and the formatter will crash
+        for idx in self.graph.node_indices() {
+            match &self.graph[idx] {
+                Node::If { condition, else_ifs, .. } => {
+                    if *condition == node {
+                        return;
+                    }
+                    for (cond, _) in else_ifs {
+                        if *cond == node {
+                            return;
+                        }
+                    }
+                }
+                Node::Assert { condition, .. } => {
+                    if *condition == node {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let n = match self.graph.node_weight(node) {
             Some(n) => n,
             None => return,
@@ -415,7 +439,7 @@ impl Forest {
                 .filter(|&&i| matches!(self.graph[i], Node::Variable { .. } | Node::Input { .. })) // @todo comor, pq no una expresión normal?, quizás una leaf¿?
                 .choose(random)
                 .map(|&i| self.get_expr_for_node(i))
-                .unwrap_or_else(|| ret.random_value(random, ctx, scope));
+                .unwrap_or_else(|| ret.random_value(random, ctx, scope, true));
 
             self.return_expr = Some(value);
         }

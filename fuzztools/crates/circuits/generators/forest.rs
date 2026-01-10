@@ -224,7 +224,7 @@ impl Forest {
         }
 
         // Generate a new literal (don't register in types - literals are not for reuse)
-        self.literal(ty.random_value(random, ctx, scope), ty.clone())
+        self.literal(ty.random_value(random, ctx, scope, true), ty.clone())
     }
 
     /// Get nodes of a type that can be reused (only Variable and Input nodes)
@@ -726,11 +726,7 @@ impl Forest {
     // Call generation
     // ────────────────────────────────────────────────────────────────────────────────
 
-    pub fn gen_call(
-        &mut self,
-        random: &mut impl Rng,
-        functions: &[(String, Vec<Type>, Type)],
-    ) {
+    pub fn gen_call(&mut self, random: &mut impl Rng, functions: &[(String, Vec<Type>, Type)]) {
         let callables: Vec<_> =
             self.callables.iter().cloned().chain(functions.iter().cloned()).collect();
         if callables.is_empty() {

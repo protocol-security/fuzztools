@@ -415,7 +415,7 @@ mod tests {
 
         for _ in 0..50 {
             let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
-            let value = ty.random_value(&mut random, &ctx, &scope);
+            let value = ty.random_value(&mut random, &ctx, &scope, true);
             println!("    {}: {}", ty, value);
         }
     }

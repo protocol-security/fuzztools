@@ -35,7 +35,7 @@
     "max_lambda_body_size": 3,
 
     "min_rewrites_count": 5,
-    "max_rewrites_count": 25,
+    "max_rewrites_count": 15,
 
     "min_for_loop_body_size": 1,
     "max_for_loop_body_size": 3,
@@ -50,6 +50,8 @@
     "max_if_count": 1,
     "max_assert_count": 1,
     "max_lambda_count": 1,
+
+    "max_forest_size": 100,
 
     "field_weight": 12,
     "unsigned_weight": 10,

@@ -4,9 +4,9 @@ use crate::circuits::{
     scope::Scope,
 };
 use petgraph::{graph::NodeIndex, visit::EdgeRef, Direction};
-use rand::Rng;
+use rand::{seq::IteratorRandom, Rng};
 use rules::{Rule, RuleKind, RULES};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use Operator::{
     Add, And, Div, Equal, Greater, GreaterOrEqual, Less, LessOrEqual, Mod, Mul, Neg, Not, NotEqual,
     Or, Shl, Shr, Sub, Xor,
@@ -44,16 +44,25 @@ impl Default for Rewriter {
 }
 
 impl Rewriter {
+    /// Get rule names in the order defined in RULES (for ordered display)
+    pub fn rule_names_ordered() -> Vec<String> {
+        RULES.iter().map(|r| r.kind.name()).collect()
+    }
+
     /// Randomly select a rule, then apply it to ALL matching instances in the forest
+    /// Returns (rule_name, count) if a rule was applied, None otherwise
     pub fn apply_random(
         &self,
         random: &mut impl Rng,
         forest: &mut Forest,
         ctx: &Context,
         scope: &Scope,
-    ) {
-        // Collect all (node, rule_index) pairs that match
-        let mut matches: Vec<_> = vec![];
+    ) -> Option<(String, usize)> {
+        // Collect nodes that are If/Assert conditions (these can't be redirected safely) @todo
+        let condition_nodes = collect_condition_nodes(forest);
+
+        // Collect all nodes that match a rule
+        let mut matches = HashMap::<usize, Vec<NodeIndex>>::default();
 
         // 1. Operator-specific rules
         for (&op, nodes) in &forest.operators {
@@ -64,8 +73,12 @@ impl Rewriter {
                     }
                     let (left, right) = (forest.left(n), forest.right(n));
                     for &i in rules {
+                        // Skip rules that use redirect on condition nodes
+                        if uses_redirect(&self.rules[i].kind) && condition_nodes.contains(&n) {
+                            continue;
+                        }
                         if matches_rule(forest, Some(op), left, right, &self.rules[i].kind) {
-                            matches.push((n, i));
+                            matches.entry(i).or_default().push(n);
                         }
                     }
                 }
@@ -73,21 +86,24 @@ impl Rewriter {
         }
 
         // 2. Type-based inject rules (for terminal nodes like literals/variables)
-        for (&ty_kind, nodes) in &forest.type_kinds {
-            if let Some(rules) = self.type_rules.get(&ty_kind) {
-                for &n in nodes {
-                    if op_of(forest, n).is_some() {
-                        continue;
-                    }
-                    if is_assignment_lhs(forest, n) {
-                        continue;
-                    }
-                    if forest.graph.edges_directed(n, Direction::Incoming).next().is_none() {
-                        continue;
-                    }
-                    for &i in rules {
-                        if matches_rule(forest, None, Some(n), None, &self.rules[i].kind) {
-                            matches.push((n, i));
+        // Skip inject rules if the forest is already large to prevent exponential blowup
+        if forest.graph.node_count() < ctx.max_forest_size {
+            for (&ty_kind, nodes) in &forest.type_kinds {
+                if let Some(rules) = self.type_rules.get(&ty_kind) {
+                    for &n in nodes {
+                        if op_of(forest, n).is_some() {
+                            continue;
+                        }
+                        if is_assignment_lhs(forest, n) {
+                            continue;
+                        }
+                        if forest.graph.edges_directed(n, Direction::Incoming).next().is_none() {
+                            continue;
+                        }
+                        for &i in rules {
+                            if matches_rule(forest, None, Some(n), None, &self.rules[i].kind) {
+                                matches.entry(i).or_default().push(n);
+                            }
                         }
                     }
                 }
@@ -95,24 +111,30 @@ impl Rewriter {
         }
 
         if matches.is_empty() {
-            return;
+            return None;
         }
 
         // Randomly select which rule to apply
-        let selected_rule_idx = matches[random.random_range(0..matches.len())].1;
+        let selected_rule_idx = matches.keys().choose(random).unwrap();
+        let selected_rule = self.rules[*selected_rule_idx].clone().kind;
 
         // Collect all nodes that match this specific rule
-        let nodes_for_rule: Vec<NodeIndex> = matches
-            .iter()
-            .filter(|(_, rule_idx)| *rule_idx == selected_rule_idx)
-            .map(|(n, _)| *n)
-            .collect();
+        let nodes_for_rule: Vec<NodeIndex> = matches.get(selected_rule_idx).unwrap().clone();
+
+        let mut applied_count = 0;
 
         // Apply to all matching nodes (check node still exists - graph may change during rewrites)
         for node in nodes_for_rule {
             if forest.graph.contains_node(node) {
-                self.apply(random, forest, node, &self.rules[selected_rule_idx].kind, ctx, scope);
+                self.apply(random, forest, node, &selected_rule, ctx, scope);
+                applied_count += 1;
             }
+        }
+
+        if applied_count > 0 {
+            Some((selected_rule.name(), applied_count))
+        } else {
+            None
         }
     }
 
@@ -183,6 +205,9 @@ impl Rewriter {
             RuleKind::DoubleMulTwo => do_double_mul_two(forest, n),
             RuleKind::MulNegOneNeg => do_mul_neg_one_neg(forest, n),
         }
+
+        // Remove the node if it is orphaned
+        forest.remove_if_orphan(n);
     }
 }
 
@@ -377,14 +402,14 @@ fn matches_rule(
             left.is_some_and(|l| is_zero(f, l) && matches!(f.ty(l), Type::Integer(_)))
         }
 
-        // a & 1 ↔ a % 2
+        // a & 1 ↔ a % 2 (only valid when type can hold value 2, i.e., not u1)
         (RuleKind::AndToMod, Some(Operator::And)) => {
             right.is_some_and(|r| is_one(f, r)) &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
+                left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1))
         }
         (RuleKind::AndToMod, Some(Operator::Mod)) => {
             right.is_some_and(|r| is_two(f, r)) &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
+                left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -397,8 +422,13 @@ fn matches_rule(
         // ─────────────────────────────────────────────────────────────────────────
         // Simplification rules
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::DoubleMulTwo, Some(Operator::Add)) => left == right,
-        (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => right.is_some_and(|r| is_two(f, r)),
+        // a + a ↔ a * 2 (only valid when type can hold value 2, i.e., not u1)
+        (RuleKind::DoubleMulTwo, Some(Operator::Add)) => {
+            left == right && left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1) || matches!(f.ty(l), Type::Field))
+        }
+        (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => {
+            right.is_some_and(|r| is_two(f, r)) && left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1) || matches!(f.ty(l), Type::Field))
+        }
 
         (RuleKind::MulNegOneNeg, Some(Operator::Mul)) => {
             right.is_some_and(|r| is_neg_one(f, r)) && left.is_some_and(|l| is_signed_type(f, l))
@@ -485,6 +515,46 @@ fn types_for_inject_rule(kind: &RuleKind) -> Vec<TypeKind> {
         RuleKind::ModOne => vec![TypeKind::Signed, TypeKind::Unsigned],
         _ => vec![],
     }
+}
+
+/// Collect all nodes that are used as If/Assert conditions.
+/// These nodes are stored as direct NodeIndex fields (not edges), so redirect won't update them.
+fn collect_condition_nodes(forest: &Forest) -> HashSet<NodeIndex> {
+    let mut conditions = HashSet::new();
+    for idx in forest.graph.node_indices() {
+        match &forest.graph[idx] {
+            Node::If { condition, else_ifs, .. } => {
+                conditions.insert(*condition);
+                for (cond, _) in else_ifs {
+                    conditions.insert(*cond);
+                }
+            }
+            Node::Assert { condition, .. } => {
+                conditions.insert(*condition);
+            }
+            _ => {}
+        }
+    }
+    conditions
+}
+
+/// Check if a rule uses redirect_edges internally (which breaks If/Assert conditions)
+fn uses_redirect(kind: &RuleKind) -> bool {
+    matches!(
+        kind,
+        RuleKind::NegateComparison |
+            RuleKind::ExpandComparison |
+            RuleKind::DeMorgan |
+            RuleKind::XorToAndOr |
+            RuleKind::InjectAddSub |
+            RuleKind::InjectSubAdd |
+            RuleKind::InjectMulDiv |
+            RuleKind::InjectXorXor |
+            RuleKind::InjectDivDiv |
+            RuleKind::InjectOrZero |
+            RuleKind::InjectAndSelf |
+            RuleKind::ModOne
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -709,10 +779,8 @@ fn do_neg_zero_sub(f: &mut Forest, n: NodeIndex) {
                 .edges_directed(n, Direction::Outgoing)
                 .find(|e| *e.weight() == 0 && e.target() != right)
             {
-                let old = edge.target();
                 let id = edge.id();
                 f.graph.remove_edge(id);
-                f.remove_if_orphan(old);
             }
         }
         _ => {}
@@ -955,7 +1023,7 @@ fn do_inject(
 ) {
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
-    let r = f.literal(ty.random_value(random, ctx, scope), ty.clone());
+    let r = f.literal(ty.random_value(random, ctx, scope, true), ty.clone());
     let first = f.operator(op1, ty.clone(), n, Some(r));
     let second = f.operator(op2, ty, first, Some(r));
     f.redirect_edges(n, second, &edges);
@@ -969,7 +1037,7 @@ fn do_inject_nonzero(
     scope: &Scope,
 ) {
     let ty = f.ty(n);
-    let value = ty.random_value(random, ctx, scope);
+    let value = ty.random_value(random, ctx, scope, true);
     // Skip if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
         return;
@@ -993,7 +1061,7 @@ fn do_inject_div_div(
         return;
     }
     let ty = f.ty(n);
-    let value = ty.random_value(random, ctx, scope);
+    let value = ty.random_value(random, ctx, scope, true);
     // Skip if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
         return;

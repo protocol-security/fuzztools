@@ -5,9 +5,9 @@ use rand::{rngs::SmallRng, SeedableRng};
 use std::{fs, path::Path};
 
 mod app;
+mod commands;
 mod constants;
 mod scheduler;
-mod commands;
 use crate::app::App;
 use constants::{GREEN, HEADER, RED, RESET};
 
@@ -32,6 +32,9 @@ struct Cli {
         help = "Target ratio for power schedule (T2/(T1+T2) < ratio to run prover/verifier stages)"
     )]
     target_ratio: f64,
+
+    #[arg(long, default_value = "4", help = "Number of concurrent workers")]
+    workers: usize,
 }
 
 #[tokio::main]
@@ -52,11 +55,12 @@ async fn main() -> Result<()> {
          {GREEN}INFO{RESET}      Executions: {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Config:     {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Crash dir:  {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Target p:   {RED}{}{RESET}\n\n",
-        cli.seed, cli.executions, config_path, crash_dir, cli.target_ratio
+         {GREEN}INFO{RESET}      Target p:   {RED}{}{RESET}\n\
+         {GREEN}INFO{RESET}      Workers:    {RED}{}{RESET}\n\n",
+        cli.seed, cli.executions, config_path, crash_dir, cli.target_ratio, cli.workers
     );
 
-    let mut app = App::new(ctx, cli.executions, prelude, crash_dir, cli.target_ratio)?;
+    let mut app = App::new(ctx, cli.executions, prelude, crash_dir, cli.target_ratio, cli.workers)?;
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
     if let Err(e) = app.run(&mut random).await {

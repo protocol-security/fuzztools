@@ -1,4 +1,11 @@
-use crate::{commands::is_expected_execution_error, constants::{GREEN, RED, RESET}};
+use crate::{
+    commands::{
+        bb_prove, bb_verify, compile_project, execute_project, is_expected_execution_error,
+        setup_project,
+    },
+    constants::{GREEN, RED, RESET},
+    scheduler::PowerScheduler,
+};
 use anyhow::Result;
 use fuzztools::{
     builders::CircuitBuilder,
@@ -6,19 +13,20 @@ use fuzztools::{
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write},
     process::Command,
     sync::{
-        Arc, atomic::{AtomicBool, AtomicU64, Ordering}
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
     },
-    thread,
     time::{Duration, Instant},
 };
-use tempfile::TempDir;
-use crate::commands::{setup_project, compile_project, execute_project, bb_prove, bb_verify};
-use crate::scheduler::PowerScheduler;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Semaphore,
+};
 
 pub(crate) struct TestJob {
     original_code: String,
@@ -106,6 +114,7 @@ pub(crate) struct App {
     error_signal: Arc<AtomicBool>,
     error_sender: Sender<String>,
     error_receiver: Option<Receiver<String>>,
+    worker_semaphore: Arc<Semaphore>,
 
     // Power schedule
     power_schedule: Arc<PowerScheduler>,
@@ -121,6 +130,9 @@ pub(crate) struct App {
     circuits_per_tick: u64,
     start_time: Instant,
     last_update: Instant,
+
+    // Rule stats: rule_name -> application_count
+    rule_stats: HashMap<String, u64>,
 }
 
 impl App {
@@ -130,15 +142,24 @@ impl App {
         prelude: String,
         crash_dir: String,
         target_ratio: f64,
+        workers: usize,
     ) -> Result<Self> {
-        let num_workers = thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
         let power_schedule = Arc::new(PowerScheduler::new(target_ratio));
+        let worker_semaphore = Arc::new(Semaphore::new(workers));
 
-        let (job_sender, job_receiver) = channel::<TestJob>(num_workers * 2);
-        let (result_sender, result_receiver) = channel::<TestResult>(num_workers * 2);
-        let (error_sender, error_receiver) = channel::<String>(num_workers * 2);
+        let (job_sender, job_receiver) = channel::<TestJob>(workers * 2);
+        let (result_sender, result_receiver) = channel::<TestResult>(workers * 2);
+        let (error_sender, error_receiver) = channel::<String>(workers * 2);
 
         fs::create_dir_all(&crash_dir)?;
+
+        // Create worker directories upfront
+        for i in 0..workers {
+            let worker_dir = format!("./tmp/worker_{}", i);
+            let _ = fs::remove_dir_all(&worker_dir);
+            fs::create_dir_all(format!("{}/original/src", worker_dir))?;
+            fs::create_dir_all(format!("{}/rewritten/src", worker_dir))?;
+        }
 
         Ok(Self {
             prelude,
@@ -152,6 +173,7 @@ impl App {
             error_signal: Arc::new(AtomicBool::new(false)),
             error_sender,
             error_receiver: Some(error_receiver),
+            worker_semaphore,
             power_schedule,
             total_circuits: AtomicU64::new(0),
             compile_mismatches: AtomicU64::new(0),
@@ -163,11 +185,13 @@ impl App {
             circuits_per_tick: 0,
             start_time: Instant::now(),
             last_update: Instant::now(),
+            rule_stats: HashMap::new(),
         })
     }
 
     pub(crate) async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
-        // This will spawn a thread that will be listening for incoming circuits and doing all the heavy work of compiling, executing, proving, and verifying them
+        // This will spawn a thread that will be listening for incoming circuits and doing all the
+        // heavy work of compiling, executing, proving, and verifying them
         self.spawn_dispatcher();
 
         let builder = CircuitBuilder::default();
@@ -176,7 +200,8 @@ impl App {
         let mut error_receiver = self.error_receiver.take().unwrap();
 
         loop {
-            // If there was an error in one of the workers, we stop the main loop and print the error
+            // If there was an error in one of the workers, we stop the main loop and print the
+            // error
             if self.error_signal.load(Ordering::Relaxed) {
                 let error = error_receiver.recv().await.unwrap();
                 eprintln!("\n\n\x1b[1;31m[!] Error: {error}\x1b[0m");
@@ -187,17 +212,19 @@ impl App {
 
             // Generate circuit (forest + scope)
             let (mut forest, scope) = builder.generate(random, &self.ctx);
-
             let original_code = builder.format_circuit(&scope, &forest);
 
             let rewrite_count =
                 random.random_range(self.ctx.min_rewrites_count..=self.ctx.max_rewrites_count);
             for _ in 0..rewrite_count {
-                rewriter.apply_random(random, &mut forest, &self.ctx, &scope);
+                if let Some((rule_name, count)) =
+                    rewriter.apply_random(random, &mut forest, &self.ctx, &scope)
+                {
+                    *self.rule_stats.entry(rule_name).or_insert(0) += count as u64;
+                }
             }
 
             let rewritten_code = builder.format_circuit(&scope, &forest);
-
             // Check power schedule to decide if we should run later stages
             let run_later_stages = self.power_schedule.should_run_later_stages();
 
@@ -212,17 +239,31 @@ impl App {
                 run_later_stages,
             };
 
-            if self.job_sender.send(job).await.is_err() {
-                break;
+            // Send job while draining results periodically
+            let sender = self.job_sender.clone();
+            let send_fut = sender.send(job);
+            tokio::pin!(send_fut);
+
+            loop {
+                tokio::select! {
+                    result = &mut send_fut => {
+                        if result.is_err() {
+                            return Ok(());
+                        }
+                        break;
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                        self.drain_results();
+                        if self.last_update.elapsed().as_secs_f64() >= 1.0 {
+                            self.screen()?;
+                            self.circuits_per_tick = 0;
+                            self.last_update = Instant::now();
+                        }
+                    }
+                }
             }
 
             job_id += 1;
-
-            if self.last_update.elapsed().as_secs_f64() >= 1.0 {
-                self.screen()?;
-                self.circuits_per_tick = 0;
-                self.last_update = Instant::now();
-            }
         }
 
         Ok(())
@@ -234,6 +275,7 @@ impl App {
         let signal = self.error_signal.clone();
         let error_sender = self.error_sender.clone();
         let ctx = self.ctx;
+        let semaphore = self.worker_semaphore.clone();
 
         tokio::spawn(async move {
             while let Some(job) = rx.recv().await {
@@ -246,36 +288,17 @@ impl App {
                 let worker_signal = signal.clone();
                 let worker_ctx = ctx;
 
+                let permit = semaphore.clone().acquire_owned().await.unwrap();
+
                 tokio::spawn(async move {
+                    let _permit = permit;
                     let builder = CircuitBuilder::default();
                     let mut t1 = Duration::ZERO;
                     let mut t2 = Duration::ZERO;
 
-                    // If any error occurs, signal the dispatcher to stop
-                    let temp_dir = match TempDir::new() {
-                        Ok(d) => d,
-                        Err(e) => {
-                            worker_signal.store(true, Ordering::Relaxed);
-                            let _ = worker_error_sender.send(format!("TempDir error: {}", e));
-                            return;
-                        }
-                    };
-
-                    let temp_path = temp_dir.path();
+                    let temp_path = std::path::PathBuf::from(format!("./tmp/job_{}", job.job_id));
                     let orig_dir = temp_path.join("original");
                     let rewr_dir = temp_path.join("rewritten");
-
-                    if let Err(e) = fs::create_dir_all(&orig_dir) {
-                        worker_signal.store(true, Ordering::Relaxed);
-                        let _ = worker_error_sender.send(format!("Create original dir error: {}", e));
-                        return;
-                    }
-
-                    if let Err(e) = fs::create_dir_all(&rewr_dir) {
-                        worker_signal.store(true, Ordering::Relaxed);
-                        let _ = worker_error_sender.send(format!("Create rewritten dir error: {}", e));
-                        return;
-                    }
 
                     if let Err(e) = setup_project(&orig_dir, &job.original_code).await {
                         worker_signal.store(true, Ordering::Relaxed);
@@ -299,15 +322,30 @@ impl App {
                         // Both compiled - test with random inputs
                         (Ok(()), Ok(())) => {
                             let mut seeded_random = SmallRng::seed_from_u64(job.seed);
-                            let mut last_successful_prover_toml = String::new();
+                            let mut found_bug = false;
 
-                            for _ in 0..job.executions {
-                                let prover_toml = builder.generate_prover_toml(&mut seeded_random, &worker_ctx, &job.scope);
+                            'executions: for _ in 0..job.executions {
+                                let prover_toml = builder.generate_prover_toml(
+                                    &mut seeded_random,
+                                    &worker_ctx,
+                                    &job.scope,
+                                );
 
-                                if fs::write(orig_dir.join("Prover.toml"), &prover_toml).is_err() ||
-                                    fs::write(rewr_dir.join("Prover.toml"), &prover_toml).is_err()
+                                if let Err(e) =
+                                    fs::write(orig_dir.join("Prover.toml"), &prover_toml)
                                 {
-                                    continue;
+                                    worker_signal.store(true, Ordering::Relaxed);
+                                    let _ = worker_error_sender
+                                        .send(format!("Write Prover.toml error: {}", e));
+                                    break 'executions;
+                                }
+                                if let Err(e) =
+                                    fs::write(rewr_dir.join("Prover.toml"), &prover_toml)
+                                {
+                                    worker_signal.store(true, Ordering::Relaxed);
+                                    let _ = worker_error_sender
+                                        .send(format!("Write Prover.toml error: {}", e));
+                                    break 'executions;
                                 }
 
                                 // Initial stages (T1): Execute (witness generation)
@@ -316,197 +354,252 @@ impl App {
                                 let rewr_exec = execute_project(&rewr_dir).await;
                                 t1 += exec_start.elapsed();
 
-                                match (orig_exec, rewr_exec) {
+                                match (&orig_exec, &rewr_exec) {
                                     (Ok(orig_out), Ok(rewr_out)) => {
                                         // Both succeeded - compare outputs
-                                        let (orig_success, orig_result) = Self::parse_output(&orig_out);
-                                        let (rewr_success, rewr_result) = Self::parse_output(&rewr_out);
+                                        let (orig_success, orig_result) =
+                                            Self::parse_output(orig_out);
+                                        let (rewr_success, rewr_result) =
+                                            Self::parse_output(rewr_out);
 
-                                        if orig_success != rewr_success || orig_result != rewr_result {
-                                            let _ = worker_tx.send(TestResult::ExecutionMismatch {
-                                                original_code: job.original_code.clone(),
-                                                rewritten_code: job.rewritten_code.clone(),
-                                                prover_toml: prover_toml.clone(),
-                                                original_output: orig_out,
-                                                rewritten_output: rewr_out,
-                                                job_id: job.job_id,
-                                                t1,
-                                            });
+                                        if orig_success != rewr_success ||
+                                            orig_result != rewr_result
+                                        {
+                                            let _ = worker_tx
+                                                .send(TestResult::ExecutionMismatch {
+                                                    original_code: job.original_code.clone(),
+                                                    rewritten_code: job.rewritten_code.clone(),
+                                                    prover_toml: prover_toml.clone(),
+                                                    original_output: orig_out.clone(),
+                                                    rewritten_output: rewr_out.clone(),
+                                                    job_id: job.job_id,
+                                                    t1,
+                                                })
+                                                .await;
+                                            found_bug = true;
+                                            break 'executions;
                                         }
 
-                                        last_successful_prover_toml = prover_toml;
+                                        // If we should run later stages, prove and verify this
+                                        // execution
+                                        if job.run_later_stages {
+                                            // Later stages (T2): Proof generation
+                                            let proof_start = Instant::now();
+                                            let orig_proof = bb_prove(&orig_dir).await;
+                                            let rewr_proof = bb_prove(&rewr_dir).await;
+                                            t2 += proof_start.elapsed();
+
+                                            match (orig_proof, rewr_proof) {
+                                                (Ok(()), Ok(())) => {
+                                                    // Both proofs succeeded - verify
+                                                    let verify_start = Instant::now();
+                                                    let orig_verify = bb_verify(&orig_dir).await;
+                                                    let rewr_verify = bb_verify(&rewr_dir).await;
+                                                    t2 += verify_start.elapsed();
+
+                                                    match (orig_verify, rewr_verify) {
+                                                        (Ok(()), Ok(())) => {
+                                                            // Both verified successfully - continue
+                                                        }
+                                                        (Ok(()), Err(e)) => {
+                                                            let _ = worker_tx.send(TestResult::VerificationMismatch {
+                                                                original_code: job.original_code.clone(),
+                                                                rewritten_code: job.rewritten_code.clone(),
+                                                                prover_toml: prover_toml.clone(),
+                                                                original_result: "Verification succeeded".to_string(),
+                                                                rewritten_result: format!("Verification failed: {}", e),
+                                                                job_id: job.job_id,
+                                                                t1,
+                                                                t2,
+                                                            }).await;
+                                                            found_bug = true;
+                                                            break 'executions;
+                                                        }
+                                                        (Err(e), Ok(())) => {
+                                                            let _ = worker_tx.send(TestResult::VerificationMismatch {
+                                                                original_code: job.original_code.clone(),
+                                                                rewritten_code: job.rewritten_code.clone(),
+                                                                prover_toml: prover_toml.clone(),
+                                                                original_result: format!("Verification failed: {}", e),
+                                                                rewritten_result: "Verification succeeded".to_string(),
+                                                                job_id: job.job_id,
+                                                                t1,
+                                                                t2,
+                                                            }).await;
+                                                            found_bug = true;
+                                                            break 'executions;
+                                                        }
+                                                        _ => {
+                                                            let _ = worker_tx
+                                                                .send(
+                                                                    TestResult::BothFailedVerify {
+                                                                        t1,
+                                                                        t2,
+                                                                    },
+                                                                )
+                                                                .await; // @todo should be a bug?
+                                                        }
+                                                    }
+                                                }
+                                                (Ok(()), Err(e)) => {
+                                                    let _ = worker_tx
+                                                        .send(TestResult::ProofMismatch {
+                                                            original_code: job
+                                                                .original_code
+                                                                .clone(),
+                                                            rewritten_code: job
+                                                                .rewritten_code
+                                                                .clone(),
+                                                            prover_toml: prover_toml.clone(),
+                                                            original_result:
+                                                                "Proof generation succeeded"
+                                                                    .to_string(),
+                                                            rewritten_result: format!(
+                                                                "Proof generation failed: {}",
+                                                                e
+                                                            ),
+                                                            job_id: job.job_id,
+                                                            t1,
+                                                            t2,
+                                                        })
+                                                        .await;
+                                                    found_bug = true;
+                                                    break 'executions;
+                                                }
+                                                (Err(e), Ok(())) => {
+                                                    let _ = worker_tx
+                                                        .send(TestResult::ProofMismatch {
+                                                            original_code: job
+                                                                .original_code
+                                                                .clone(),
+                                                            rewritten_code: job
+                                                                .rewritten_code
+                                                                .clone(),
+                                                            prover_toml: prover_toml.clone(),
+                                                            original_result: format!(
+                                                                "Proof generation failed: {}",
+                                                                e
+                                                            ),
+                                                            rewritten_result:
+                                                                "Proof generation succeeded"
+                                                                    .to_string(),
+                                                            job_id: job.job_id,
+                                                            t1,
+                                                            t2,
+                                                        })
+                                                        .await;
+                                                    found_bug = true;
+                                                    break 'executions;
+                                                }
+                                                _ => {
+                                                    let _ = worker_tx
+                                                        .send(TestResult::BothFailedProve {
+                                                            t1,
+                                                            t2,
+                                                        })
+                                                        .await;
+                                                }
+                                            }
+                                        }
                                     }
                                     (Ok(orig_out), Err(rewr_err)) => {
-                                        if is_expected_execution_error(&rewr_err) {
-                                            let _ = worker_tx.send(TestResult::KnownError { t1 });
+                                        if is_expected_execution_error(rewr_err) {
+                                            let _ =
+                                                worker_tx.send(TestResult::KnownError { t1 }).await;
                                         } else {
-                                            // Unknown execution error - this IS a bug
-                                            let _ = worker_tx.send(TestResult::ExecutionMismatch {
-                                                original_code: job.original_code.clone(),
-                                                rewritten_code: job.rewritten_code.clone(),
-                                                prover_toml,
-                                                original_output: orig_out,
-                                                rewritten_output: format!("UNKNOWN EXECUTION ERROR: {}", rewr_err),
-                                                job_id: job.job_id,
-                                                t1,
-                                            });
+                                            let _ = worker_tx
+                                                .send(TestResult::ExecutionMismatch {
+                                                    original_code: job.original_code.clone(),
+                                                    rewritten_code: job.rewritten_code.clone(),
+                                                    prover_toml,
+                                                    original_output: orig_out.clone(),
+                                                    rewritten_output: format!(
+                                                        "UNKNOWN EXECUTION ERROR: {}",
+                                                        rewr_err
+                                                    ),
+                                                    job_id: job.job_id,
+                                                    t1,
+                                                })
+                                                .await;
+                                            found_bug = true;
+                                            break 'executions;
                                         }
                                     }
                                     (Err(orig_err), Ok(rewr_out)) => {
-                                        if is_expected_execution_error(&orig_err) {
-                                            let _ = worker_tx.send(TestResult::KnownError { t1 });
+                                        if is_expected_execution_error(orig_err) {
+                                            let _ =
+                                                worker_tx.send(TestResult::KnownError { t1 }).await;
                                         } else {
-                                            // Unknown execution error - this IS a bug
-                                            let _ = worker_tx.send(TestResult::ExecutionMismatch {
-                                                original_code: job.original_code.clone(),
-                                                rewritten_code: job.rewritten_code.clone(),
-                                                prover_toml,
-                                                original_output: format!("UNKNOWN EXECUTION ERROR: {}", orig_err),
-                                                rewritten_output: rewr_out,
-                                                job_id: job.job_id,
-                                                t1,
-                                            });
+                                            let _ = worker_tx
+                                                .send(TestResult::ExecutionMismatch {
+                                                    original_code: job.original_code.clone(),
+                                                    rewritten_code: job.rewritten_code.clone(),
+                                                    prover_toml,
+                                                    original_output: format!(
+                                                        "UNKNOWN EXECUTION ERROR: {}",
+                                                        orig_err
+                                                    ),
+                                                    rewritten_output: rewr_out.clone(),
+                                                    job_id: job.job_id,
+                                                    t1,
+                                                })
+                                                .await;
+                                            found_bug = true;
+                                            break 'executions;
                                         }
                                     }
-                                    (Err(orig_err), Err(rewr_err)) => {
-                                        // For EQUAL metamorphic relation: failed assertions must match
-                                        let orig_assertion = Self::extract_assertion(&orig_err);
-                                        let rewr_assertion = Self::extract_assertion(&rewr_err);
-
-                                        if orig_assertion == rewr_assertion {
-                                            let _ = worker_tx.send(TestResult::BothFailedExecute { t1 });
-                                        } else {
-                                            // Different assertions failed - metamorphic violation
-                                            let _ = worker_tx.send(TestResult::ExecutionMismatch {
-                                                original_code: job.original_code.clone(),
-                                                rewritten_code: job.rewritten_code.clone(),
-                                                prover_toml,
-                                                original_output: format!("ASSERTION: {:?}", orig_assertion),
-                                                rewritten_output: format!("ASSERTION: {:?}", rewr_assertion),
-                                                job_id: job.job_id,
-                                                t1,
-                                            });
-                                        }
+                                    (Err(_), Err(_)) => {
+                                        // @todo imo due to the rewritten code may have errors
+                                        // before, i dont count this as a soundness bug
+                                        let _ = worker_tx
+                                            .send(TestResult::BothFailedExecute { t1 })
+                                            .await;
                                     }
                                 }
                             }
 
-                            // If we shouldn't run later stages, we're done here
-                            if !job.run_later_stages {
-                                let _ = worker_tx.send(TestResult::Success { t1, t2 });
-                                return;
+                            // Only send Success if no bug was found
+                            if !found_bug {
+                                let _ = worker_tx.send(TestResult::Success { t1, t2 }).await;
                             }
-                        
-                            // Later stages (T2): Proof generation
-                            let proof_start = Instant::now();
-                            let orig_proof = bb_prove(&orig_dir).await;
-                            let rewr_proof = bb_prove(&rewr_dir).await;
-                            t2 += proof_start.elapsed();
-
-                            match (orig_proof, rewr_proof) {
-                                (Ok(()), Ok(())) => {
-                                    // Both proofs succeeded - verify
-                                    let verify_start = Instant::now();
-                                    let orig_verify = bb_verify(&orig_dir).await;
-                                    let rewr_verify = bb_verify(&rewr_dir).await;
-                                    t2 += verify_start.elapsed();
-
-                                    match (orig_verify, rewr_verify) {
-                                        (Ok(()), Ok(())) => {
-                                            // Both verified successfully
-                                            let _ = worker_tx.send(TestResult::Success { t1, t2 });
-                                        },
-                                        (Ok(()), Err(e)) => {
-                                            let _ = worker_tx.send(TestResult::VerificationMismatch {
-                                                original_code: job.original_code.clone(),
-                                                rewritten_code: job.rewritten_code.clone(),
-                                                prover_toml: last_successful_prover_toml,
-                                                original_result: "Verification succeeded".to_string(),
-                                                rewritten_result: format!("Verification failed: {}", e),
-                                                job_id: job.job_id,
-                                                t1,
-                                                t2,
-                                            });
-                                        },
-                                        (Err(e), Ok(())) => {
-                                            let _ = worker_tx.send(TestResult::VerificationMismatch {
-                                                original_code: job.original_code.clone(),
-                                                rewritten_code: job.rewritten_code.clone(),
-                                                prover_toml: last_successful_prover_toml,
-                                                original_result: format!("Verification failed: {}", e),
-                                                rewritten_result: "Verification succeeded".to_string(),
-                                                job_id: job.job_id,
-                                                t1,
-                                                t2,
-                                            });
-                                        },
-                                        _ => {
-                                            // Both failed, not interesting
-                                            let _ = worker_tx.send(TestResult::BothFailedVerify { t1, t2 });
-                                        }
-                                    }
-                                    
-                                },
-                                (Ok(()), Err(e)) => {
-                                    let _ = worker_tx.send(TestResult::ProofMismatch {
-                                        original_code: job.original_code.clone(),
-                                        rewritten_code: job.rewritten_code.clone(),
-                                        prover_toml: last_successful_prover_toml,
-                                        original_result: "Proof generation succeeded".to_string(),
-                                        rewritten_result: format!("Proof generation failed: {}", e),
-                                        job_id: job.job_id,
-                                        t1,
-                                        t2,
-                                    });
-                                },
-                                (Err(e), Ok(())) => {
-                                    let _ = worker_tx.send(TestResult::ProofMismatch {
-                                        original_code: job.original_code.clone(),
-                                        rewritten_code: job.rewritten_code.clone(),
-                                        prover_toml: last_successful_prover_toml,
-                                        original_result: format!("Proof generation failed: {}", e),
-                                        rewritten_result: "Proof generation succeeded".to_string(),
-                                        job_id: job.job_id,
-                                        t1,
-                                        t2,
-                                    });
-                                },
-                                _ => {
-                                    // Both failed, not interesting
-                                    let _ = worker_tx.send(TestResult::BothFailedProve { t1, t2 });
-                                }
-                            }
-                        },
-                        // One compiled, one didn't, compile mismatch, maybe a bug
+                        }
+                        // One compiled, one didn't
                         (Ok(()), Err(e)) => {
                             if is_expected_execution_error(&e) {
-                                let _ = worker_tx.send(TestResult::KnownError { t1 });
+                                let _ = worker_tx.send(TestResult::KnownError { t1 }).await;
                             } else {
-                                let _ = worker_tx.send(TestResult::CompilationMismatch {
+                                let _ = worker_tx
+                                    .send(TestResult::CompilationMismatch {
+                                        original_code: job.original_code.clone(),
+                                        rewritten_code: job.rewritten_code.clone(),
+                                        original_compiled: true,
+                                        error: e,
+                                        job_id: job.job_id,
+                                        t1,
+                                    })
+                                    .await;
+                            }
+                        }
+                        (Err(e), Ok(())) => {
+                            let _ = worker_tx
+                                .send(TestResult::CompilationMismatch {
                                     original_code: job.original_code.clone(),
                                     rewritten_code: job.rewritten_code.clone(),
-                                    original_compiled: true,
+                                    original_compiled: false,
                                     error: e,
                                     job_id: job.job_id,
                                     t1,
-                                });
-                            }
-                        },
-                        (Err(e), Ok(())) => {
-                            let _ = worker_tx.send(TestResult::CompilationMismatch {
-                                original_code: job.original_code.clone(),
-                                rewritten_code: job.rewritten_code.clone(),
-                                original_compiled: false,
-                                error: e,
-                                job_id: job.job_id,
-                                t1,
-                            });
-                        },
-                        // Both failed to compile, not interesting
-                        _ => { 
-                            let _ = worker_tx.send(TestResult::BothFailedCompile { t1 });
+                                })
+                                .await;
+                        }
+                        // Both failed to compile
+                        _ => {
+                            let _ = worker_tx.send(TestResult::BothFailedCompile { t1 }).await;
                         }
                     }
+
+                    // Clean up
+                    let _ = fs::remove_dir_all(&temp_path);
                 });
             }
         });
@@ -525,7 +618,14 @@ impl App {
                         self.later_stages_run.fetch_add(1, Ordering::Relaxed);
                     }
                 }
-                TestResult::CompilationMismatch { job_id, original_code, rewritten_code, original_compiled, error, t1 } => {
+                TestResult::CompilationMismatch {
+                    job_id,
+                    original_code,
+                    rewritten_code,
+                    original_compiled,
+                    error,
+                    t1,
+                } => {
                     self.power_schedule.add_t1(t1);
                     self.compile_mismatches.fetch_add(1, Ordering::Relaxed);
                     self.save_compile_mismatch(
@@ -536,7 +636,15 @@ impl App {
                         &error,
                     );
                 }
-                TestResult::ExecutionMismatch { original_code, rewritten_code, prover_toml, original_output, rewritten_output, job_id, t1 } => {
+                TestResult::ExecutionMismatch {
+                    original_code,
+                    rewritten_code,
+                    prover_toml,
+                    original_output,
+                    rewritten_output,
+                    job_id,
+                    t1,
+                } => {
                     self.power_schedule.add_t1(t1);
                     self.soundness_bugs.fetch_add(1, Ordering::Relaxed);
                     self.save_soundness_bug(
@@ -571,7 +679,16 @@ impl App {
                         &rewritten_result,
                     );
                 }
-                TestResult::VerificationMismatch { original_code, rewritten_code, prover_toml, original_result, rewritten_result, job_id, t1, t2 } => {
+                TestResult::VerificationMismatch {
+                    original_code,
+                    rewritten_code,
+                    prover_toml,
+                    original_result,
+                    rewritten_result,
+                    job_id,
+                    t1,
+                    t2,
+                } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
                     self.verification_mismatches.fetch_add(1, Ordering::Relaxed);
@@ -587,7 +704,8 @@ impl App {
                 TestResult::BothFailedCompile { t1 } | TestResult::BothFailedExecute { t1 } => {
                     self.power_schedule.add_t1(t1);
                 }
-                TestResult::BothFailedProve { t1, t2 } | TestResult::BothFailedVerify { t1, t2 }=> {
+                TestResult::BothFailedProve { t1, t2 } |
+                TestResult::BothFailedVerify { t1, t2 } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
                 }
@@ -613,11 +731,8 @@ impl App {
         let (passed, failed) =
             if original_compiled { ("original", "rewritten") } else { ("rewritten", "original") };
 
-        let original_path = format!("{}/original.nr", dir);
-        let rewritten_path = format!("{}/rewritten.nr", dir);
-
-        let _ = fs::write(&original_path, original);
-        let _ = fs::write(&rewritten_path, rewritten);
+        let _ = fs::write(format!("{}/original.nr", dir), original);
+        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
         let _ = fs::write(
             format!("{}/info.txt", dir),
             format!("Passed: {}\nFailed: {}\n\nError:\n{}", passed, failed, error),
@@ -636,12 +751,8 @@ impl App {
         let dir = format!("{}/possible_soundness_bug_{}", self.crash_dir, job_id);
         let _ = fs::create_dir_all(&dir);
 
-        let original_path = format!("{}/original.nr", dir);
-        let rewritten_path = format!("{}/rewritten.nr", dir);
-
-        let _ = fs::write(&original_path, original);
-        let _ = fs::write(&rewritten_path, rewritten);
-
+        let _ = fs::write(format!("{}/original.nr", dir), original);
+        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
         let _ = fs::write(format!("{}/Prover.toml", dir), prover_toml);
         let _ = fs::write(
             format!("{}/divergence.txt", dir),
@@ -664,12 +775,8 @@ impl App {
         let dir = format!("{}/proof_mismatch_{}", self.crash_dir, job_id);
         let _ = fs::create_dir_all(&dir);
 
-        let original_path = format!("{}/original.nr", dir);
-        let rewritten_path = format!("{}/rewritten.nr", dir);
-
-        let _ = fs::write(&original_path, original);
-        let _ = fs::write(&rewritten_path, rewritten);
-
+        let _ = fs::write(format!("{}/original.nr", dir), original);
+        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
         let _ = fs::write(format!("{}/Prover.toml", dir), prover_toml);
         let _ = fs::write(
             format!("{}/proof_divergence.txt", dir),
@@ -692,13 +799,8 @@ impl App {
         let dir = format!("{}/verification_mismatch_{}", self.crash_dir, job_id);
         let _ = fs::create_dir_all(&dir);
 
-        let original_path = format!("{}/original.nr", dir);
-        let rewritten_path = format!("{}/rewritten.nr", dir);
-
-        let _ = fs::write(&original_path, original);
-        let _ = fs::write(&rewritten_path, rewritten);
-
-
+        let _ = fs::write(format!("{}/original.nr", dir), original);
+        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
         let _ = fs::write(format!("{}/Prover.toml", dir), prover_toml);
         let _ = fs::write(
             format!("{}/verification_divergence.txt", dir),
@@ -722,22 +824,7 @@ impl App {
                 }
             }
         }
-
         (success, result)
-    }
-
-    fn extract_assertion(error: &str) -> String {
-        // Extract the assertion failure message after "error: Assertion failed: " if present.
-        // Returns the assertion string, or empty string if not present.
-        let prefix = "error: Assertion failed: ";
-        for line in error.lines() {
-            if let Some(pos) = line.find(prefix) {
-                // Get everything after the prefix
-                let assertion = &line[pos + prefix.len()..];
-                return assertion.trim().to_string();
-            }
-        }
-        String::new()
     }
 
     fn screen(&self) -> Result<()> {
@@ -753,11 +840,10 @@ impl App {
         let current_ratio = self.power_schedule.current_ratio();
         let elapsed = self.start_time.elapsed().as_secs();
 
-        print!(
+        println!(
             "[{GREEN}+{RESET}] Circuits: {RED}{}{RESET} | Mismatches: {RED}{}{RESET} | \
              Soundness: {RED}{}{RESET} | Proof: {RED}{}{RESET} | Known: {RED}{}{RESET} | \
-             Rate: {RED}{}{RESET}/s | Time: {RED}{:02}h {:02}m {:02}s{RESET}\n\
-             [{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
+             Rate: {RED}{}{RESET}/s | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
             total,
             mismatches,
             soundness,
@@ -767,9 +853,19 @@ impl App {
             elapsed / 3600,
             (elapsed % 3600) / 60,
             elapsed % 60,
-            current_ratio,
-            later_stages_run,
         );
+        println!(
+            "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
+            current_ratio, later_stages_run,
+        );
+
+        // Display rule stats in order defined in RULES
+        println!("[{GREEN}+{RESET}] Rule applications:");
+        for name in Rewriter::rule_names_ordered() {
+            if let Some(&count) = self.rule_stats.get(&name) {
+                println!("    {name}: {RED}{count}{RESET}");
+            }
+        }
 
         io::stdout().flush()?;
         Ok(())

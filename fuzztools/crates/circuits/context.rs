@@ -67,6 +67,9 @@ pub struct Context {
     /// Max number of lambdas
     pub max_lambda_count: usize,
 
+    /// Max forest size
+    pub max_forest_size: usize,
+
     // ─────────────────────────────────────────────────────────────────────────
     // Type weights (relative probability of generating each type)
     // ─────────────────────────────────────────────────────────────────────────
