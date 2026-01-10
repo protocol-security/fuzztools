@@ -275,11 +275,19 @@ fn matches_rule(
         }
         (RuleKind::Identity { op, .. }, _) => {
             // For And injection (a -> a & 1), only apply to booleans
-            // For Or injection (a -> a | 0), apply to all integer types
-            if *op == Operator::And {
-                left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
-            } else {
-                left.is_some_and(|l| is_numeric_or_bool(f, l))
+            // For Or/Xor injection (a -> a | 0, a -> a ^ 0), apply to all types
+            // For Add/Sub/Mul/Div/Shl/Shr injection, only apply to Field/Integer (not Boolean)
+            // because booleans don't support arithmetic or shift operations
+            match op {
+                Operator::And => left.is_some_and(|l| matches!(f.ty(l), Type::Boolean)),
+                Operator::Or | Operator::Xor => left.is_some_and(|l| is_numeric_or_bool(f, l)),
+                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
+                    left.is_some_and(|l| matches!(f.ty(l), Type::Field | Type::Integer(_)))
+                }
+                Operator::Shl | Operator::Shr => {
+                    left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
+                }
+                _ => false,
             }
         }
 
@@ -424,10 +432,18 @@ fn matches_rule(
         // ─────────────────────────────────────────────────────────────────────────
         // a + a ↔ a * 2 (only valid when type can hold value 2, i.e., not u1)
         (RuleKind::DoubleMulTwo, Some(Operator::Add)) => {
-            left == right && left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1) || matches!(f.ty(l), Type::Field))
+            left == right &&
+                left.is_some_and(|l| {
+                    matches!(f.ty(l), Type::Integer(i) if i.bits > 1) ||
+                        matches!(f.ty(l), Type::Field)
+                })
         }
         (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => {
-            right.is_some_and(|r| is_two(f, r)) && left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1) || matches!(f.ty(l), Type::Field))
+            right.is_some_and(|r| is_two(f, r)) &&
+                left.is_some_and(|l| {
+                    matches!(f.ty(l), Type::Integer(i) if i.bits > 1) ||
+                        matches!(f.ty(l), Type::Field)
+                })
         }
 
         (RuleKind::MulNegOneNeg, Some(Operator::Mul)) => {
@@ -1096,9 +1112,14 @@ fn do_inject_and_self(f: &mut Forest, n: NodeIndex) {
 }
 
 fn do_double_mul_two(f: &mut Forest, n: NodeIndex) {
+    // Safety check: don't apply for u1 types - can't hold value 2
+    let ty = f.ty(n);
+    if matches!(&ty, Type::Integer(i) if i.bits == 1) {
+        return;
+    }
+
     match op_of(f, n) {
         Some(Operator::Add) if f.left(n) == f.right(n) => {
-            let ty = f.ty(n);
             let two = make_two(f, &ty);
             set_op(f, n, Operator::Mul);
             f.replace_operand(n, 1, two);
