@@ -50,7 +50,7 @@ impl Forest {
             Node::Input { ty, .. } | Node::Literal { ty, .. } | Node::Variable { ty, .. } => {
                 ty.clone()
             }
-            Node::Operator { ret, .. } => ret.clone(), // @audit quizás usando esto abjo??
+            Node::Operator { ret, .. } | Node::Call { ret, .. } => ret.clone(), // @audit quizás usando esto abjo??
             Node::Index { .. } => match self.ty(self.left(idx).unwrap()) {
                 Type::Array(a) => *a.ty,
                 Type::Slice(s) => *s.ty,
@@ -66,7 +66,6 @@ impl Forest {
                 }
                 _ => unreachable!(),
             },
-            Node::Call { ret, .. } => ret.clone(),
             Node::Cast { target } => target.clone(),
             Node::Assignment { .. } => self.ty(self.left(idx).unwrap()),
             Node::ForLoop { .. } | Node::If { .. } | Node::Assert { .. } => Type::Empty,
@@ -496,7 +495,7 @@ impl Forest {
                         "rhs"
                     }
                 }
-                Node::Variable { .. } => "let".into(),
+                Node::Variable { .. } => "let",
                 Node::Assignment { .. } => {
                     if *w == 0 {
                         "source"

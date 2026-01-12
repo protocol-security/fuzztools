@@ -302,13 +302,13 @@ impl App {
 
                     if let Err(e) = setup_project(&orig_dir, &job.original_code).await {
                         worker_signal.store(true, Ordering::Relaxed);
-                        let _ = worker_error_sender.send(format!("Setup original error: {}", e));
+                        let _ = worker_error_sender.send(format!("Setup original error: {}", e)).await;
                         return;
                     }
 
                     if let Err(e) = setup_project(&rewr_dir, &job.rewritten_code).await {
                         worker_signal.store(true, Ordering::Relaxed);
-                        let _ = worker_error_sender.send(format!("Setup rewritten error: {}", e));
+                        let _ = worker_error_sender.send(format!("Setup rewritten error: {}", e)).await;
                         return;
                     }
 
@@ -336,7 +336,7 @@ impl App {
                                 {
                                     worker_signal.store(true, Ordering::Relaxed);
                                     let _ = worker_error_sender
-                                        .send(format!("Write Prover.toml error: {}", e));
+                                        .send(format!("Write Prover.toml error: {}", e)).await;
                                     break 'executions;
                                 }
                                 if let Err(e) =
@@ -344,7 +344,7 @@ impl App {
                                 {
                                     worker_signal.store(true, Ordering::Relaxed);
                                     let _ = worker_error_sender
-                                        .send(format!("Write Prover.toml error: {}", e));
+                                        .send(format!("Write Prover.toml error: {}", e)).await;
                                     break 'executions;
                                 }
 

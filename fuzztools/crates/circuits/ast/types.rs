@@ -248,7 +248,7 @@ impl Integer {
             pick!(0, max, [0, 1, max]).to_string()
         };
 
-        format!("{}{}", value, if with_suffix { ty } else { "".into() })
+        format!("{}{}", value, if with_suffix { ty } else { String::new() })
     }
 }
 

@@ -50,7 +50,7 @@ impl Rewriter {
     }
 
     /// Randomly select a rule, then apply it to ALL matching instances in the forest
-    /// Returns (rule_name, count) if a rule was applied, None otherwise
+    /// Returns (rule name, count) if a rule was applied, None otherwise
     pub fn apply_random(
         &self,
         random: &mut impl Rng,
@@ -534,7 +534,7 @@ fn types_for_inject_rule(kind: &RuleKind) -> Vec<TypeKind> {
 }
 
 /// Collect all nodes that are used as If/Assert conditions.
-/// These nodes are stored as direct NodeIndex fields (not edges), so redirect won't update them.
+/// These nodes are stored as direct `NodeIndex` fields (not edges), so `redirect` won't update them.
 fn collect_condition_nodes(forest: &Forest) -> HashSet<NodeIndex> {
     let mut conditions = HashSet::new();
     for idx in forest.graph.node_indices() {
@@ -554,8 +554,8 @@ fn collect_condition_nodes(forest: &Forest) -> HashSet<NodeIndex> {
     conditions
 }
 
-/// Check if a rule uses redirect_edges internally (which breaks If/Assert conditions)
-fn uses_redirect(kind: &RuleKind) -> bool {
+/// Check if a rule uses `redirect_edges` internally (which breaks `If/Assert` conditions)
+const fn uses_redirect(kind: &RuleKind) -> bool {
     matches!(
         kind,
         RuleKind::NegateComparison |

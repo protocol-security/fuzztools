@@ -1,9 +1,0 @@
-[submodule "raidan/clients/lighthouse"]
-	path = raidan/clients/lighthouse
-	url = https://github.com/nethoxa/lighthouse.git
-[submodule "raidan/clients/prysm"]
-	path = raidan/clients/prysm
-	url = https://github.com/nethoxa/prysm.git
-[submodule "raidan/clients/teku"]
-	path = raidan/clients/teku
-	url = https://github.com/nethoxa/teku.git

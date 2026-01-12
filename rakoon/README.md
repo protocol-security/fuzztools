@@ -42,5 +42,49 @@ running on a MacBook Pro 2023, M3 Max and 36 GB of RAM.
 
 ## Fast commands
 
-- `make geth-testnet` -> `cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xb71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291`
-- `make reth-testnet` -> `cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97`
+If you wanna create a kurtosis testnet, modify [network_params.yaml](../network_params.yaml) and run:
+
+```sh
+kurtosis run --enclave testnet github.com/ethpandaops/ethereum-package --args-file ./network_params.yaml
+```
+
+To stop it and remove its files:
+
+```sh
+kurtosis enclave stop testnet && kurtosis enclave rm testnet --force
+```
+
+You will need to choose one of the default keys shown in the output and put it under the `--key` flag, as well as you must choose the `rpc` endpoint of the client you wanna fuzz.
+
+For a local geth testnet with the `--dev` flag:
+
+```sh
+geth --dev \
+		--dev.period 12 \
+		--datadir ./tmp/geth-db \
+		--http \
+		--http.addr "127.0.0.1" \
+		--http.port 8545 \
+		--http.api "eth,net,web3,debug"
+```
+
+use the next command to run `rakoon`:
+
+```sh
+cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xb71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291
+```
+
+and for a local reth instance with the `--dev` flag:
+
+```sh
+	reth node \
+		--dev \
+		--dev.block-time 12s \
+		--datadir ./tmp/reth-db
+```
+
+use the next command to run `rakoon`:
+
+```sh
+cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97
+```
