@@ -117,6 +117,7 @@ pub(crate) struct App {
     worker_semaphore: Arc<Semaphore>,
 
     // Power schedule
+    always_run_later_stages: bool,
     power_schedule: Arc<PowerScheduler>,
 
     // Stats
@@ -143,6 +144,7 @@ impl App {
         crash_dir: String,
         target_ratio: f64,
         workers: usize,
+        always_run_later_stages: bool,
     ) -> Result<Self> {
         let power_schedule = Arc::new(PowerScheduler::new(target_ratio));
         let worker_semaphore = Arc::new(Semaphore::new(workers));
@@ -174,6 +176,7 @@ impl App {
             error_sender,
             error_receiver: Some(error_receiver),
             worker_semaphore,
+            always_run_later_stages,
             power_schedule,
             total_circuits: AtomicU64::new(0),
             compile_mismatches: AtomicU64::new(0),
@@ -225,8 +228,10 @@ impl App {
             }
 
             let rewritten_code = builder.format_circuit(&scope, &forest);
-            // Check power schedule to decide if we should run later stages
-            let run_later_stages = self.power_schedule.should_run_later_stages();
+            // Check power schedule to decide if we should run later stages, or if we always run
+            // them
+            let run_later_stages =
+                self.power_schedule.should_run_later_stages() || self.always_run_later_stages;
 
             // Send job
             let job = TestJob {
@@ -302,13 +307,15 @@ impl App {
 
                     if let Err(e) = setup_project(&orig_dir, &job.original_code).await {
                         worker_signal.store(true, Ordering::Relaxed);
-                        let _ = worker_error_sender.send(format!("Setup original error: {}", e)).await;
+                        let _ =
+                            worker_error_sender.send(format!("Setup original error: {}", e)).await;
                         return;
                     }
 
                     if let Err(e) = setup_project(&rewr_dir, &job.rewritten_code).await {
                         worker_signal.store(true, Ordering::Relaxed);
-                        let _ = worker_error_sender.send(format!("Setup rewritten error: {}", e)).await;
+                        let _ =
+                            worker_error_sender.send(format!("Setup rewritten error: {}", e)).await;
                         return;
                     }
 
@@ -336,7 +343,8 @@ impl App {
                                 {
                                     worker_signal.store(true, Ordering::Relaxed);
                                     let _ = worker_error_sender
-                                        .send(format!("Write Prover.toml error: {}", e)).await;
+                                        .send(format!("Write Prover.toml error: {}", e))
+                                        .await;
                                     break 'executions;
                                 }
                                 if let Err(e) =
@@ -344,7 +352,8 @@ impl App {
                                 {
                                     worker_signal.store(true, Ordering::Relaxed);
                                     let _ = worker_error_sender
-                                        .send(format!("Write Prover.toml error: {}", e)).await;
+                                        .send(format!("Write Prover.toml error: {}", e))
+                                        .await;
                                     break 'executions;
                                 }
 
@@ -854,10 +863,14 @@ impl App {
             (elapsed % 3600) / 60,
             elapsed % 60,
         );
-        println!(
-            "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
-            current_ratio, later_stages_run,
-        );
+        if self.always_run_later_stages {
+            println!("[{GREEN}+{RESET}] Later stages: {RED}{}{RESET}", later_stages_run,);
+        } else {
+            println!(
+                "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
+                current_ratio, later_stages_run,
+            );
+        };
 
         // Display rule stats in order defined in RULES
         println!("[{GREEN}+{RESET}] Rule applications:");

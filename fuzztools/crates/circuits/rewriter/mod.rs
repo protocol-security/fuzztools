@@ -534,7 +534,8 @@ fn types_for_inject_rule(kind: &RuleKind) -> Vec<TypeKind> {
 }
 
 /// Collect all nodes that are used as If/Assert conditions.
-/// These nodes are stored as direct `NodeIndex` fields (not edges), so `redirect` won't update them.
+/// These nodes are stored as direct `NodeIndex` fields (not edges), so `redirect` won't update
+/// them.
 fn collect_condition_nodes(forest: &Forest) -> HashSet<NodeIndex> {
     let mut conditions = HashSet::new();
     for idx in forest.graph.node_indices() {

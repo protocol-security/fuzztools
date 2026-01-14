@@ -50,7 +50,9 @@ impl Forest {
             Node::Input { ty, .. } | Node::Literal { ty, .. } | Node::Variable { ty, .. } => {
                 ty.clone()
             }
-            Node::Operator { ret, .. } | Node::Call { ret, .. } => ret.clone(), // @audit quizás usando esto abjo??
+            Node::Operator { ret, .. } | Node::Call { ret, .. } => ret.clone(), /* @audit quizás
+                                                                                  * usando esto
+                                                                                  * abjo?? */
             Node::Index { .. } => match self.ty(self.left(idx).unwrap()) {
                 Type::Array(a) => *a.ty,
                 Type::Slice(s) => *s.ty,
