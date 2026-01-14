@@ -35,9 +35,6 @@ struct Cli {
 
     #[arg(long, default_value = "4", help = "Number of concurrent workers")]
     workers: usize,
-
-    #[arg(long, help = "Whether to always run later stages or not")]
-    always_run_later_stages: bool,
 }
 
 #[tokio::main]
@@ -59,15 +56,13 @@ async fn main() -> Result<()> {
          {GREEN}INFO{RESET}      Config:     {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Crash dir:  {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Target p:   {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Workers:    {RED}{}{RESET}\n\
-         {GREEN}INFO{RESET}      Always run later stages:    {RED}{}{RESET}\n\n",
+         {GREEN}INFO{RESET}      Workers:    {RED}{}{RESET}\n\n",
         cli.seed,
         cli.executions,
         config_path,
         crash_dir,
         cli.target_ratio,
         cli.workers,
-        cli.always_run_later_stages
     );
 
     let mut app = App::new(
@@ -77,7 +72,6 @@ async fn main() -> Result<()> {
         crash_dir,
         cli.target_ratio,
         cli.workers,
-        cli.always_run_later_stages,
     )?;
     let mut random = SmallRng::seed_from_u64(cli.seed);
 

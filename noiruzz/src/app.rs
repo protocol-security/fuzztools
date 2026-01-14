@@ -117,7 +117,6 @@ pub(crate) struct App {
     worker_semaphore: Arc<Semaphore>,
 
     // Power schedule
-    always_run_later_stages: bool,
     power_schedule: Arc<PowerScheduler>,
 
     // Stats
@@ -144,7 +143,6 @@ impl App {
         crash_dir: String,
         target_ratio: f64,
         workers: usize,
-        always_run_later_stages: bool,
     ) -> Result<Self> {
         let power_schedule = Arc::new(PowerScheduler::new(target_ratio));
         let worker_semaphore = Arc::new(Semaphore::new(workers));
@@ -176,7 +174,6 @@ impl App {
             error_sender,
             error_receiver: Some(error_receiver),
             worker_semaphore,
-            always_run_later_stages,
             power_schedule,
             total_circuits: AtomicU64::new(0),
             compile_mismatches: AtomicU64::new(0),
@@ -231,7 +228,7 @@ impl App {
             // Check power schedule to decide if we should run later stages, or if we always run
             // them
             let run_later_stages =
-                self.power_schedule.should_run_later_stages() || self.always_run_later_stages;
+                self.power_schedule.should_run_later_stages();
 
             // Send job
             let job = TestJob {
@@ -863,14 +860,10 @@ impl App {
             (elapsed % 3600) / 60,
             elapsed % 60,
         );
-        if self.always_run_later_stages {
-            println!("[{GREEN}+{RESET}] Later stages: {RED}{}{RESET}", later_stages_run,);
-        } else {
-            println!(
-                "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
-                current_ratio, later_stages_run,
-            );
-        };
+        println!(
+            "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
+            current_ratio, later_stages_run,
+        );
 
         // Display rule stats in order defined in RULES
         println!("[{GREEN}+{RESET}] Rule applications:");
