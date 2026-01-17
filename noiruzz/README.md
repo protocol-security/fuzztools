@@ -25,3 +25,4 @@ and using the default [config](../configs/noiruzz.json), has a throughput of `~8
 - Add support for unstable features like ownership reference, oracle...
 - Fix the `@todo`s around the codebase
 - Make it possible to increase `max_rewrites_count` without blowing up memory
+- Restore usage of top level functions

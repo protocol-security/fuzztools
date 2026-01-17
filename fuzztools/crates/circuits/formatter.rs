@@ -29,7 +29,7 @@ impl Forest {
                 format!(
                     "{}({})",
                     name,
-                    args.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join(", ")
+                    args.iter().skip(1).map(|(_, s)| s.as_str()).collect::<Vec<_>>().join(", ")
                 )
             }
             _ => "()".to_string(),

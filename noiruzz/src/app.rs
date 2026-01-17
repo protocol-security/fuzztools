@@ -126,7 +126,8 @@ pub(crate) struct App {
     proof_mismatches: AtomicU64,
     verification_mismatches: AtomicU64,
     known_errors: AtomicU64,
-    later_stages_run: AtomicU64,
+    total_proofs: AtomicU64,
+    total_verifications: AtomicU64,
     circuits_per_tick: u64,
     start_time: Instant,
     last_update: Instant,
@@ -181,7 +182,8 @@ impl App {
             proof_mismatches: AtomicU64::new(0),
             verification_mismatches: AtomicU64::new(0),
             known_errors: AtomicU64::new(0),
-            later_stages_run: AtomicU64::new(0),
+            total_proofs: AtomicU64::new(0),
+            total_verifications: AtomicU64::new(0),
             circuits_per_tick: 0,
             start_time: Instant::now(),
             last_update: Instant::now(),
@@ -227,8 +229,7 @@ impl App {
             let rewritten_code = builder.format_circuit(&scope, &forest);
             // Check power schedule to decide if we should run later stages, or if we always run
             // them
-            let run_later_stages =
-                self.power_schedule.should_run_later_stages();
+            let run_later_stages = self.power_schedule.should_run_later_stages();
 
             // Send job
             let job = TestJob {
@@ -587,16 +588,20 @@ impl App {
                             }
                         }
                         (Err(e), Ok(())) => {
-                            let _ = worker_tx
-                                .send(TestResult::CompilationMismatch {
-                                    original_code: job.original_code.clone(),
-                                    rewritten_code: job.rewritten_code.clone(),
-                                    original_compiled: false,
-                                    error: e,
-                                    job_id: job.job_id,
-                                    t1,
-                                })
-                                .await;
+                            if is_expected_execution_error(&e) {
+                                let _ = worker_tx.send(TestResult::KnownError { t1 }).await;
+                            } else {
+                                let _ = worker_tx
+                                    .send(TestResult::CompilationMismatch {
+                                        original_code: job.original_code.clone(),
+                                        rewritten_code: job.rewritten_code.clone(),
+                                        original_compiled: false,
+                                        error: e,
+                                        job_id: job.job_id,
+                                        t1,
+                                    })
+                                    .await;
+                            }
                         }
                         // Both failed to compile
                         _ => {
@@ -621,7 +626,8 @@ impl App {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
                     if t2 > Duration::ZERO {
-                        self.later_stages_run.fetch_add(1, Ordering::Relaxed);
+                        self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                        self.total_verifications.fetch_add(1, Ordering::Relaxed);
                     }
                 }
                 TestResult::CompilationMismatch {
@@ -674,7 +680,7 @@ impl App {
                 } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
-                    self.later_stages_run.fetch_add(1, Ordering::Relaxed);
+                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
                     self.proof_mismatches.fetch_add(1, Ordering::Relaxed);
                     self.save_proof_mismatch(
                         job_id,
@@ -697,6 +703,8 @@ impl App {
                 } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
+                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                    self.total_verifications.fetch_add(1, Ordering::Relaxed);
                     self.verification_mismatches.fetch_add(1, Ordering::Relaxed);
                     self.save_verification_mismatch(
                         job_id,
@@ -710,10 +718,16 @@ impl App {
                 TestResult::BothFailedCompile { t1 } | TestResult::BothFailedExecute { t1 } => {
                     self.power_schedule.add_t1(t1);
                 }
-                TestResult::BothFailedProve { t1, t2 } |
+                TestResult::BothFailedProve { t1, t2 } => {
+                    self.power_schedule.add_t1(t1);
+                    self.power_schedule.add_t2(t2);
+                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                }
                 TestResult::BothFailedVerify { t1, t2 } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
+                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                    self.total_verifications.fetch_add(1, Ordering::Relaxed);
                 }
                 TestResult::KnownError { t1 } => {
                     self.power_schedule.add_t1(t1);
@@ -842,7 +856,8 @@ impl App {
         let soundness = self.soundness_bugs.load(Ordering::Relaxed);
         let proof = self.proof_mismatches.load(Ordering::Relaxed);
         let known = self.known_errors.load(Ordering::Relaxed);
-        let later_stages_run = self.later_stages_run.load(Ordering::Relaxed);
+        let proofs = self.total_proofs.load(Ordering::Relaxed);
+        let verifications = self.total_verifications.load(Ordering::Relaxed);
         let current_ratio = self.power_schedule.current_ratio();
         let elapsed = self.start_time.elapsed().as_secs();
 
@@ -861,8 +876,8 @@ impl App {
             elapsed % 60,
         );
         println!(
-            "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Later stages: {RED}{}{RESET}",
-            current_ratio, later_stages_run,
+            "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Proofs: {RED}{}{RESET} | Verifications: {RED}{}{RESET}",
+            current_ratio, proofs, verifications,
         );
 
         // Display rule stats in order defined in RULES

@@ -3,7 +3,7 @@ use crate::circuits::{
         forest::Forest,
         nodes::{Node, NodeKind},
         operators::Operator,
-        types::{Array, Integer, Slice, Tuple, Type, TypeKind},
+        types::{Array, Integer, Lambda, Slice, Tuple, Type, TypeKind},
     },
     context::Context,
     generators::types::TypeLocation,
@@ -41,11 +41,11 @@ impl Forest {
     ) {
         self.skip_idle_vars = skip_idle_vars;
         // Pre-compute function callables (they don't change during forest generation)
-        let functions: Vec<(String, Vec<Type>, Type)> = scope
+        let functions: Vec<(String, Lambda)> = scope
             .functions
             .iter()
             .map(|f| {
-                (f.name.clone(), f.params.iter().map(|(_, ty)| ty.clone()).collect(), f.ret.clone())
+                (f.name.clone(), Lambda { params: f.params.clone(), ret: Box::new(f.ret.clone()) })
             })
             .collect();
 
@@ -62,7 +62,7 @@ impl Forest {
             choices.push((StatementKind::Expression, ctx.operator_weight * 2));
 
             // Allow function/lambda calls if we have callables
-            if has_nodes && (!functions.is_empty() || !self.callables.is_empty()) {
+            if has_nodes && (!functions.is_empty() || !self.lambdas.is_empty()) {
                 choices.push((StatementKind::Call, ctx.call_weight));
             }
             // Allow assignments if we have mutable variables
@@ -87,7 +87,7 @@ impl Forest {
 
             match choices.choose_weighted(random, |c| c.1).unwrap().0 {
                 StatementKind::Expression => self.gen_expression(random, ctx, scope),
-                StatementKind::Call => self.gen_call(random, &functions),
+                StatementKind::Call => self.gen_call(random),
                 StatementKind::Assignment => self.gen_assignment(random, ctx, scope),
                 StatementKind::ForLoop => {
                     self.gen_for_loop(random, ctx, scope);
@@ -112,7 +112,7 @@ impl Forest {
     /// Generate a complete expression tree and assign it to a variable
     /// If `scope.type_bias` is set, generation is biased towards those types
     pub fn gen_expression(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        let ctx = if self.callables.len() < ctx.max_lambda_count {
+        let ctx = if self.lambdas.len() < ctx.max_lambda_count {
             *ctx
         } else {
             let mut ctx = *ctx;
@@ -726,28 +726,27 @@ impl Forest {
     // Call generation
     // ────────────────────────────────────────────────────────────────────────────────
 
-    pub fn gen_call(&mut self, random: &mut impl Rng, functions: &[(String, Vec<Type>, Type)]) {
-        let callables: Vec<_> =
-            self.callables.iter().cloned().chain(functions.iter().cloned()).collect();
-        if callables.is_empty() {
+    pub fn gen_call(&mut self, random: &mut impl Rng) {
+        if self.lambdas.is_empty() {
             return;
         }
-        let (name, params, ret) = callables.choose(random).unwrap().clone();
+
+        let (name, lambda, idx) = self.lambdas.choose(random).unwrap().clone();
 
         // Collect arguments for each parameter type, skipping if any is missing
-        let mut args = Vec::with_capacity(params.len());
-        for ty in &params {
+        let mut args = Vec::with_capacity(lambda.params.len());
+        for (_, ty) in &lambda.params {
             let Some(types) = self.types.get(ty) else { return };
             let Some(&idx) = types.choose(random) else { return };
             args.push(idx);
         }
 
-        let call_idx = self.call(name, ret.clone(), args);
-        self.register(random, call_idx, NodeKind::Call, &ret, None);
+        let call_idx = self.call(name, *lambda.ret.clone(), args, idx);
+        self.register(random, call_idx, NodeKind::Call, &lambda.ret.clone(), None);
 
         let var_name = self.next_var();
-        let var_idx = self.variable(var_name, ret.clone(), false, false, call_idx);
-        self.register(random, var_idx, NodeKind::Variable, &ret, None);
+        let var_idx = self.variable(var_name, *lambda.ret.clone(), false, false, call_idx);
+        self.register(random, var_idx, NodeKind::Variable, &lambda.ret, None);
     }
 
     // ────────────────────────────────────────────────────────────────────────────────

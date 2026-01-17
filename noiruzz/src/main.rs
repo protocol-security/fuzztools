@@ -57,22 +57,10 @@ async fn main() -> Result<()> {
          {GREEN}INFO{RESET}      Crash dir:  {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Target p:   {RED}{}{RESET}\n\
          {GREEN}INFO{RESET}      Workers:    {RED}{}{RESET}\n\n",
-        cli.seed,
-        cli.executions,
-        config_path,
-        crash_dir,
-        cli.target_ratio,
-        cli.workers,
+        cli.seed, cli.executions, config_path, crash_dir, cli.target_ratio, cli.workers,
     );
 
-    let mut app = App::new(
-        ctx,
-        cli.executions,
-        prelude,
-        crash_dir,
-        cli.target_ratio,
-        cli.workers,
-    )?;
+    let mut app = App::new(ctx, cli.executions, prelude, crash_dir, cli.target_ratio, cli.workers)?;
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
     if let Err(e) = app.run(&mut random).await {

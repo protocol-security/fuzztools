@@ -7,7 +7,6 @@ use crate::circuits::{
         types::{Struct, Type, TypeKind},
     },
     context::Context,
-    functions::Function,
     generators::types::TypeLocation,
     scope::Scope,
     Circuit,
@@ -75,6 +74,8 @@ impl CircuitBuilder {
         }
 
         // Create functions (can be used in other functions or main)
+        // @todo I removed function calls and only rely on lambdas, maybe change in the future
+        /*
         for i in 0..random.random_range(ctx.min_function_count..=ctx.max_function_count) {
             let mut func = Function::random(random, ctx, &scope, format!("fn{i}"));
 
@@ -94,6 +95,7 @@ impl CircuitBuilder {
 
             scope.functions.push(func);
         }
+        */
 
         // Create inputs (can be used in main) with random visibility
         scope.inputs = (0..random.random_range(ctx.min_input_count..=ctx.max_input_count))

@@ -31,7 +31,7 @@ pub struct Forest {
 
     // Tracks callable lambdas: (accessor_expression, params, return_type)
     // Includes direct lambda variables and lambdas nested in structs/arrays/slices/tuples
-    pub callables: Vec<(String, Vec<Type>, Type)>,
+    pub lambdas: Vec<(String, Lambda, NodeIndex)>,
 
     // This hashmap holds which variables from the outer scope (if any) are mutable and can be
     // mutable within this sub-forest
@@ -50,9 +50,8 @@ impl Forest {
             Node::Input { ty, .. } | Node::Literal { ty, .. } | Node::Variable { ty, .. } => {
                 ty.clone()
             }
-            Node::Operator { ret, .. } | Node::Call { ret, .. } => ret.clone(), /* @audit quizás
-                                                                                  * usando esto
-                                                                                  * abjo?? */
+            // @audit quizás usando esto abajo
+            Node::Operator { ret, .. } | Node::Call { ret, .. } => ret.clone(),
             Node::Index { .. } => match self.ty(self.left(idx).unwrap()) {
                 Type::Array(a) => *a.ty,
                 Type::Slice(s) => *s.ty,
@@ -147,10 +146,18 @@ impl Forest {
     }
 
     #[inline(always)]
-    pub fn call(&mut self, name: String, ret: Type, args: Vec<NodeIndex>) -> NodeIndex {
+    pub fn call(
+        &mut self,
+        name: String,
+        ret: Type,
+        args: Vec<NodeIndex>,
+        parent: NodeIndex,
+    ) -> NodeIndex {
         let idx = self.graph.add_node(Node::Call { name, ret });
+        self.graph.add_edge(idx, parent, 0);
+
         for (pos, arg) in args.into_iter().enumerate() {
-            self.graph.add_edge(idx, arg, pos);
+            self.graph.add_edge(idx, arg, pos + 1);
         }
 
         idx
@@ -379,23 +386,29 @@ impl Forest {
                 Node::Variable { name, .. } | Node::Input { name, .. } => Some(name.clone()),
                 _ => None,
             }) {
-                self.register_callables(random, &name, ty);
+                self.register_callables(random, &name, ty, Some(idx));
             }
         }
     }
 
     /// Registers callable lambdas from a type, recursively handling nested types.
-    fn register_callables(&mut self, random: &mut impl Rng, accessor: &str, ty: &Type) {
+    fn register_callables(
+        &mut self,
+        random: &mut impl Rng,
+        accessor: &str,
+        ty: &Type,
+        idx: Option<NodeIndex>,
+    ) {
         match ty {
             Type::Lambda(lambda) => {
-                let params = lambda.params.iter().map(|(_, t)| t.clone()).collect();
-                let ret = lambda.ret.as_ref().clone();
-                self.callables.push((accessor.to_string(), params, ret));
+                // idx is the top-most node (variable/input) that contains this lambda,
+                // either directly or nested within structs/arrays/slices/tuples
+                self.lambdas.push((accessor.to_string(), lambda.clone(), idx.unwrap()));
             }
             Type::Struct(s) => {
                 for field in &s.fields {
                     let field_accessor = format!("{}.{}", accessor, field.name);
-                    self.register_callables(random, &field_accessor, &field.ty);
+                    self.register_callables(random, &field_accessor, &field.ty, idx);
                 }
             }
             Type::Array(arr) => {
@@ -407,7 +420,7 @@ impl Forest {
                 // Choose an index randomly
                 let index = random.random_range(0..arr.size);
                 let elem_accessor = format!("{}[{}]", accessor, index);
-                self.register_callables(random, &elem_accessor, &arr.ty);
+                self.register_callables(random, &elem_accessor, &arr.ty, idx);
             }
             Type::Slice(slice) => {
                 // If empty, skip
@@ -418,12 +431,12 @@ impl Forest {
                 // Choose an index randomly
                 let index = random.random_range(0..slice.size);
                 let elem_accessor = format!("{}[{}]", accessor, index);
-                self.register_callables(random, &elem_accessor, &slice.ty);
+                self.register_callables(random, &elem_accessor, &slice.ty, idx);
             }
             Type::Tuple(tuple) => {
                 for (i, elem_ty) in tuple.elements.iter().enumerate() {
                     let elem_accessor = format!("{}.{}", accessor, i);
-                    self.register_callables(random, &elem_accessor, elem_ty);
+                    self.register_callables(random, &elem_accessor, elem_ty, idx);
                 }
             }
             _ => {}

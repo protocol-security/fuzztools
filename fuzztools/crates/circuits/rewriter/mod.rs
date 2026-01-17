@@ -126,7 +126,7 @@ impl Rewriter {
         // Apply to all matching nodes (check node still exists - graph may change during rewrites)
         for node in nodes_for_rule {
             if forest.graph.contains_node(node) {
-                self.apply(random, forest, node, &selected_rule, ctx, scope);
+                self.apply(random, forest, node, &selected_rule, ctx, scope, &condition_nodes);
                 applied_count += 1;
             }
         }
@@ -146,6 +146,7 @@ impl Rewriter {
         kind: &RuleKind,
         ctx: &Context,
         scope: &Scope,
+        condition_nodes: &HashSet<NodeIndex>,
     ) {
         match kind {
             // Structural
@@ -171,7 +172,7 @@ impl Rewriter {
 
             // Comparison
             RuleKind::FlipComparison => do_flip_comparison(forest, n),
-            RuleKind::NegateComparison => do_negate_comparison(forest, n),
+            RuleKind::NegateComparison => do_negate_comparison(forest, n, condition_nodes),
             RuleKind::ExpandComparison => do_expand_comparison(forest, n),
 
             // Boolean logic
@@ -239,24 +240,36 @@ fn matches_rule(
 
         // ((a - b) - c) or (a - (b + c))
         (RuleKind::AssociateSub, Some(Operator::Sub)) => {
-            is_binary && (left_op == Some(Operator::Sub) || right_op == Some(Operator::Add))
+            is_binary &&
+                (left_op == Some(Operator::Sub) || right_op == Some(Operator::Add))
         }
 
-        // ((a / b) * c) ↔ (a * (c / b)) - only valid for Field (not integer division!)
+        // ((a / b) * c) ↔ (a * (c / b)) - only valid for Field as integers round down
         (RuleKind::AssociateDiv, Some(Operator::Mul)) => {
             is_binary &&
                 left.is_some_and(|l| matches!(f.ty(l), Type::Field)) &&
                 (left_op == Some(Operator::Div) || right_op == Some(Operator::Div))
         }
 
-        // (a / b) → ((1 / b) * a) - only valid for Field (not integer division!)
+        // (a / b) ↔ ((1 / b) * a) - only valid for Field as integers round down
         (RuleKind::DivCommute, Some(Operator::Div)) => {
             is_binary && left.is_some_and(|l| matches!(f.ty(l), Type::Field))
         }
+        // Reverse: ((1 / b) * a) → (a / b)
+        (RuleKind::DivCommute, Some(Operator::Mul)) => {
+            is_binary &&
+                left.is_some_and(|l| matches!(f.ty(l), Type::Field)) &&
+                left_op == Some(Operator::Div) &&
+                left.and_then(|l| f.left(l)).is_some_and(|ll| is_one(f, ll))
+        }
 
+        // (a * (b + c)) ↔ ((a * b) + (a * c))
         (RuleKind::Distribute { outer, inner }, Some(o)) => {
-            (o == *outer && left_op == Some(*inner)) ||
-                (o == *inner && left_op == Some(*outer) && right_op == Some(*outer))
+            is_binary &&
+                ((o == *outer && left_op == Some(*inner)) ||
+                    (o == *inner &&
+                        left_op == Some(*outer) &&
+                        right_op == Some(*outer)))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -265,15 +278,17 @@ fn matches_rule(
         (RuleKind::Identity { op: rule_op, identity_right }, Some(o))
             if o == *rule_op && is_binary =>
         {
-            // a & 1 = a is only correct for booleans (for integers, a & 1 keeps only LSB)
-            // a | 0 = a is correct for all types
-            if o == Operator::And && !left.is_some_and(|l| matches!(f.ty(l), Type::Boolean)) {
-                return false;
-            }
+            // Get the operand (non-identity) type to check And correctness
+            let operand = if *identity_right { left } else { right };
+            let operand_ty = operand.map(|n| f.ty(n));
+
             let check = if *identity_right { right } else { left };
-            check.is_some_and(|c| is_identity(f, c, o))
+            operand_ty
+                .clone()
+                .is_some_and(|op_ty| check.is_some_and(|c| is_identity_for_type(f, c, o, &op_ty)))
         }
-        (RuleKind::Identity { op, .. }, _) => {
+        // Injection case: a → a op identity (only when there's no existing operator)
+        (RuleKind::Identity { op, .. }, None) => {
             // For And injection (a -> a & 1), only apply to booleans
             // For Or/Xor injection (a -> a | 0, a -> a ^ 0), apply to all types
             // For Add/Sub/Mul/Div/Shl/Shr injection, only apply to Field/Integer (not Boolean)
@@ -292,90 +307,150 @@ fn matches_rule(
         }
 
         (RuleKind::Absorb { op: rule_op }, Some(o)) => {
-            // a & 0 = 0 is correct for all types
-            // a | 1 = 1 is only correct for booleans (for integers, a | 1 sets only LSB)
-            if o == Operator::Or && !left.is_some_and(|l| matches!(f.ty(l), Type::Boolean)) {
+            if o != *rule_op || !is_binary {
                 return false;
             }
-            o == *rule_op &&
-                is_binary &&
-                (left.is_some_and(|l| is_absorbing(f, l, o)) ||
-                    right.is_some_and(|r| is_absorbing(f, r, o)))
+            // a & 0 = 0 is correct for all types (booleans and numeric)
+            // a * 0 = 0 is correct for all numeric types
+            // a | 1 = 1 is only correct for booleans (for numeric, a | 1 sets only LSB, not all
+            // bits)
+            let operand_ty = left.map(|l| f.ty(l));
+            match o {
+                Operator::And | Operator::Mul => {
+                    left.is_some_and(|l| is_absorbing(f, l, o)) ||
+                        right.is_some_and(|r| is_absorbing(f, r, o))
+                }
+                Operator::Or => {
+                    operand_ty.is_some_and(|ty| matches!(ty, Type::Boolean)) &&
+                        (left.is_some_and(|l| is_absorbing(f, l, o)) ||
+                            right.is_some_and(|r| is_absorbing(f, r, o)))
+                }
+                _ => false,
+            }
         }
+        // Note: Absorb injection (0 → a * 0, etc.) is NOT handled here
+        // since it requires random expression generation which needs access to random/ctx/scope.
+        // Could be added as a separate InjectAbsorb rule in the future.
 
         (RuleKind::SelfInverse { op: rule_op }, Some(o)) => {
             if o != *rule_op || !is_binary || left != right {
                 return false;
             }
-            // For Div, a / a = 1 only if a != 0. Only apply to known non-zero literals.
-            if o == Operator::Div {
-                left.is_some_and(|l| {
-                    matches!(&f.graph[l], Node::Literal { value, .. }
-                        if !value.starts_with('0') && !value.starts_with("-0") && value != "false")
-                })
-            } else {
-                true
+            // Check type compatibility for the operator
+            let ty = left.map(|l| f.ty(l));
+            match o {
+                // a - a = 0: valid for Field and integers
+                Operator::Sub => ty.is_some_and(|t| matches!(t, Type::Field | Type::Integer(_))),
+                // a ^ a = 0: valid for integers and booleans
+                Operator::Xor => ty.is_some_and(|t| matches!(t, Type::Integer(_) | Type::Boolean)),
+                // a / a = 1: only if a != 0. Only apply to known non-zero literals.
+                Operator::Div => {
+                    ty.is_some_and(|t| matches!(t, Type::Field | Type::Integer(_))) &&
+                        left.is_some_and(|l| {
+                            matches!(&f.graph[l], Node::Literal { value, .. }
+                                if !value.starts_with('0') && !value.starts_with("-0") && value != "false")
+                        })
+                }
+                _ => false,
             }
         }
+        // Note: Injection (0 → a - a, etc.) is handled by InjectXorXor and similar rules
+        // since it requires random expression generation
 
         (RuleKind::Idempotent { op: rule_op }, Some(o)) => {
-            (o == *rule_op && is_binary && left == right) ||
-                left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
+            if o != *rule_op || !is_binary || left != right {
+                return false;
+            }
+            // Check type compatibility: And/Or work on booleans and integers
+            left.is_some_and(|l| {
+                let ty = f.ty(l);
+                match o {
+                    Operator::And | Operator::Or => matches!(ty, Type::Boolean | Type::Integer(_)),
+                    _ => false,
+                }
+            })
         }
+        // Injection: a → a & a or a → a | a (only for booleans/integers that support these ops)
+        (RuleKind::Idempotent { op }, None) => left.is_some_and(|l| {
+            let ty = f.ty(l);
+            match op {
+                Operator::And | Operator::Or => matches!(ty, Type::Boolean | Type::Integer(_)),
+                _ => false,
+            }
+        }),
 
         // ─────────────────────────────────────────────────────────────────────────
         // Unary rules
         // ─────────────────────────────────────────────────────────────────────────
+        // Simplification: --a → a or !!a → a
         (RuleKind::DoubleUnary { op: rule_op }, Some(o)) => {
-            (o == *rule_op &&
+            o == *rule_op &&
                 is_unary &&
-                left.is_some_and(|i| op_of(f, i) == Some(o) && f.right(i).is_none())) ||
-                can_apply_unary(f, left, *rule_op)
+                left.is_some_and(|i| op_of(f, i) == Some(o) && f.right(i).is_none())
         }
+        // Injection: a → --a or a → !!a
         (RuleKind::DoubleUnary { op }, None) => can_apply_unary(f, left, *op),
 
         (RuleKind::AddNegSub, Some(Operator::Sub)) => {
             is_binary && left.is_some_and(|l| is_signed_type(f, l))
         }
         (RuleKind::AddNegSub, Some(Operator::Add)) => {
-            right_op == Some(Operator::Neg) && left.is_some_and(|l| is_signed_type(f, l))
+            is_binary &&
+                right_op == Some(Operator::Neg) &&
+                left.is_some_and(|l| is_signed_type(f, l))
         }
 
         (RuleKind::NegZeroSub, Some(Operator::Neg)) => {
             is_unary && left.is_some_and(|l| is_signed_type(f, l))
         }
         (RuleKind::NegZeroSub, Some(Operator::Sub)) => {
-            left.is_some_and(|l| is_lit(f, l, "0")) && right.is_some_and(|r| is_signed_type(f, r))
+            is_binary &&
+                left.is_some_and(|l| is_zero(f, l)) &&
+                right.is_some_and(|r| is_signed_type(f, r))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Comparison rules
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::FlipComparison, Some(o)) => matches!(
-            o,
-            Operator::Less | Operator::Greater | Operator::LessOrEqual | Operator::GreaterOrEqual
-        ),
+        (RuleKind::FlipComparison, Some(o)) => {
+            is_binary &&
+                matches!(
+                    o,
+                    Operator::Less |
+                        Operator::Greater |
+                        Operator::LessOrEqual |
+                        Operator::GreaterOrEqual
+                )
+        }
 
         (RuleKind::NegateComparison, Some(o)) => {
-            o.is_comparison() || (o == Operator::Not && left_op.is_some_and(|x| x.is_comparison()))
+            (o.is_comparison() && is_binary) ||
+                (o == Operator::Not &&
+                    is_unary &&
+                    left_op.is_some_and(|x| x.is_comparison()))
         }
 
         // (a <= b) ↔ ((a < b) || (a == b))
         (RuleKind::ExpandComparison, Some(o)) => {
-            matches!(o, Operator::LessOrEqual | Operator::GreaterOrEqual) ||
-                (o == Operator::Or &&
-                    left_op.is_some_and(|x| matches!(x, Operator::Less | Operator::Greater)) &&
-                    right_op == Some(Operator::Equal))
+            is_binary &&
+                (matches!(o, Operator::LessOrEqual | Operator::GreaterOrEqual) ||
+                    (o == Operator::Or &&
+                        left_op.is_some_and(|x| {
+                            matches!(x, Operator::Less | Operator::Greater)
+                        }) &&
+                        right_op == Some(Operator::Equal)))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Boolean rules
         // ─────────────────────────────────────────────────────────────────────────
         (RuleKind::DeMorgan, Some(Operator::Not)) => {
-            left_op.is_some_and(|x| matches!(x, Operator::And | Operator::Or))
+            is_unary && left_op.is_some_and(|x| matches!(x, Operator::And | Operator::Or))
         }
         (RuleKind::DeMorgan, Some(Operator::And | Operator::Or)) => {
-            left_op == Some(Operator::Not) && right_op == Some(Operator::Not)
+            is_binary &&
+                left_op == Some(Operator::Not) &&
+                right_op == Some(Operator::Not)
         }
 
         // !a ↔ a ^ true only works for booleans (for integers, !a is bitwise NOT ≠ a ^ 1)
@@ -383,7 +458,8 @@ fn matches_rule(
             is_unary && left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
         }
         (RuleKind::ComplementXor, Some(Operator::Xor)) => {
-            right.is_some_and(|r| is_one(f, r)) &&
+            is_binary &&
+                right.is_some_and(|r| is_one(f, r)) &&
                 left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
         }
 
@@ -393,38 +469,48 @@ fn matches_rule(
         }
         (RuleKind::XorToAndOr, Some(Operator::Or)) => {
             // Match pattern: ((!a & b) | (a & !b))
-            left_op == Some(Operator::And) && right_op == Some(Operator::And) && {
-                let ll_op = left.and_then(|l| f.left(l)).and_then(|ll| op_of(f, ll));
-                let rl_op = right.and_then(|r| f.right(r)).and_then(|rr| op_of(f, rr));
-                ll_op == Some(Operator::Not) && rl_op == Some(Operator::Not)
-            }
+            is_binary &&
+                left_op == Some(Operator::And) &&
+                right_op == Some(Operator::And) &&
+                {
+                    let ll_op = left.and_then(|l| f.left(l)).and_then(|ll| op_of(f, ll));
+                    let rl_op = right.and_then(|r| f.right(r)).and_then(|rr| op_of(f, rr));
+                    ll_op == Some(Operator::Not) && rl_op == Some(Operator::Not)
+                }
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Modulo rules
         // ─────────────────────────────────────────────────────────────────────────
         // a % 1 → 0
-        (RuleKind::ModOne, Some(Operator::Mod)) => right.is_some_and(|r| is_one(f, r)),
-        // 0 → r % 1 (injection)
-        (RuleKind::ModOne, _) => {
+        (RuleKind::ModOne, Some(Operator::Mod)) => is_binary && right.is_some_and(|r| is_one(f, r)),
+        // 0 → r % 1 (injection) - only when there's no operator (injection case)
+        (RuleKind::ModOne, None) => {
             left.is_some_and(|l| is_zero(f, l) && matches!(f.ty(l), Type::Integer(_)))
         }
 
         // a & 1 ↔ a % 2 (only valid when type can hold value 2, i.e., not u1)
         (RuleKind::AndToMod, Some(Operator::And)) => {
-            right.is_some_and(|r| is_one(f, r)) &&
+            is_binary &&
+                right.is_some_and(|r| is_one(f, r)) &&
                 left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1))
         }
         (RuleKind::AndToMod, Some(Operator::Mod)) => {
-            right.is_some_and(|r| is_two(f, r)) &&
+            is_binary &&
+                right.is_some_and(|r| is_two(f, r)) &&
                 left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Shift rules
         // ─────────────────────────────────────────────────────────────────────────
+        // Simplification: a << 0 → a, a >> 0 → a
         (RuleKind::ShiftZero, Some(Operator::Shl | Operator::Shr)) => {
-            right.is_some_and(|r| is_zero(f, r))
+            is_binary && right.is_some_and(|r| is_zero(f, r))
+        }
+        // Injection: a → a << 0 or a → a >> 0 (for integers)
+        (RuleKind::ShiftZero, None) => {
+            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -432,14 +518,16 @@ fn matches_rule(
         // ─────────────────────────────────────────────────────────────────────────
         // a + a ↔ a * 2 (only valid when type can hold value 2, i.e., not u1)
         (RuleKind::DoubleMulTwo, Some(Operator::Add)) => {
-            left == right &&
+            is_binary &&
+                left == right &&
                 left.is_some_and(|l| {
                     matches!(f.ty(l), Type::Integer(i) if i.bits > 1) ||
                         matches!(f.ty(l), Type::Field)
                 })
         }
         (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => {
-            right.is_some_and(|r| is_two(f, r)) &&
+            is_binary &&
+                right.is_some_and(|r| is_two(f, r)) &&
                 left.is_some_and(|l| {
                     matches!(f.ty(l), Type::Integer(i) if i.bits > 1) ||
                         matches!(f.ty(l), Type::Field)
@@ -447,33 +535,37 @@ fn matches_rule(
         }
 
         (RuleKind::MulNegOneNeg, Some(Operator::Mul)) => {
-            right.is_some_and(|r| is_neg_one(f, r)) && left.is_some_and(|l| is_signed_type(f, l))
+            is_binary &&
+                right.is_some_and(|r| is_neg_one(f, r)) &&
+                left.is_some_and(|l| is_signed_type(f, l))
         }
         (RuleKind::MulNegOneNeg, Some(Operator::Neg)) => {
             is_unary && left.is_some_and(|l| is_signed_type(f, l))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
-        // Injection rules (obfuscation) - only for Field to avoid integer overflow issues
+        // Injection rules (obfuscation) - only when there's no existing operator
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::InjectAddSub | RuleKind::InjectSubAdd | RuleKind::InjectMulDiv, _) => {
+        (RuleKind::InjectAddSub | RuleKind::InjectSubAdd | RuleKind::InjectMulDiv, None) => {
             left.is_some_and(|l| matches!(f.ty(l), Type::Field))
         }
 
-        (RuleKind::InjectXorXor, _) => {
+        (RuleKind::InjectXorXor, None) => {
             left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_) | Type::Boolean))
         }
 
-        // 1 → r / r
-        (RuleKind::InjectDivDiv, _) => {
-            left.is_some_and(|l| is_one(f, l) && matches!(f.ty(l), Type::Field | Type::Integer(_)))
+        // 1 → r / r (only for Field since integer division truncates and we need r != 0)
+        (RuleKind::InjectDivDiv, None) => {
+            left.is_some_and(|l| is_one(f, l) && matches!(f.ty(l), Type::Field))
         }
 
         // a → a | 0 (for integers)
-        (RuleKind::InjectOrZero, _) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
+        (RuleKind::InjectOrZero, None) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
 
-        // a → a & a (for integers)
-        (RuleKind::InjectAndSelf, _) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
+        // a → a & a (for integers and booleans)
+        (RuleKind::InjectAndSelf, None) => {
+            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_) | Type::Boolean))
+        }
 
         _ => false,
     }
@@ -485,7 +577,7 @@ fn operators_for_rule(kind: &RuleKind) -> Vec<Operator> {
         RuleKind::SwapOperands { ops } | RuleKind::Associate { ops } => ops.to_vec(),
         RuleKind::AssociateSub => vec![Sub],
         RuleKind::AssociateDiv => vec![Mul],
-        RuleKind::DivCommute => vec![Div],
+        RuleKind::DivCommute => vec![Div, Mul], // Div for forward, Mul for reverse
         RuleKind::Distribute { outer, inner } => vec![*outer, *inner],
         RuleKind::Identity { op, .. } |
         RuleKind::Absorb { op } |
@@ -690,17 +782,19 @@ fn do_distribute(f: &mut Forest, n: NodeIndex, outer: Operator, inner: Operator)
 }
 
 fn do_identity(f: &mut Forest, n: NodeIndex, op: Operator, identity_right: bool) {
+    // Simplification: a op identity → a
     if op_of(f, n) == Some(op) {
         let (keep, check) =
             if identity_right { (f.left(n), f.right(n)) } else { (f.right(n), f.left(n)) };
         if check.is_some_and(|c| is_identity(f, c, op)) {
             if let Some(k) = keep {
                 redirect(f, n, k);
-                return;
             }
         }
+        // If we have the operator but identity check failed, do nothing (don't inject)
+        return;
     }
-    // Inject: x -> x op identity
+    // Injection: x → x op identity (only when there's no operator)
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
     let id = make_identity(f, &ty, op);
@@ -710,28 +804,50 @@ fn do_identity(f: &mut Forest, n: NodeIndex, op: Operator, identity_right: bool)
 }
 
 fn do_absorb(f: &mut Forest, n: NodeIndex, op: Operator) {
-    let ty = f.ty(n);
-    let absorb = make_absorbing(f, &ty, op);
-    redirect(f, n, absorb);
+    // Simplification: a * 0 → 0, a & 0 → 0, a | true → true
+    // Only applies when we have the operator and one operand is absorbing
+    if op_of(f, n) == Some(op) {
+        let left = f.left(n);
+        let right = f.right(n);
+        if left.is_some_and(|l| is_absorbing(f, l, op)) ||
+            right.is_some_and(|r| is_absorbing(f, r, op))
+        {
+            let ty = f.ty(n);
+            let absorb = make_absorbing(f, &ty, op);
+            redirect(f, n, absorb);
+        }
+    }
+    // Injection case (0 → a * 0) is NOT handled here - it requires random expression generation
+    // which needs access to random/ctx/scope. Could be added as a separate InjectAbsorb rule.
 }
 
 fn do_self_inverse(f: &mut Forest, n: NodeIndex, op: Operator) {
-    let ty = f.ty(n);
-    let lit = match op {
-        Operator::Sub | Operator::Xor => make_zero(f, &ty),
-        Operator::Div => make_one(f, &ty),
-        _ => return,
-    };
-    redirect(f, n, lit);
+    // Simplification: a op a → identity (0 for Sub/Xor, 1 for Div)
+    if op_of(f, n) == Some(op) && f.left(n) == f.right(n) {
+        let ty = f.ty(n);
+        let lit = match op {
+            Operator::Sub | Operator::Xor => make_zero(f, &ty),
+            Operator::Div => make_one(f, &ty),
+            _ => return,
+        };
+        redirect(f, n, lit);
+    }
+    // Injection case is NOT handled here - it requires random expression generation
+    // which needs access to random/ctx/scope, so injection is done via separate InjectXorXor etc.
 }
 
 fn do_idempotent(f: &mut Forest, n: NodeIndex, op: Operator) {
-    if op_of(f, n) == Some(op) && f.left(n) == f.right(n) {
-        if let Some(operand) = f.left(n) {
-            redirect(f, n, operand);
-            return;
+    // Simplification: a op a → a (for And/Or)
+    if op_of(f, n) == Some(op) {
+        if f.left(n) == f.right(n) {
+            if let Some(operand) = f.left(n) {
+                redirect(f, n, operand);
+            }
         }
+        // If we have the operator but idempotent check failed, do nothing (don't inject)
+        return;
     }
+    // Injection: a → a op a (only for booleans, only when there's no operator)
     if matches!(f.ty(n), Type::Boolean) {
         let edges = f.incoming_edges(n);
         let new = f.operator(op, Type::Boolean, n, Some(n));
@@ -740,15 +856,18 @@ fn do_idempotent(f: &mut Forest, n: NodeIndex, op: Operator) {
 }
 
 fn do_double_unary(f: &mut Forest, n: NodeIndex, op: Operator) {
+    // Simplification: op(op(x)) → x (e.g., --a → a, !!a → a)
     if op_of(f, n) == Some(op) && f.right(n).is_none() {
         if let Some(inner) = f.left(n).filter(|&i| op_of(f, i) == Some(op) && f.right(i).is_none())
         {
             if let Some(x) = f.left(inner) {
                 redirect(f, n, x);
-                return;
             }
         }
+        // If we have the operator but double unary check failed, do nothing (don't inject)
+        return;
     }
+    // Injection: x → op(op(x)) (only when there's no operator)
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
     let inner = f.operator(op, ty.clone(), n, None);
@@ -779,12 +898,12 @@ fn do_neg_zero_sub(f: &mut Forest, n: NodeIndex) {
             // -x → 0 - x
             let operand = f.left(n).unwrap();
             let ty = ret_of(f, n);
-            let zero = f.literal("0".into(), ty);
+            let zero = make_zero(f, &ty);
             set_op(f, n, Operator::Sub);
             f.add_operand(n, 1, operand);
             f.replace_operand(n, 0, zero);
         }
-        Some(Operator::Sub) if f.left(n).is_some_and(|l| is_lit(f, l, "0")) => {
+        Some(Operator::Sub) if f.left(n).is_some_and(|l| is_zero(f, l)) => {
             // 0 - x → -x
             let right = f.right(n).unwrap();
             set_op(f, n, Operator::Neg);
@@ -816,10 +935,14 @@ fn do_flip_comparison(f: &mut Forest, n: NodeIndex) {
     f.swap_operands(n);
 }
 
-fn do_negate_comparison(f: &mut Forest, n: NodeIndex) {
+fn do_negate_comparison(f: &mut Forest, n: NodeIndex, condition_nodes: &HashSet<NodeIndex>) {
     // not(a cmp b) -> a neg_cmp b
     if op_of(f, n) == Some(Operator::Not) {
         if let Some(inner) = f.left(n) {
+            // Don't modify the inner comparison if it's used as a condition
+            if condition_nodes.contains(&inner) {
+                return;
+            }
             if let Some(negated) = op_of(f, inner).and_then(negate_cmp) {
                 set_op(f, inner, negated);
                 redirect(f, n, inner);
@@ -1187,11 +1310,6 @@ fn redirect(f: &mut Forest, from: NodeIndex, to: NodeIndex) {
 // Literal predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[inline(always)]
-fn is_lit(f: &Forest, n: NodeIndex, val: &str) -> bool {
-    matches!(&f.graph[n], Node::Literal { value, .. } if value == val)
-}
-
 /// Check if node is a literal with numeric value (handles bool/field/int)
 #[inline(always)]
 fn is_numeric_literal(f: &Forest, n: NodeIndex, num: i8) -> bool {
@@ -1277,6 +1395,26 @@ fn can_apply_unary(f: &Forest, node: Option<NodeIndex>, op: Operator) -> bool {
 // Operator properties
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Check if `n` is an identity element for `op` when used with operand type `operand_ty`.
+/// For And, 1 is only identity for booleans (true & a = a), not integers (1 & 3 = 1 ≠ 3).
+#[inline(always)]
+fn is_identity_for_type(f: &Forest, n: NodeIndex, op: Operator, operand_ty: &Type) -> bool {
+    match op {
+        Operator::Add |
+        Operator::Sub |
+        Operator::Xor |
+        Operator::Or |
+        Operator::Shl |
+        Operator::Shr => is_zero(f, n),
+        Operator::Mul | Operator::Div => is_one(f, n),
+        // For And, 1 (true) is only identity for booleans
+        Operator::And => matches!(operand_ty, Type::Boolean) && is_one(f, n),
+        _ => false,
+    }
+}
+
+/// Check if `n` is an identity element for `op` (legacy version, does NOT check type for And).
+/// Callers must ensure type correctness separately when using this for And.
 #[inline(always)]
 fn is_identity(f: &Forest, n: NodeIndex, op: Operator) -> bool {
     match op {
@@ -1371,16 +1509,28 @@ fn make_absorbing(f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{builders::CircuitBuilder, circuits::ast::nodes::NodeKind};
     use std::fs;
 
-    use crate::{builders::CircuitBuilder, circuits::ast::nodes::NodeKind};
-
-    use super::*;
-
-    /// ANSI color codes for terminal output
     const RED: &str = "\x1b[31m";
     const GREEN: &str = "\x1b[32m";
     const RESET: &str = "\x1b[0m";
+
+    /// Helper to check if a rule matches for a given node
+    fn assert_matches(f: &Forest, n: NodeIndex, kind: &RuleKind) {
+        let op = op_of(f, n);
+        let left = f.left(n);
+        let right = f.right(n);
+        assert!(
+            matches_rule(f, op, left, right, kind),
+            "Rule {:?} should match for node with op={:?}, left={:?}, right={:?}",
+            kind,
+            op,
+            left,
+            right
+        );
+    }
 
     /// Find common prefix length between two strings
     fn common_prefix_len(a: &str, b: &str) -> usize {
@@ -1399,7 +1549,6 @@ mod tests {
             .count()
     }
 
-    /// Highlight only the differing part of a line
     fn highlight_diff(line: &str, other: &str, color: &str) -> String {
         let prefix_len = common_prefix_len(line, other);
         let suffix_len = common_suffix_len(line, other, prefix_len);
@@ -1418,13 +1567,12 @@ mod tests {
         format!("{prefix}{color}{diff}{RESET}{suffix}")
     }
 
-    /// Compare two strings line by line and print differences with colors
     fn print_diff(before: &str, after: &str) {
         let before_lines: Vec<&str> = before.lines().collect();
         let after_lines: Vec<&str> = after.lines().collect();
 
         println!("\n{}", "=".repeat(80));
-        println!("CIRCUIT COMPARISON (red = removed, green = added)");
+        println!("CIRCUIT COMPARISON");
         println!("{}\n", "=".repeat(80));
 
         let max_lines = before_lines.len().max(after_lines.len());
@@ -1474,17 +1622,852 @@ mod tests {
 
         // Clone forest before rewriting to compare
         let forest_before = forest.clone();
-
-        // Format circuit before rewriting (with fixed return)
         let before = builder.format_circuit(&scope, &forest_before);
 
         // Apply rewriter
         rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
 
-        // Format circuit after rewriting (with same fixed return)
         let after = builder.format_circuit(&scope, &forest);
 
-        // Print diff with colors
         print_diff(&before, &after);
+    }
+
+    #[test]
+    fn test_associate() {
+        // Test Associate rule: (a + b) + c ↔ a + (b + c)
+        let mut forest = Forest::default();
+        let rule = RuleKind::Associate { ops: &[Operator::Add] };
+
+        // Create inputs: a, b, c
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+        let c = forest.input("c".into(), Type::Field);
+
+        // Build (a + b) + c (left-associated)
+        let a_plus_b = forest.operator(Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Add, Type::Field, a_plus_b, Some(c));
+
+        // Verify initial structure: left child is (a + b), right child is c
+        assert_eq!(forest.left(root), Some(a_plus_b));
+        assert_eq!(forest.right(root), Some(c));
+        assert_eq!(op_of(&forest, forest.left(root).unwrap()), Some(Operator::Add));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply associate: (a + b) + c -> a + (b + c)
+        assert_matches(&forest, root, &rule);
+        do_associate(&mut forest, root);
+        println!("After associate: {}", forest.get_expr_for_node(root));
+
+        // Verify new structure: left child is a, right child is (b + c)
+        assert_eq!(forest.left(root), Some(a));
+        let new_right = forest.right(root).unwrap();
+        assert_eq!(op_of(&forest, new_right), Some(Operator::Add));
+        assert_eq!(forest.left(new_right), Some(b));
+        assert_eq!(forest.right(new_right), Some(c));
+
+        // Apply associate again (reverse direction): a + (b + c) -> (a + b) + c
+        assert_matches(&forest, root, &rule);
+        do_associate(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        // Verify we're back to left-associated form: (a + b) + c
+        // root's left child is the new (a + b) operator node
+        let new_left = forest.left(root).unwrap();
+        assert_eq!(op_of(&forest, new_left), Some(Operator::Add));
+        assert_eq!(forest.left(new_left), Some(a));
+        assert_eq!(forest.right(new_left), Some(b));
+        // root's right child is c directly
+        assert_eq!(forest.right(root), Some(c));
+    }
+
+    #[test]
+    fn test_associate_sub() {
+        // Test AssociateSub rule: (a - b) - c ↔ a - (b + c)
+        let mut forest = Forest::default();
+        let rule = RuleKind::AssociateSub;
+
+        // Create inputs: a, b, c
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+        let c = forest.input("c".into(), Type::Field);
+
+        // Build (a - b) - c
+        let a_minus_b = forest.operator(Operator::Sub, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Sub, Type::Field, a_minus_b, Some(c));
+
+        // Verify initial structure: (a - b) - c
+        assert_eq!(forest.left(root), Some(a_minus_b));
+        assert_eq!(forest.right(root), Some(c));
+        assert_eq!(op_of(&forest, forest.left(root).unwrap()), Some(Operator::Sub));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply associate_sub: (a - b) - c -> a - (b + c)
+        assert_matches(&forest, root, &rule);
+        do_associate_sub(&mut forest, root);
+        println!("After associate_sub: {}", forest.get_expr_for_node(root));
+
+        // Verify new structure: a - (b + c)
+        assert_eq!(forest.left(root), Some(a));
+        let new_right = forest.right(root).unwrap();
+        assert_eq!(op_of(&forest, new_right), Some(Operator::Add)); // b + c
+        assert_eq!(forest.left(new_right), Some(b));
+        assert_eq!(forest.right(new_right), Some(c));
+
+        // Apply associate_sub again (reverse direction): a - (b + c) -> (a - b) - c
+        assert_matches(&forest, root, &rule);
+        do_associate_sub(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        // Verify we're back to (a - b) - c form
+        let new_left = forest.left(root).unwrap();
+        assert_eq!(op_of(&forest, new_left), Some(Operator::Sub)); // a - b
+        assert_eq!(forest.left(new_left), Some(a));
+        assert_eq!(forest.right(new_left), Some(b));
+        assert_eq!(forest.right(root), Some(c));
+    }
+
+    #[test]
+    fn test_swap_operands() {
+        // Test SwapOperands rule: (a + b) ↔ (b + a)
+        let mut forest = Forest::default();
+        let rule = RuleKind::SwapOperands { ops: &[Operator::Add] };
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+
+        let root = forest.operator(Operator::Add, Type::Field, a, Some(b));
+
+        // Initial: a + b
+        assert_eq!(forest.left(root), Some(a));
+        assert_eq!(forest.right(root), Some(b));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Swap: a + b -> b + a
+        assert_matches(&forest, root, &rule);
+        forest.swap_operands(root);
+        println!("After swap: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(forest.left(root), Some(b));
+        assert_eq!(forest.right(root), Some(a));
+
+        // Swap back: b + a -> a + b
+        assert_matches(&forest, root, &rule);
+        forest.swap_operands(root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(forest.left(root), Some(a));
+        assert_eq!(forest.right(root), Some(b));
+    }
+
+    #[test]
+    fn test_associate_div() {
+        // Test AssociateDiv rule: ((a / b) * c) ↔ (a * (c / b))
+        let mut forest = Forest::default();
+        let rule = RuleKind::AssociateDiv;
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+        let c = forest.input("c".into(), Type::Field);
+
+        // Build (a / b) * c
+        let a_div_b = forest.operator(Operator::Div, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Mul, Type::Field, a_div_b, Some(c));
+
+        // Verify initial: (a / b) * c
+        assert_eq!(forest.left(root), Some(a_div_b));
+        assert_eq!(forest.right(root), Some(c));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: (a / b) * c -> a * (c / b)
+        assert_matches(&forest, root, &rule);
+        do_associate_div(&mut forest, root);
+        println!("After associate_div: {}", forest.get_expr_for_node(root));
+
+        // Verify: a * (c / b)
+        assert_eq!(forest.left(root), Some(a));
+        let new_right = forest.right(root).unwrap();
+        assert_eq!(op_of(&forest, new_right), Some(Operator::Div));
+        assert_eq!(forest.left(new_right), Some(c));
+        assert_eq!(forest.right(new_right), Some(b));
+
+        // Reverse: a * (c / b) -> (a / b) * c
+        assert_matches(&forest, root, &rule);
+        do_associate_div(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        let new_left = forest.left(root).unwrap();
+        assert_eq!(op_of(&forest, new_left), Some(Operator::Div));
+        assert_eq!(forest.left(new_left), Some(a));
+        assert_eq!(forest.right(new_left), Some(b));
+        assert_eq!(forest.right(root), Some(c));
+    }
+
+    #[test]
+    fn test_distribute() {
+        // Test Distribute rule: ((a + b) * c) ↔ ((a * c) + (b * c))
+        let mut forest = Forest::default();
+        let rule = RuleKind::Distribute { outer: Operator::Mul, inner: Operator::Add };
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+        let c = forest.input("c".into(), Type::Field);
+
+        // Build (a + b) * c
+        let a_plus_b = forest.operator(Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Mul, Type::Field, a_plus_b, Some(c));
+
+        // Verify initial: (a + b) * c
+        assert_eq!(op_of(&forest, root), Some(Operator::Mul));
+        assert_eq!(op_of(&forest, forest.left(root).unwrap()), Some(Operator::Add));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply distribute: (a + b) * c -> (a * c) + (b * c)
+        assert_matches(&forest, root, &rule);
+        do_distribute(&mut forest, root, Operator::Mul, Operator::Add);
+        println!("After distribute: {}", forest.get_expr_for_node(root));
+
+        // Verify: (a * c) + (b * c)
+        assert_eq!(op_of(&forest, root), Some(Operator::Add));
+        let left = forest.left(root).unwrap();
+        let right = forest.right(root).unwrap();
+        assert_eq!(op_of(&forest, left), Some(Operator::Mul));
+        assert_eq!(op_of(&forest, right), Some(Operator::Mul));
+        assert_eq!(forest.left(left), Some(a));
+        assert_eq!(forest.right(left), Some(c));
+        assert_eq!(forest.left(right), Some(b));
+        assert_eq!(forest.right(right), Some(c));
+
+        // Reverse: (a * c) + (b * c) -> (a + b) * c
+        assert_matches(&forest, root, &rule);
+    }
+
+    #[test]
+    fn test_identity_add() {
+        // Test Identity rule for Add: (a + 0) ↔ a
+        let mut forest = Forest::default();
+        let rule = RuleKind::Identity { op: Operator::Add, identity_right: true };
+
+        let a = forest.input("a".into(), Type::Field);
+        let zero = forest.literal("0Field".into(), Type::Field);
+
+        // Build a + 0
+        let root = forest.operator(Operator::Add, Type::Field, a, Some(zero));
+
+        // Add an incoming edge so redirect works
+        let var = forest.variable("v".into(), Type::Field, false, false, root);
+
+        // Verify initial: a + 0
+        assert_eq!(forest.left(root), Some(a));
+        assert_eq!(forest.right(root), Some(zero));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply identity: a + 0 -> a (redirects var to point to a)
+        assert_matches(&forest, root, &rule);
+        do_identity(&mut forest, root, Operator::Add, true);
+        println!("After identity: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        // The variable should now point to a
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_identity_mul() {
+        // Test Identity rule for Mul: (a * 1) ↔ a
+        let mut forest = Forest::default();
+        let rule = RuleKind::Identity { op: Operator::Mul, identity_right: true };
+
+        let a = forest.input("a".into(), Type::Field);
+        let one = forest.literal("1Field".into(), Type::Field);
+
+        let root = forest.operator(Operator::Mul, Type::Field, a, Some(one));
+        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply identity: a * 1 -> a
+        assert_matches(&forest, root, &rule);
+        do_identity(&mut forest, root, Operator::Mul, true);
+        println!("After identity: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_self_inverse_sub() {
+        // Test SelfInverse rule for Sub: (a - a) -> 0
+        let mut forest = Forest::default();
+        let rule = RuleKind::SelfInverse { op: Operator::Sub };
+
+        let a = forest.input("a".into(), Type::Field);
+
+        let root = forest.operator(Operator::Sub, Type::Field, a, Some(a));
+        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a - a -> 0
+        assert_matches(&forest, root, &rule);
+        do_self_inverse(&mut forest, root, Operator::Sub);
+
+        // var should now point to a zero literal
+        let new_target = forest.left(var).unwrap();
+        println!("After self_inverse: {}", forest.get_expr_for_node(new_target));
+        assert!(is_zero(&forest, new_target));
+    }
+
+    #[test]
+    fn test_self_inverse_xor() {
+        // Test SelfInverse rule for Xor: (a ^ a) -> 0
+        let mut forest = Forest::default();
+        let rule = RuleKind::SelfInverse { op: Operator::Xor };
+
+        let a = forest.input("a".into(), Type::Integer(Integer { bits: 32, signed: false }));
+
+        let root = forest.operator(
+            Operator::Xor,
+            Type::Integer(Integer { bits: 32, signed: false }),
+            a,
+            Some(a),
+        );
+        let var = forest.variable(
+            "v".into(),
+            Type::Integer(Integer { bits: 32, signed: false }),
+            false,
+            false,
+            root,
+        );
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        assert_matches(&forest, root, &rule);
+        do_self_inverse(&mut forest, root, Operator::Xor);
+
+        let new_target = forest.left(var).unwrap();
+        println!("After self_inverse: {}", forest.get_expr_for_node(new_target));
+        assert!(is_zero(&forest, new_target));
+    }
+
+    #[test]
+    fn test_idempotent_and() {
+        // Test Idempotent rule for And: (a & a) ↔ a
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Boolean);
+
+        let root = forest.operator(Operator::And, Type::Boolean, a, Some(a));
+        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a & a -> a
+        do_idempotent(&mut forest, root, Operator::And);
+        println!("After idempotent: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_idempotent_or() {
+        // Test Idempotent rule for Or: (a | a) ↔ a
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Boolean);
+
+        let root = forest.operator(Operator::Or, Type::Boolean, a, Some(a));
+        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a | a -> a
+        do_idempotent(&mut forest, root, Operator::Or);
+        println!("After idempotent: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_double_unary_neg() {
+        // Test DoubleUnary rule for Neg: --a ↔ a
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Field);
+
+        // Build --a
+        let neg_a = forest.operator(Operator::Neg, Type::Field, a, None);
+        let neg_neg_a = forest.operator(Operator::Neg, Type::Field, neg_a, None);
+        let var = forest.variable("v".into(), Type::Field, false, false, neg_neg_a);
+        println!("Initial: {}", forest.get_expr_for_node(neg_neg_a));
+
+        // Apply: --a -> a
+        do_double_unary(&mut forest, neg_neg_a, Operator::Neg);
+        println!("After double_unary: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_double_unary_not() {
+        // Test DoubleUnary rule for Not: !!a ↔ a
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Boolean);
+
+        let not_a = forest.operator(Operator::Not, Type::Boolean, a, None);
+        let not_not_a = forest.operator(Operator::Not, Type::Boolean, not_a, None);
+        let var = forest.variable("v".into(), Type::Boolean, false, false, not_not_a);
+        println!("Initial: {}", forest.get_expr_for_node(not_not_a));
+
+        // Apply: !!a -> a
+        do_double_unary(&mut forest, not_not_a, Operator::Not);
+        println!("After double_unary: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_add_neg_sub() {
+        // Test AddNegSub rule: (a - b) ↔ (a + (-b))
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+
+        // Build a - b
+        let root = forest.operator(Operator::Sub, Type::Field, a, Some(b));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a - b -> a + (-b)
+        do_add_neg_sub(&mut forest, root);
+        println!("After add_neg_sub: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Add));
+        assert_eq!(forest.left(root), Some(a));
+        let neg_b = forest.right(root).unwrap();
+        assert_eq!(op_of(&forest, neg_b), Some(Operator::Neg));
+        assert_eq!(forest.left(neg_b), Some(b));
+
+        // Reverse: a + (-b) -> a - b
+        do_add_neg_sub(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Sub));
+        assert_eq!(forest.left(root), Some(a));
+        assert_eq!(forest.right(root), Some(b));
+    }
+
+    #[test]
+    fn test_neg_zero_sub() {
+        // Test NegZeroSub rule: (-a) ↔ (0 - a)
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Field);
+
+        // Build -a
+        let root = forest.operator(Operator::Neg, Type::Field, a, None);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: -a -> 0 - a
+        do_neg_zero_sub(&mut forest, root);
+        println!("After neg_zero_sub: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Sub));
+        assert!(is_zero(&forest, forest.left(root).unwrap()));
+        assert_eq!(forest.right(root), Some(a));
+
+        // Reverse: 0 - a -> -a
+        do_neg_zero_sub(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Neg));
+        assert_eq!(forest.left(root), Some(a));
+        assert!(forest.right(root).is_none());
+    }
+
+    #[test]
+    fn test_flip_comparison() {
+        // Test FlipComparison rule: (a < b) ↔ (b > a)
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+
+        let root = forest.operator(Operator::Less, Type::Boolean, a, Some(b));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a < b -> b > a
+        do_flip_comparison(&mut forest, root);
+        println!("After flip_comparison: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Greater));
+        assert_eq!(forest.left(root), Some(b));
+        assert_eq!(forest.right(root), Some(a));
+
+        // Reverse: b > a -> a < b
+        do_flip_comparison(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Less));
+        assert_eq!(forest.left(root), Some(a));
+        assert_eq!(forest.right(root), Some(b));
+    }
+
+    #[test]
+    fn test_negate_comparison() {
+        // Test NegateComparison rule: (a < b) ↔ !(a >= b)
+        let mut forest = Forest::default();
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+
+        let root = forest.operator(Operator::Less, Type::Boolean, a, Some(b));
+        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a < b -> !(a >= b)
+        let empty_conditions = HashSet::new();
+        do_negate_comparison(&mut forest, root, &empty_conditions);
+
+        // root is now a >= b, and var points to a Not node
+        assert_eq!(op_of(&forest, root), Some(Operator::GreaterOrEqual));
+        let not_node = forest.left(var).unwrap();
+        assert_eq!(op_of(&forest, not_node), Some(Operator::Not));
+        assert_eq!(forest.left(not_node), Some(root));
+        println!("After negate_comparison: {}", forest.get_expr_for_node(not_node));
+
+        // Reverse: !(a >= b) -> a < b
+        do_negate_comparison(&mut forest, not_node, &empty_conditions);
+        println!("After reverse: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Less));
+    }
+
+    #[test]
+    fn test_expand_comparison() {
+        // Test ExpandComparison rule: (a <= b) ↔ ((a < b) | (a == b))
+        let mut forest = Forest::default();
+        let rule = RuleKind::ExpandComparison;
+
+        let a = forest.input("a".into(), Type::Field);
+        let b = forest.input("b".into(), Type::Field);
+
+        let root = forest.operator(Operator::LessOrEqual, Type::Boolean, a, Some(b));
+        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a <= b -> (a < b) | (a == b)
+        assert_matches(&forest, root, &rule);
+        do_expand_comparison(&mut forest, root);
+
+        // var should now point to the new Or node
+        let or_node = forest.left(var).unwrap();
+        assert_eq!(op_of(&forest, or_node), Some(Operator::Or));
+        println!("After expand_comparison: {}", forest.get_expr_for_node(or_node));
+
+        let less_node = forest.left(or_node).unwrap();
+        let eq_node = forest.right(or_node).unwrap();
+        assert_eq!(op_of(&forest, less_node), Some(Operator::Less));
+        assert_eq!(op_of(&forest, eq_node), Some(Operator::Equal));
+
+        // Reverse: (a < b) | (a == b) -> a <= b
+        assert_matches(&forest, or_node, &rule);
+        do_expand_comparison(&mut forest, or_node);
+
+        let leq_node = forest.left(var).unwrap();
+        println!("After reverse: {}", forest.get_expr_for_node(leq_node));
+        assert_eq!(op_of(&forest, leq_node), Some(Operator::LessOrEqual));
+    }
+
+    #[test]
+    fn test_demorgan_and() {
+        // Test DeMorgan rule: !(a & b) ↔ (!a | !b)
+        let mut forest = Forest::default();
+        let rule = RuleKind::DeMorgan;
+
+        let a = forest.input("a".into(), Type::Boolean);
+        let b = forest.input("b".into(), Type::Boolean);
+
+        // Build !(a & b)
+        let a_and_b = forest.operator(Operator::And, Type::Boolean, a, Some(b));
+        let not_and = forest.operator(Operator::Not, Type::Boolean, a_and_b, None);
+        let var = forest.variable("v".into(), Type::Boolean, false, false, not_and);
+        println!("Initial: {}", forest.get_expr_for_node(not_and));
+
+        // Apply: !(a & b) -> (!a | !b)
+        assert_matches(&forest, not_and, &rule);
+        do_demorgan(&mut forest, not_and);
+
+        let or_node = forest.left(var).unwrap();
+        assert_eq!(op_of(&forest, or_node), Some(Operator::Or));
+        println!("After demorgan: {}", forest.get_expr_for_node(or_node));
+
+        let not_a = forest.left(or_node).unwrap();
+        let not_b = forest.right(or_node).unwrap();
+        assert_eq!(op_of(&forest, not_a), Some(Operator::Not));
+        assert_eq!(op_of(&forest, not_b), Some(Operator::Not));
+        assert_eq!(forest.left(not_a), Some(a));
+        assert_eq!(forest.left(not_b), Some(b));
+
+        // Reverse: (!a | !b) -> !(a & b)
+        assert_matches(&forest, or_node, &rule);
+        do_demorgan(&mut forest, or_node);
+
+        let not_and_new = forest.left(var).unwrap();
+        assert_eq!(op_of(&forest, not_and_new), Some(Operator::Not));
+        let and_node = forest.left(not_and_new).unwrap();
+        assert_eq!(op_of(&forest, and_node), Some(Operator::And));
+        println!("After reverse: {}", forest.get_expr_for_node(not_and_new));
+    }
+
+    #[test]
+    fn test_complement_xor() {
+        // Test ComplementXor rule: !a ↔ (a ^ true)
+        let mut forest = Forest::default();
+        let rule = RuleKind::ComplementXor;
+
+        let a = forest.input("a".into(), Type::Boolean);
+
+        // Build !a
+        let not_a = forest.operator(Operator::Not, Type::Boolean, a, None);
+        println!("Initial: {}", forest.get_expr_for_node(not_a));
+
+        // Apply: !a -> a ^ true
+        assert_matches(&forest, not_a, &rule);
+        do_complement_xor(&mut forest, not_a);
+        println!("After complement_xor: {}", forest.get_expr_for_node(not_a));
+
+        assert_eq!(op_of(&forest, not_a), Some(Operator::Xor));
+        assert_eq!(forest.left(not_a), Some(a));
+        assert!(is_one(&forest, forest.right(not_a).unwrap()));
+
+        // Reverse: a ^ true -> !a
+        assert_matches(&forest, not_a, &rule);
+        do_complement_xor(&mut forest, not_a);
+        println!("After reverse: {}", forest.get_expr_for_node(not_a));
+
+        assert_eq!(op_of(&forest, not_a), Some(Operator::Not));
+        assert_eq!(forest.left(not_a), Some(a));
+        assert!(forest.right(not_a).is_none());
+    }
+
+    #[test]
+    fn test_xor_to_and_or() {
+        // Test XorToAndOr rule: (a ^ b) ↔ ((!a & b) | (a & !b))
+        let mut forest = Forest::default();
+        let rule = RuleKind::XorToAndOr;
+
+        let a = forest.input("a".into(), Type::Boolean);
+        let b = forest.input("b".into(), Type::Boolean);
+
+        let xor = forest.operator(Operator::Xor, Type::Boolean, a, Some(b));
+        let var = forest.variable("v".into(), Type::Boolean, false, false, xor);
+        println!("Initial: {}", forest.get_expr_for_node(xor));
+
+        // Apply: a ^ b -> (!a & b) | (a & !b)
+        assert_matches(&forest, xor, &rule);
+        do_xor_to_and_or(&mut forest, xor);
+
+        let or_node = forest.left(var).unwrap();
+        assert_eq!(op_of(&forest, or_node), Some(Operator::Or));
+        println!("After xor_to_and_or: {}", forest.get_expr_for_node(or_node));
+
+        let left_and = forest.left(or_node).unwrap();
+        let right_and = forest.right(or_node).unwrap();
+        assert_eq!(op_of(&forest, left_and), Some(Operator::And));
+        assert_eq!(op_of(&forest, right_and), Some(Operator::And));
+
+        // Reverse: (!a & b) | (a & !b) -> a ^ b
+        assert_matches(&forest, or_node, &rule);
+        do_xor_to_and_or(&mut forest, or_node);
+
+        let new_xor = forest.left(var).unwrap();
+        println!("After reverse: {}", forest.get_expr_for_node(new_xor));
+        assert_eq!(op_of(&forest, new_xor), Some(Operator::Xor));
+    }
+
+    #[test]
+    fn test_mod_one() {
+        // Test ModOne rule: (a % 1) -> 0
+        let mut forest = Forest::default();
+        let rule = RuleKind::ModOne;
+
+        let a = forest.input("a".into(), Type::Integer(Integer { bits: 32, signed: false }));
+        let one = forest.literal("1u32".into(), Type::Integer(Integer { bits: 32, signed: false }));
+
+        let root = forest.operator(
+            Operator::Mod,
+            Type::Integer(Integer { bits: 32, signed: false }),
+            a,
+            Some(one),
+        );
+        let var = forest.variable(
+            "v".into(),
+            Type::Integer(Integer { bits: 32, signed: false }),
+            false,
+            false,
+            root,
+        );
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a % 1 -> 0
+        assert_matches(&forest, root, &rule);
+        do_mod_one(&mut forest, root);
+
+        let result = forest.left(var).unwrap();
+        println!("After mod_one: {}", forest.get_expr_for_node(result));
+        assert!(is_zero(&forest, result));
+    }
+
+    #[test]
+    fn test_and_to_mod() {
+        // Test AndToMod rule: (a & 1) ↔ (a % 2)
+        let mut forest = Forest::default();
+        let rule = RuleKind::AndToMod;
+        let ty = Type::Integer(Integer { bits: 32, signed: false });
+
+        let a = forest.input("a".into(), ty.clone());
+        let one = forest.literal("1u32".into(), ty.clone());
+
+        let root = forest.operator(Operator::And, ty.clone(), a, Some(one));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a & 1 -> a % 2
+        assert_matches(&forest, root, &rule);
+        do_and_to_mod(&mut forest, root);
+        println!("After and_to_mod: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Mod));
+        assert_eq!(forest.left(root), Some(a));
+        assert!(is_two(&forest, forest.right(root).unwrap()));
+
+        // Reverse: a % 2 -> a & 1
+        assert_matches(&forest, root, &rule);
+        do_and_to_mod(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::And));
+        assert_eq!(forest.left(root), Some(a));
+        assert!(is_one(&forest, forest.right(root).unwrap()));
+    }
+
+    #[test]
+    fn test_shift_zero() {
+        // Test ShiftZero rule: (a << 0) -> a
+        let mut forest = Forest::default();
+        let rule = RuleKind::ShiftZero;
+        let ty = Type::Integer(Integer { bits: 32, signed: false });
+
+        let a = forest.input("a".into(), ty.clone());
+        let zero = forest.literal("0u32".into(), ty.clone());
+
+        let root = forest.operator(Operator::Shl, ty.clone(), a, Some(zero));
+        let var = forest.variable("v".into(), ty.clone(), false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a << 0 -> a
+        assert_matches(&forest, root, &rule);
+        do_shift_zero(&mut forest, root);
+        println!("After shift_zero: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
+
+        assert_eq!(forest.left(var), Some(a));
+    }
+
+    #[test]
+    fn test_double_mul_two() {
+        // Test DoubleMulTwo rule: (a + a) ↔ (a * 2)
+        let mut forest = Forest::default();
+        let rule = RuleKind::DoubleMulTwo;
+
+        let a = forest.input("a".into(), Type::Field);
+
+        let root = forest.operator(Operator::Add, Type::Field, a, Some(a));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a + a -> a * 2
+        assert_matches(&forest, root, &rule);
+        do_double_mul_two(&mut forest, root);
+        println!("After double_mul_two: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Mul));
+        assert_eq!(forest.left(root), Some(a));
+        assert!(is_two(&forest, forest.right(root).unwrap()));
+
+        // Reverse: a * 2 -> a + a
+        assert_matches(&forest, root, &rule);
+        do_double_mul_two(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Add));
+        assert_eq!(forest.left(root), Some(a));
+        assert_eq!(forest.right(root), Some(a));
+    }
+
+    #[test]
+    fn test_mul_neg_one_neg() {
+        // Test MulNegOneNeg rule: (a * -1) ↔ (-a)
+        let mut forest = Forest::default();
+        let rule = RuleKind::MulNegOneNeg;
+
+        let a = forest.input("a".into(), Type::Field);
+        let neg_one = forest.literal("-1Field".into(), Type::Field);
+
+        let root = forest.operator(Operator::Mul, Type::Field, a, Some(neg_one));
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a * -1 -> -a
+        assert_matches(&forest, root, &rule);
+        do_mul_neg_one_neg(&mut forest, root);
+        println!("After mul_neg_one_neg: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Neg));
+        assert_eq!(forest.left(root), Some(a));
+        assert!(forest.right(root).is_none());
+
+        // Reverse: -a -> a * -1
+        assert_matches(&forest, root, &rule);
+        do_mul_neg_one_neg(&mut forest, root);
+        println!("After reverse: {}", forest.get_expr_for_node(root));
+
+        assert_eq!(op_of(&forest, root), Some(Operator::Mul));
+        assert_eq!(forest.left(root), Some(a));
+        assert!(is_neg_one(&forest, forest.right(root).unwrap()));
+    }
+
+    #[test]
+    fn test_absorb_mul() {
+        // Test Absorb rule for Mul: (a * 0) -> 0
+        let mut forest = Forest::default();
+        let rule = RuleKind::Absorb { op: Operator::Mul };
+
+        let a = forest.input("a".into(), Type::Field);
+        let zero = forest.literal("0Field".into(), Type::Field);
+
+        let root = forest.operator(Operator::Mul, Type::Field, a, Some(zero));
+        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a * 0 -> 0
+        assert_matches(&forest, root, &rule);
+        do_absorb(&mut forest, root, Operator::Mul);
+
+        let result = forest.left(var).unwrap();
+        println!("After absorb: {}", forest.get_expr_for_node(result));
+        assert!(is_zero(&forest, result));
+    }
+
+    #[test]
+    fn test_absorb_and() {
+        // Test Absorb rule for And: (a & 0) -> 0 (for booleans: a & false -> false)
+        let mut forest = Forest::default();
+        let rule = RuleKind::Absorb { op: Operator::And };
+
+        let a = forest.input("a".into(), Type::Boolean);
+        let false_lit = forest.literal("false".into(), Type::Boolean);
+
+        let root = forest.operator(Operator::And, Type::Boolean, a, Some(false_lit));
+        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        println!("Initial: {}", forest.get_expr_for_node(root));
+
+        // Apply: a & false -> false
+        assert_matches(&forest, root, &rule);
+        do_absorb(&mut forest, root, Operator::And);
+
+        let result = forest.left(var).unwrap();
+        println!("After absorb: {}", forest.get_expr_for_node(result));
+        assert!(is_zero(&forest, result));
     }
 }

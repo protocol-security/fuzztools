@@ -12,6 +12,8 @@ const EXPECTED_EXECUTION_ERRORS: &[&str] = &[
     "bug: Assertion is always false: attempt to bit-shift with overflow",
     "bug: Assertion is always false: attempt to shr with overflow",
     "bug: Assertion is always false: attempt to bit-shift with overflow",
+    "error: Assertion failed: attempt to divide by zero",
+    "error: Assertion failed: attempt to calculate the remainder with a divisor of zero",
     "error: Assertion failed: attempt to subtract with overflow",
     "error: Assertion failed: attempt to add with overflow",
     "error: Assertion failed: attempt to multiply with overflow",
