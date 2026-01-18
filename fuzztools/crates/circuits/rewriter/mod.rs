@@ -240,8 +240,7 @@ fn matches_rule(
 
         // ((a - b) - c) or (a - (b + c))
         (RuleKind::AssociateSub, Some(Operator::Sub)) => {
-            is_binary &&
-                (left_op == Some(Operator::Sub) || right_op == Some(Operator::Add))
+            is_binary && (left_op == Some(Operator::Sub) || right_op == Some(Operator::Add))
         }
 
         // ((a / b) * c) ↔ (a * (c / b)) - only valid for Field as integers round down
@@ -267,9 +266,7 @@ fn matches_rule(
         (RuleKind::Distribute { outer, inner }, Some(o)) => {
             is_binary &&
                 ((o == *outer && left_op == Some(*inner)) ||
-                    (o == *inner &&
-                        left_op == Some(*outer) &&
-                        right_op == Some(*outer)))
+                    (o == *inner && left_op == Some(*outer) && right_op == Some(*outer)))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -283,9 +280,22 @@ fn matches_rule(
             let operand_ty = operand.map(|n| f.ty(n));
 
             let check = if *identity_right { right } else { left };
-            operand_ty
+            let is_valid_identity = operand_ty
                 .clone()
-                .is_some_and(|op_ty| check.is_some_and(|c| is_identity_for_type(f, c, o, &op_ty)))
+                .is_some_and(|op_ty| check.is_some_and(|c| is_identity_for_type(f, c, o, &op_ty)));
+
+            // For arithmetic operators (Add/Sub/Mul/Div) and shifts, only allow Field/Integer types
+            let is_type_compatible = match o {
+                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
+                    operand_ty.is_some_and(|ty| matches!(ty, Type::Field | Type::Integer(_)))
+                }
+                Operator::Shl | Operator::Shr => {
+                    operand_ty.is_some_and(|ty| matches!(ty, Type::Integer(_)))
+                }
+                _ => true, // Other operators (Xor, Or, And) are already handled correctly
+            };
+
+            is_valid_identity && is_type_compatible
         }
         // Injection case: a → a op identity (only when there's no existing operator)
         (RuleKind::Identity { op, .. }, None) => {
@@ -331,7 +341,6 @@ fn matches_rule(
         // Note: Absorb injection (0 → a * 0, etc.) is NOT handled here
         // since it requires random expression generation which needs access to random/ctx/scope.
         // Could be added as a separate InjectAbsorb rule in the future.
-
         (RuleKind::SelfInverse { op: rule_op }, Some(o)) => {
             if o != *rule_op || !is_binary || left != right {
                 return false;
@@ -356,7 +365,6 @@ fn matches_rule(
         }
         // Note: Injection (0 → a - a, etc.) is handled by InjectXorXor and similar rules
         // since it requires random expression generation
-
         (RuleKind::Idempotent { op: rule_op }, Some(o)) => {
             if o != *rule_op || !is_binary || left != right {
                 return false;
@@ -425,9 +433,7 @@ fn matches_rule(
 
         (RuleKind::NegateComparison, Some(o)) => {
             (o.is_comparison() && is_binary) ||
-                (o == Operator::Not &&
-                    is_unary &&
-                    left_op.is_some_and(|x| x.is_comparison()))
+                (o == Operator::Not && is_unary && left_op.is_some_and(|x| x.is_comparison()))
         }
 
         // (a <= b) ↔ ((a < b) || (a == b))
@@ -448,9 +454,7 @@ fn matches_rule(
             is_unary && left_op.is_some_and(|x| matches!(x, Operator::And | Operator::Or))
         }
         (RuleKind::DeMorgan, Some(Operator::And | Operator::Or)) => {
-            is_binary &&
-                left_op == Some(Operator::Not) &&
-                right_op == Some(Operator::Not)
+            is_binary && left_op == Some(Operator::Not) && right_op == Some(Operator::Not)
         }
 
         // !a ↔ a ^ true only works for booleans (for integers, !a is bitwise NOT ≠ a ^ 1)
@@ -469,14 +473,11 @@ fn matches_rule(
         }
         (RuleKind::XorToAndOr, Some(Operator::Or)) => {
             // Match pattern: ((!a & b) | (a & !b))
-            is_binary &&
-                left_op == Some(Operator::And) &&
-                right_op == Some(Operator::And) &&
-                {
-                    let ll_op = left.and_then(|l| f.left(l)).and_then(|ll| op_of(f, ll));
-                    let rl_op = right.and_then(|r| f.right(r)).and_then(|rr| op_of(f, rr));
-                    ll_op == Some(Operator::Not) && rl_op == Some(Operator::Not)
-                }
+            is_binary && left_op == Some(Operator::And) && right_op == Some(Operator::And) && {
+                let ll_op = left.and_then(|l| f.left(l)).and_then(|ll| op_of(f, ll));
+                let rl_op = right.and_then(|r| f.right(r)).and_then(|rr| op_of(f, rr));
+                ll_op == Some(Operator::Not) && rl_op == Some(Operator::Not)
+            }
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -509,9 +510,7 @@ fn matches_rule(
             is_binary && right.is_some_and(|r| is_zero(f, r))
         }
         // Injection: a → a << 0 or a → a >> 0 (for integers)
-        (RuleKind::ShiftZero, None) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
-        }
+        (RuleKind::ShiftZero, None) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
 
         // ─────────────────────────────────────────────────────────────────────────
         // Simplification rules
@@ -1625,7 +1624,9 @@ mod tests {
         let before = builder.format_circuit(&scope, &forest_before);
 
         // Apply rewriter
-        rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
+        for _ in 0..25 {
+            rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
+        }
 
         let after = builder.format_circuit(&scope, &forest);
 
@@ -2469,5 +2470,31 @@ mod tests {
         let result = forest.left(var).unwrap();
         println!("After absorb: {}", forest.get_expr_for_node(result));
         assert!(is_zero(&forest, result));
+    }
+
+    #[test]
+    fn test_sub_identity_rejects_boolean() {
+        // Test that Identity rule for Sub does NOT match boolean operands
+        // This prevents invalid transformations like (bool_expr - false)
+        let mut forest = Forest::default();
+        let rule = RuleKind::Identity { op: Operator::Sub, identity_right: true };
+
+        // Create a boolean XOR expression
+        let a = forest.input("a".into(), Type::Boolean);
+        let b = forest.literal("true".into(), Type::Boolean);
+        let xor_expr = forest.operator(Operator::Xor, Type::Boolean, a, Some(b));
+
+        // Create Sub expression with boolean operands: xor_expr - false
+        let false_lit = forest.literal("false".into(), Type::Boolean);
+        let sub_expr = forest.operator(Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
+
+        // The Identity rule should NOT match this because Sub is not valid for booleans
+        let op = op_of(&forest, sub_expr);
+        let left = forest.left(sub_expr);
+        let right = forest.right(sub_expr);
+        assert!(
+            !matches_rule(&forest, op, left, right, &rule),
+            "Identity(Sub) rule should NOT match boolean operands"
+        );
     }
 }
