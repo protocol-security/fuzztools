@@ -69,12 +69,12 @@ impl Forest {
             if self.has_mutable_variables() {
                 choices.push((StatementKind::Assignment, ctx.assignment_weight));
             }
-            // Only allow for loops with one level of nesting and no more than `max_for_count`
-            if self.has_integer_types() && self.depth < 2 && for_count < ctx.max_for_count {
+            // Only allow for loops at top level (depth 0) - no nesting @todo configurable
+            if self.has_integer_types() && self.depth < 1 && for_count < ctx.max_for_count {
                 choices.push((StatementKind::ForLoop, ctx.for_loop_weight));
             }
-            // Only allow ifs with one level of nesting and no more than `max_if_count`
-            if self.has_boolean_types() && self.depth < 2 && if_count < ctx.max_if_count {
+            // Only allow ifs at top level (depth 0) - no nesting
+            if self.has_boolean_types() && self.depth < 1 && if_count < ctx.max_if_count {
                 choices.push((StatementKind::If, ctx.if_weight));
             }
             // Allow no more than `max_assert_count` asserts
@@ -867,6 +867,7 @@ impl Forest {
             body: Box::new(body),
         });
         self.nodes.entry(NodeKind::ForLoop).or_default().push(idx);
+        self.nested_forests.push(idx);
     }
 
     pub fn gen_if(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
@@ -890,6 +891,10 @@ impl Forest {
             let mut else_ifs: Vec<_> = vec![];
 
             for _ in 0..else_if_count {
+                // Stop if we run out of conditions
+                if conditions.is_empty() {
+                    break;
+                }
                 // To avoid using `choose` and then finding the idx, we do a little trick here to
                 // achive O(1) instead O(N)
                 let idx = random.random_range(0..conditions.len());
@@ -919,6 +924,7 @@ impl Forest {
 
             let idx = self.graph.add_node(Node::If { condition, then_body, else_ifs, else_body });
             self.nodes.entry(NodeKind::If).or_default().push(idx);
+            self.nested_forests.push(idx);
         }
     }
 

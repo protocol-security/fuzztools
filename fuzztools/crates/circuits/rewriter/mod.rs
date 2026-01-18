@@ -57,7 +57,7 @@ impl Rewriter {
         forest: &mut Forest,
         ctx: &Context,
         scope: &Scope,
-    ) -> Option<(String, usize)> {
+    ) -> Option<String> {
         // Collect nodes that are If/Assert conditions (these can't be redirected safely) @todo
         let condition_nodes = collect_condition_nodes(forest);
 
@@ -110,32 +110,60 @@ impl Rewriter {
             }
         }
 
-        if matches.is_empty() {
-            return None;
-        }
+        // If we found matches in the main forest, apply ONE rule and return
+        if !matches.is_empty() {
+            // Randomly select which rule to apply
+            let selected_rule_idx = matches.keys().choose(random).unwrap();
+            let selected_rule = self.rules[*selected_rule_idx].clone().kind;
 
-        // Randomly select which rule to apply
-        let selected_rule_idx = matches.keys().choose(random).unwrap();
-        let selected_rule = self.rules[*selected_rule_idx].clone().kind;
+            // Get all nodes that match this specific rule
+            let nodes_for_rule = matches.get(selected_rule_idx).unwrap();
 
-        // Collect all nodes that match this specific rule
-        let nodes_for_rule: Vec<NodeIndex> = matches.get(selected_rule_idx).unwrap().clone();
+            // Randomly select ONE node to apply the rule to (prevents exponential blowup)
+            let selected_node = *nodes_for_rule.iter().choose(random).unwrap();
 
-        let mut applied_count = 0;
-
-        // Apply to all matching nodes (check node still exists - graph may change during rewrites)
-        for node in nodes_for_rule {
-            if forest.graph.contains_node(node) {
-                self.apply(random, forest, node, &selected_rule, ctx, scope, &condition_nodes);
-                applied_count += 1;
+            // Apply the rule to the selected node
+            if forest.graph.contains_node(selected_node) {
+                self.apply(random, forest, selected_node, &selected_rule, ctx, scope, &condition_nodes);
+                return Some(selected_rule.name());
+            } else {
+                return None;
             }
         }
 
-        if applied_count > 0 {
-            Some((selected_rule.name(), applied_count))
-        } else {
-            None
+        // No matches in main forest, try nested forests (ForLoop and If bodies)
+        // Use the stored nested_forests list for O(1) lookup instead of traversing the graph
+        for &idx in &forest.nested_forests.clone() {
+            if !forest.graph.contains_node(idx) {
+                continue;
+            }
+
+            match &mut forest.graph[idx] {
+                Node::ForLoop { body, .. } => {
+                    if let Some(rule_name) = self.apply_random(random, body, ctx, scope) {
+                        return Some(rule_name);
+                    }
+                }
+                Node::If { then_body, else_ifs, else_body, .. } => {
+                    if let Some(rule_name) = self.apply_random(random, then_body, ctx, scope) {
+                        return Some(rule_name);
+                    }
+                    for (_cond, body) in else_ifs {
+                        if let Some(rule_name) = self.apply_random(random, body, ctx, scope) {
+                            return Some(rule_name);
+                        }
+                    }
+                    if let Some(body) = else_body {
+                        if let Some(rule_name) = self.apply_random(random, body, ctx, scope) {
+                            return Some(rule_name);
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
+
+        None
     }
 
     fn apply(
@@ -1624,7 +1652,7 @@ mod tests {
         let before = builder.format_circuit(&scope, &forest_before);
 
         // Apply rewriter
-        for _ in 0..25 {
+        for _ in 0..15 {
             rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
         }
 

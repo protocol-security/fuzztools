@@ -219,10 +219,10 @@ impl App {
             let rewrite_count =
                 random.random_range(self.ctx.min_rewrites_count..=self.ctx.max_rewrites_count);
             for _ in 0..rewrite_count {
-                if let Some((rule_name, count)) =
+                if let Some(rule_name) =
                     rewriter.apply_random(random, &mut forest, &self.ctx, &scope)
                 {
-                    *self.rule_stats.entry(rule_name).or_insert(0) += count as u64;
+                    *self.rule_stats.entry(rule_name).or_insert(0) += 1;
                 }
             }
 

@@ -33,6 +33,10 @@ pub struct Forest {
     // Includes direct lambda variables and lambdas nested in structs/arrays/slices/tuples
     pub lambdas: Vec<(String, Lambda, NodeIndex)>,
 
+    // Tracks nodes with nested forests: ForLoop and If statements
+    // Used by the rewriter to efficiently find nested forests without traversing the graph
+    pub nested_forests: Vec<NodeIndex>,
+
     // This hashmap holds which variables from the outer scope (if any) are mutable and can be
     // mutable within this sub-forest
     pub mutable_refs: HashMap<String, NodeIndex>,
@@ -285,6 +289,8 @@ impl Forest {
                 v.retain(|&x| x != node);
             }
         }
+        // Remove from nested_forests list if present
+        self.nested_forests.retain(|&x| x != node);
 
         self.graph.remove_node(node);
     }
@@ -462,20 +468,67 @@ impl Forest {
     pub fn collect_boolean_nodes(&self) -> Vec<NodeIndex> {
         let mut nodes = vec![];
 
-        // Add boolean type nodes
+        // Add boolean type nodes, but filter out literals and nodes with complex dependencies
         if let Some(bool_nodes) = self.type_kinds.get(&TypeKind::Boolean) {
-            nodes.extend(bool_nodes.iter().copied());
+            for &idx in bool_nodes {
+                // Only include nodes that can be used as standalone conditions:
+                // - Variables and Inputs are always valid
+                // - Operators (including boolean ops) are valid
+                // - FieldAccess, TupleIndex, Index are only valid if they point to a Variable/Input
+                match &self.graph[idx] {
+                    Node::Variable { .. } | Node::Input { .. } | Node::Operator { .. } => {
+                        nodes.push(idx);
+                    }
+                    Node::FieldAccess { .. } | Node::TupleIndex { .. } | Node::Index { .. } => {
+                        // Check if the root (left side) is a Variable or Input
+                        if let Some(left) = self.left(idx) {
+                            if self.is_variable_or_input(left) {
+                                nodes.push(idx);
+                            }
+                        }
+                    }
+                    Node::Cast { .. } => {
+                        // Casts are valid if they cast from a variable/input
+                        if let Some(left) = self.left(idx) {
+                            if self.is_variable_or_input(left) {
+                                nodes.push(idx);
+                            }
+                        }
+                    }
+                    Node::Call { .. } => {
+                        // Function calls are valid
+                        nodes.push(idx);
+                    }
+                    _ => {
+                        // Skip Literal, Assignment, ForLoop, If, Assert
+                    }
+                }
+            }
         }
 
-        // Add comparison operator results
+        // Add comparison operator results (these are always valid as conditions)
         for (op, indices) in &self.operators {
             if op.is_comparison() {
-                // @todo should check for boolean operators too? how can i differentiate em?
                 nodes.extend(indices.iter().copied());
             }
         }
 
         nodes
+    }
+
+    /// Check if a node is a Variable or Input (recursively follows FieldAccess/TupleIndex/Index)
+    fn is_variable_or_input(&self, idx: NodeIndex) -> bool {
+        match &self.graph[idx] {
+            Node::Variable { .. } | Node::Input { .. } => true,
+            Node::FieldAccess { .. } | Node::TupleIndex { .. } | Node::Index { .. } => {
+                if let Some(left) = self.left(idx) {
+                    self.is_variable_or_input(left)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
@@ -681,6 +734,9 @@ mod tests {
 
         assert_eq!(forest.left(op).is_none(), true);
         assert_eq!(forest.right(op).is_none(), true);
+
+        // Explicitly remove the operator node if it's now orphaned
+        forest.remove_if_orphan(op);
 
         // Save forest as DOT file
         forest.save_as_dot(&std::env::current_dir().unwrap().join("test_remove_all_operands.dot"));

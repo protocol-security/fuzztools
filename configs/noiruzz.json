@@ -1,12 +1,12 @@
 {
-    "min_expression_count": 5,
-    "max_expression_count": 10,
+    "min_expression_count": 8,
+    "max_expression_count": 15,
 
     "min_element_count": 0,
     "max_element_count": 2,
 
     "min_string_size": 0,
-    "max_string_size": 3,
+    "max_string_size": 2,
 
     "max_hashes_count": 2,
 
@@ -17,25 +17,25 @@
     "max_struct_fields_count": 2,
 
     "min_struct_count": 0,
-    "max_struct_count": 1,
+    "max_struct_count": 2,
 
     "min_globals_count": 0,
-    "max_globals_count": 1,
+    "max_globals_count": 2,
 
     "min_input_count": 0,
-    "max_input_count": 2,
+    "max_input_count": 3,
 
     "min_function_count": 0,
     "max_function_count": 1,
 
     "min_function_body_size": 1,
-    "max_function_body_size": 3,
+    "max_function_body_size": 4,
 
     "min_lambda_body_size": 1,
-    "max_lambda_body_size": 3,
+    "max_lambda_body_size": 4,
 
-    "min_rewrites_count": 5,
-    "max_rewrites_count": 15,
+    "min_rewrites_count": 1,
+    "max_rewrites_count": 10,
 
     "min_for_loop_body_size": 1,
     "max_for_loop_body_size": 3,
@@ -48,60 +48,60 @@
 
     "max_for_count": 1,
     "max_if_count": 1,
-    "max_assert_count": 1,
-    "max_lambda_count": 1,
+    "max_assert_count": 2,
+    "max_lambda_count": 2,
 
     "max_forest_size": 100,
 
-    "field_weight": 12,
+    "field_weight": 10,
     "unsigned_weight": 10,
-    "signed_weight": 12,
-    "boolean_weight": 10,
-    "string_weight": 2,
-    "array_weight": 2,
-    "slice_weight": 2,
-    "tuple_weight": 2,
-    "struct_weight": 2,
-    "lambda_weight": 1,
+    "signed_weight": 10,
+    "boolean_weight": 8,
+    "string_weight": 3,
+    "array_weight": 8,
+    "slice_weight": 5,
+    "tuple_weight": 8,
+    "struct_weight": 10,
+    "lambda_weight": 5,
     "empty_weight": 1,
 
-    "operator_weight": 25,
-    "index_weight": 3,
-    "tuple_index_weight": 3,
-    "field_access_weight": 3,
-    "call_weight": 1,
-    "cast_weight": 10,
-    "assignment_weight": 30,
-    "for_loop_weight": 3,
+    "operator_weight": 20,
+    "index_weight": 12,
+    "tuple_index_weight": 12,
+    "field_access_weight": 15,
+    "call_weight": 8,
+    "cast_weight": 15,
+    "assignment_weight": 25,
+    "for_loop_weight": 4,
     "if_weight": 8,
-    "assert_weight": 4,
+    "assert_weight": 3,
 
     "else_probability": 0.7,
     "boundary_value_probability": 0.1,
     "small_value_probability": 0.4,
     "max_small_value": 100,
     "raw_string_probability": 0.1,
-    "unary_probability": 0.25,
+    "unary_probability": 0.2,
     "mutable_probability": 0.6,
     "compound_assignment_probability": 0.6,
     "assert_message_probability": 0.2,
     "function_return_probability": 0.7,
     "public_input_probability": 0.5,
-    "main_return_probability": 0.6,
+    "main_return_probability": 0.7,
 
     "comparison_probability": 0.5,
-    "mixed_types_probability": 0.5,
-    "array_vs_slice_probability": 0.5,
+    "mixed_types_probability": 0.6,
+    "array_vs_slice_probability": 0.6,
     "cast_source_field_probability": 0.5,
     "signed_loop_probability": 0.5,
 
-    "leaf_expr_weight": 5,
-    "use_existing_expr_weight": 10,
+    "leaf_expr_weight": 4,
+    "use_existing_expr_weight": 12,
 
-    "max_type_depth": 2,
-    "max_expr_depth": 2,
-    "leaf_probability": 0.25,
-    "reuse_variable_probability": 0.6,
+    "max_type_depth": 3,
+    "max_expr_depth": 4,
+    "leaf_probability": 0.2,
+    "reuse_variable_probability": 0.7,
 
-    "type_bias_multiplier": 5
+    "type_bias_multiplier": 8
 }
