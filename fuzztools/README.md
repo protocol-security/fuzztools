@@ -11,7 +11,6 @@ This crate implements many types as well as stuff I will be using in my fuzzers.
 - [`mutations`](#mutations) - Implements the `Mutable` trait for various types
 - [`rpc`](#rpc) - Implements a blazingly fast `RpcClient` to send JSON-RPC requests
 - [`transactions`](#transactions) - Implements the `Transaction` and `SignedTransaction` types
-- [`utils`](#utils) - Some stuff I do not know where to put like `Signer`
 
 ## Builders
 
@@ -22,11 +21,7 @@ It also contains a set of Solidity contracts to test on-chain, like sending tran
 
 ## Circuits
 
-Implements the Noir IR to generate random circuits.
-
-### TODO 
-
-- References, trait implementations, functions implementations for types and maybe std lib
+Implements the Noir IR to generate random circuits. I do follow a different approach against usual compiler fuzzers, whereas they use linear ASTs (`Vec<Expr>` and so) I use directed acyclic graphs. The benefit is that i can create very complex expresions in `O(1)` time by referencing index nodes rather than nested expressions within elements from the AST. This crate implements to a rewritter based on [circuzz](https://github.com/Rigorous-Software-Engineering/circuzz) that applies random equivalence-preserving mutations to the graph, so that it maintains the same "input-output map".
 
 ## Mutations
 
@@ -46,7 +41,3 @@ Implements the `RpcClient` to make single RPC calls as well as batched ones, muc
 This module contains the `Transaction` and `SignedTransaction` types. The interesting one is the `Transaction` type, which is a wrapper around all possible fields an Ethereum transaction can have (without taking into account EIP-4844 sidecars, which I don't think I will be using for now).
 
 This is mainly used in `rakoon` for fuzzing transactions, as the idea is to send malformed transactions like a `Legacy` one with blob hashes or EIP-7702 with `gas_price` instead of `EIP-1559`'s. I could not do it via `alloy`'s types, so I had to implement it myself. Implements the usual RLP encoding, decoding and signing hash methods, so they work out of the box **AND** are equivalent to the ones in `alloy` (if not please lmk but I am 99% sure they are).
-
-## Utils
-
-- `signer` - Implements a secp256k1 signer that is faster than alloy's one by 20-30% (check [this](https://github.com/tarcieri/rust-secp256k1-ecdsa-bench)).
