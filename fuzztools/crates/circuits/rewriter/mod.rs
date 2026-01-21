@@ -124,7 +124,15 @@ impl Rewriter {
 
             // Apply the rule to the selected node
             if forest.graph.contains_node(selected_node) {
-                self.apply(random, forest, selected_node, &selected_rule, ctx, scope, &condition_nodes);
+                self.apply(
+                    random,
+                    forest,
+                    selected_node,
+                    &selected_rule,
+                    ctx,
+                    scope,
+                    &condition_nodes,
+                );
                 return Some(selected_rule.name());
             } else {
                 return None;
