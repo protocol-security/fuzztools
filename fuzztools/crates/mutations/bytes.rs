@@ -1,37 +1,34 @@
-//! Mutation implementations for byte sequences (`Vec<u8>`).
-
-use super::{
-    constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
-    traits::Mutable,
-};
 use rand::{
     seq::{IndexedRandom, SliceRandom},
     Rng,
 };
 
+use super::{
+    constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
+    traits::{BytesMutations, Mutable},
+};
+
 impl Mutable for Vec<u8> {
     #[inline(always)]
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=19) {
-            0 => {
-                // random_byte_push
+        let mutation = BytesMutations::random(random);
+
+        match mutation {
+            BytesMutations::RandomBytePush => {
                 let byte = random.random();
                 self.push(byte);
             }
-            1 => {
-                // byte_clone
+            BytesMutations::ByteClone => {
                 check_not_empty!(self);
                 let byte = self.choose(random).unwrap();
                 self.push(*byte);
             }
-            2 => {
-                // byte_remove
+            BytesMutations::ByteRemove => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 self.remove(idx);
             }
-            3 => {
-                // byte_swap
+            BytesMutations::ByteSwap => {
                 check_not_smaller!(self, 2);
                 let idx1 = random.random_range(0..self.len());
                 let idx2 = random.random_range(0..self.len());
@@ -39,29 +36,21 @@ impl Mutable for Vec<u8> {
                     self.swap(idx1, idx2);
                 }
             }
-            4 => {
-                // byte_mutate
+            BytesMutations::ByteMutate => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 self[idx].mutate(random);
             }
-            5 => {
-                // set_all_zero
-                // No need to check as it is a NOOP if empty
+            BytesMutations::SetAllZero => {
                 self.fill(0x00);
             }
-            6 => {
-                // set_all_one
-                // No need to check as it is a NOOP if empty
+            BytesMutations::SetAllOne => {
                 self.fill(0x01);
             }
-            7 => {
-                // set_all_max
-                // No need to check as it is a NOOP if empty
+            BytesMutations::SetAllMax => {
                 self.fill(0xff);
             }
-            8 => {
-                // set_all_pattern
+            BytesMutations::SetAllPattern => {
                 check_not_empty!(self);
                 for (i, byte) in self.iter_mut().enumerate() {
                     if i % 2 == 0 {
@@ -71,43 +60,35 @@ impl Mutable for Vec<u8> {
                     }
                 }
             }
-            9 => {
-                // set_all_random
+            BytesMutations::SetAllRandom => {
                 check_not_empty!(self);
                 random.fill_bytes(self);
             }
-            10 => {
-                // shuffle_array
-                // No need to check as it is a NOOP if empty
+            BytesMutations::ShuffleArray => {
                 self.shuffle(random);
             }
-            11 => {
-                // rotate_left_by_n
+            BytesMutations::RotateLeftByN => {
                 check_not_empty!(self);
                 let positions = random.random_range(0..self.len());
                 self.rotate_left(positions);
             }
-            12 => {
-                // rotate_right_by_n
+            BytesMutations::RotateRightByN => {
                 check_not_empty!(self);
                 let positions = random.random_range(0..self.len());
                 self.rotate_right(positions);
             }
-            13 => {
-                // reverse_array
+            BytesMutations::ReverseArray => {
                 check_not_empty!(self);
                 self.reverse();
             }
-            14 => {
-                // slice_clone
+            BytesMutations::SliceClone => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 let len = random.random_range(0..self.len() - idx);
                 let slice_to_clone = self[idx..idx + len].to_vec();
                 self.extend_from_slice(&slice_to_clone);
             }
-            15 => {
-                // slice_swap
+            BytesMutations::SliceSwap => {
                 check_not_smaller!(self, 2);
                 let idx1 = random.random_range(0..self.len());
                 let idx2 = random.random_range(0..self.len());
@@ -123,8 +104,7 @@ impl Mutable for Vec<u8> {
                     self[idx2..idx2 + len].copy_from_slice(&slice1);
                 }
             }
-            16 => {
-                // slice_swap_with_invalid_utf8
+            BytesMutations::SliceSwapWithInvalidUtf8 => {
                 check_not_empty!(self);
                 let utf8 = INVALID_UTF8_SEQUENCES.choose(random).unwrap().to_vec();
 
@@ -133,8 +113,7 @@ impl Mutable for Vec<u8> {
                 let idx2 = random.random_range(0..=self.len() - utf8.len());
                 self[idx2..idx2 + utf8.len()].copy_from_slice(&utf8);
             }
-            17 => {
-                // slice_mutate
+            BytesMutations::SliceMutate => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..self.len());
                 let len = random.random_range(0..self.len() - idx);
@@ -143,44 +122,46 @@ impl Mutable for Vec<u8> {
                     x.mutate(random);
                 });
             }
-            18 => {
-                // set_interesting
-                match random.random_range(0..=7) {
-                    0 => {
+            BytesMutations::SetInteresting => {
+                use super::traits::BytesSetInterestingMutations;
+                let mutation = BytesSetInterestingMutations::random(random);
+
+                match mutation {
+                    BytesSetInterestingMutations::SetInterestingU8 => {
                         check_not_empty!(self);
                         let idx = random.random_range(0..self.len());
                         self[idx] = *INTERESTING_U8.choose(random).unwrap();
                     }
-                    1 => {
+                    BytesSetInterestingMutations::SetInterestingU8ReverseBits => {
                         check_not_empty!(self);
                         let idx = random.random_range(0..self.len());
                         self[idx] = INTERESTING_U8.choose(random).unwrap().reverse_bits();
                     }
-                    2 => {
+                    BytesSetInterestingMutations::SetInterestingU16LE => {
                         check_not_smaller!(self, 2);
                         let idx = random.random_range(0..=self.len() - 2);
                         let value = INTERESTING_U16.choose(random).unwrap().to_le_bytes();
                         self[idx..idx + 2].copy_from_slice(&value);
                     }
-                    3 => {
+                    BytesSetInterestingMutations::SetInterestingU16BE => {
                         check_not_smaller!(self, 2);
                         let idx = random.random_range(0..=self.len() - 2);
                         let value = INTERESTING_U16.choose(random).unwrap().to_be_bytes();
                         self[idx..idx + 2].copy_from_slice(&value);
                     }
-                    4 => {
+                    BytesSetInterestingMutations::SetInterestingU32LE => {
                         check_not_smaller!(self, 4);
                         let idx = random.random_range(0..=self.len() - 4);
                         let value = INTERESTING_U32.choose(random).unwrap().to_le_bytes();
                         self[idx..idx + 4].copy_from_slice(&value);
                     }
-                    5 => {
+                    BytesSetInterestingMutations::SetInterestingU32BE => {
                         check_not_smaller!(self, 4);
                         let idx = random.random_range(0..=self.len() - 4);
                         let value = INTERESTING_U32.choose(random).unwrap().to_be_bytes();
                         self[idx..idx + 4].copy_from_slice(&value);
                     }
-                    6 => {
+                    BytesSetInterestingMutations::SetInvalidUtf8 => {
                         check_not_empty!(self);
                         let utf8 = INVALID_UTF8_SEQUENCES.choose(random).unwrap().to_vec();
 
@@ -189,12 +170,10 @@ impl Mutable for Vec<u8> {
                         let idx = random.random_range(0..=self.len() - utf8.len());
                         self[idx..idx + utf8.len()].copy_from_slice(&utf8);
                     }
-                    7 => return false,
-                    _ => unreachable!(),
+                    BytesSetInterestingMutations::SetNone => return false,
                 }
             }
-            19 => return true,
-            _ => unreachable!(),
+            BytesMutations::SetNone => return true,
         }
         false
     }

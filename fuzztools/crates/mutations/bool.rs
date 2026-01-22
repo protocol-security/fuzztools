@@ -1,19 +1,15 @@
-//! Mutation implementations for boolean types.
-
-use super::traits::Mutable;
 use rand::Rng;
 
+use super::traits::Mutable;
+
 impl Mutable for bool {
+    #[inline(always)]
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=1) {
-            // flip
-            0 => {
-                *self = !*self;
-            }
-            // signal to set `None`
-            1 => return true,
-            _ => unreachable!(),
+        if random.random() {
+            return true;
         }
+
+        *self = !*self;
         false
     }
 }

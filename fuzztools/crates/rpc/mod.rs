@@ -1,21 +1,12 @@
-//! Implements a blazingly fast `RpcClient` to send JSON-RPC requests.
+use std::time::Duration;
 
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::time::Duration;
 
 mod error;
 pub use error::RpcError;
 
-/// A client for making RPC calls to a JSON-RPC endpoint.
-//
-// # Examples
-//
-// ```
-// let client = RpcClient::new("https://api.example.com", Duration::from_secs(10));
-// let result = client.call("eth_blockNumber", json!({})).await?;
-// println!("Result: {:?}", result);
-// ```
+/// A custom client for sending arbitrary JSON-RPC request. Uses `reqwest::Client` under-the-hood.
 pub struct RpcClient {
     inner: Client,
     url: String,
@@ -23,65 +14,85 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn new(url: String, timeout: Duration) -> Self {
-        let client = Client::builder()
+        let inner = Client::builder()
             .tcp_nodelay(true)
             .pool_max_idle_per_host(100)
             .timeout(timeout)
             .build()
             .unwrap();
-        Self { inner: client, url }
+
+        Self { inner, url }
     }
 
-    /// Make a single RPC call to the endpoint.
-    pub async fn call(&self, method: &str, params: Value) -> Result<u128, RpcError> {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-            "id": 1
-        });
-
-        let resp: Value = self.inner.post(&self.url).json(&payload).send().await?.json().await?;
-        let hex = resp
-            .get("result")
-            .and_then(|r| r.as_str())
-            .ok_or_else(|| RpcError::Parse("missing result".to_string()))?;
-        u128::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .map_err(|_| RpcError::Parse(format!("invalid hex: {}", hex)))
+    #[inline(always)]
+    pub fn payload(&self) -> Payload<'_> {
+        Payload { client: self, calls: Vec::new() }
     }
 
-    /// Make a batch of RPC calls to the endpoint without any parameters. Useful for `GET` queries
-    /// like `eth_blockNumber`, `eth_chainId`, etc.
-    pub async fn batch_call_no_params(&self, methods: &[&str]) -> Result<Vec<u128>, RpcError> {
-        let payload: Vec<Value> = methods
-            .iter()
+    pub async fn send_raw_transactions(&self, txs: Vec<String>) -> Result<(), RpcError> {
+        let payload: Vec<Value> = txs
+            .into_iter()
             .enumerate()
-            .map(|(id, method)| json!({ "jsonrpc": "2.0", "method": method, "params": [], "id": id }))
+            .map(|(i, tx)| json!({"jsonrpc": "2.0", "method": "eth_sendRawTransaction", "params": [tx], "id": i}))
             .collect();
 
-        let resp: Vec<Value> =
-            self.inner.post(&self.url).json(&payload).send().await?.json().await?;
+        let source = self.inner.post(&self.url).json(&payload).send().await?;
+        let text = format!("{:?}", source);
+        let result: Result<Vec<Value>, reqwest::Error> = source.json().await;
+        if result.is_err() {
+            println!("Error source {} error {}", text, result.unwrap_err());
+        }
 
-        resp.iter()
-            .map(|v| {
-                let hex = v
-                    .get("result")
-                    .and_then(|r| r.as_str())
-                    .ok_or_else(|| RpcError::Parse("missing result".to_string()))?;
+        Ok(())
+    }
+
+    async fn call(&self, calls: Vec<(&str, Value)>) -> Result<Vec<u128>, RpcError> {
+        let requests: Vec<Value> = calls
+            .into_iter()
+            .enumerate()
+            .map(|(i, (method, params))| json!({"jsonrpc": "2.0", "id": i, "method": method, "params": params}))
+            .collect();
+
+        let body = if requests.len() == 1 {
+            requests.into_iter().next().unwrap()
+        } else {
+            Value::Array(requests)
+        };
+
+        let response: Value = self.inner.post(&self.url).json(&body).send().await?.json().await?;
+
+        let results = match response {
+            Value::Array(arr) => arr,
+            single => vec![single],
+        };
+
+        results
+            .into_iter()
+            .map(|r| {
+                let hex =
+                    r["result"].as_str().ok_or_else(|| RpcError::MissingResult(r.to_string()))?;
+
                 u128::from_str_radix(hex.trim_start_matches("0x"), 16)
-                    .map_err(|_| RpcError::Parse(format!("invalid hex: {}", hex)))
+                    .map_err(|e| RpcError::ParseError(e.to_string()))
             })
             .collect()
     }
+}
 
-    /// Send a batch of raw transactions to the endpoint.
-    pub async fn send_raw_transactions(&self, transactions: Vec<String>) -> Result<(), RpcError> {
-        let payload: Vec<Value> = transactions
-            .iter()
-            .map(|tx| json!({ "jsonrpc": "2.0", "method": "eth_sendRawTransaction", "params": [tx], "id": 1 }))
-            .collect();
+pub struct Payload<'a> {
+    client: &'a RpcClient,
+    calls: Vec<(&'a str, Value)>,
+}
 
-        let _: Vec<Value> = self.inner.post(&self.url).json(&payload).send().await?.json().await?;
-        Ok(())
+impl<'a> Payload<'a> {
+    #[inline(always)]
+    pub fn add(mut self, method: &'a str, params: Option<Value>) -> Self {
+        self.calls.push((method, params.unwrap_or(json!([]))));
+        self
+    }
+
+    #[inline(always)]
+    pub async fn execute(self) -> Result<Vec<u128>, RpcError> {
+        self.client.call(self.calls).await
     }
 }

@@ -1,12 +1,14 @@
 mod app;
 mod constants;
+mod context;
 
 use std::{fs, path::Path};
 
 use anyhow::Result;
-use app::{App, Context};
+use app::App;
 use clap::Parser;
-use constants::{TransactionType, GREEN, HEADER, RED, RESET};
+use constants::{GREEN, HEADER, RED, RESET};
+use context::Config;
 use rand::{rngs::SmallRng, SeedableRng};
 
 #[derive(Parser)]
@@ -16,23 +18,26 @@ use rand::{rngs::SmallRng, SeedableRng};
     author = "nethoxa"
 )]
 struct Cli {
-    #[arg(long, help = "Transaction type to fuzz", value_enum)]
-    tx_type: TransactionType,
+    #[arg(long, help = "Transaction type to fuzz (legacy, eip2930, eip1559, eip7702)")]
+    tx_type: String,
 
     #[arg(long, help = "Private key for signing transactions")]
     key: String,
 
-    #[arg(long, help = "Seed for the random generator")]
+    #[arg(long, help = "Seed for the random generator", default_value_t = 0)]
     seed: u64,
 
-    #[arg(long, help = "URL to send transactions to (supports IPC, WS and HTTP)")]
+    #[arg(long, help = "URL to send transactions to", default_value = "http://127.0.0.1:8545")]
     url: String,
 
-    #[arg(long, help = "If false, it spams VALID transactions")]
+    #[arg(long, help = "Wether to mutate txs or not before sending them", default_value_t = true)]
     fuzzing: bool,
 
-    #[arg(long, help = "Path to the config file")]
-    config: Option<String>,
+    #[arg(long, help = "Time to wait between tx batches (in ms)", default_value_t = 0)]
+    sleep: u64,
+
+    #[arg(long, help = "Path to the config file", default_value = "./configs/rakoon.json")]
+    config: String,
 }
 
 #[tokio::main]
@@ -40,26 +45,28 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
-    let config_path = cli.config.unwrap_or_else(|| "./configs/rakoon.json".into());
-    if !Path::new(&config_path).exists() {
-        return Err(anyhow::anyhow!("Config file not found: {}", config_path));
+    if !Path::new(&cli.config).exists() {
+        return Err(anyhow::anyhow!("Config file not found: {}", cli.config));
     }
 
-    let config: Context = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-    let prelude = format!(
-        "{HEADER}\n{GREEN}INFO{RESET}      URL:                    \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Key:                    \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Seed:                   \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Config:                 \
-         {RED}{}{RESET}\n{GREEN}INFO{RESET}      Type:                   \
-         {RED}{:?}{RESET}\n{GREEN}INFO{RESET}      Fuzzing enabled:        {RED}{}{RESET}\n\n",
-        cli.url, cli.key, cli.seed, config_path, cli.tx_type, cli.fuzzing,
+    let config: Config = serde_json::from_str(&fs::read_to_string(&cli.config)?)?;
+    let header = format!(
+        "{HEADER}\n\
+        {GREEN}INFO{RESET}      Tx type:         {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Key:             {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Seed:            {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Url:             {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Fuzzing enabled: {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Sleep time:      {RED}{}s{RESET}\n\
+        {GREEN}INFO{RESET}      Config:          {RED}{}{RESET}\n\n",
+        cli.tx_type, cli.key, cli.seed, cli.url, cli.fuzzing, cli.sleep, cli.config
     );
 
     // Run the application
-    let mut app = App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, prelude, config).await?;
-    let result = app.run(&mut random).await;
+    let mut app =
+        App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, cli.sleep, header, config).await?;
 
+    let result = app.run(&mut random).await;
     if let Err(e) = result {
         eprintln!("\n\n\x1b[1;31m[!] Error: {e}\x1b[0m");
     }

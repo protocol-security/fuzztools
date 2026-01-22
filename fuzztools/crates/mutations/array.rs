@@ -1,13 +1,14 @@
-//! Mutation implementations for fixed-size arrays.
+use rand::{
+    seq::{IndexedRandom, SliceRandom},
+    Rng,
+};
 
 use super::{
     constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
     traits::Mutable,
 };
-use crate::mutations::traits::InterestingMutations;
-use rand::{
-    seq::{IndexedRandom, SliceRandom},
-    Rng,
+use crate::mutations::traits::{
+    ArrayMutations, BytesSetInterestingMutations, InterestingMutations,
 };
 
 impl<T, const N: usize> Mutable for [T; N]
@@ -16,9 +17,10 @@ where
 {
     #[inline(always)]
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=8) {
-            // value_swap
-            0 => {
+        let mutation = ArrayMutations::random(random);
+
+        match mutation {
+            ArrayMutations::ValueSwap => {
                 check_not_smaller!(self, 2);
                 let idx1 = random.random_range(0..N);
                 let idx2 = random.random_range(0..N);
@@ -27,38 +29,32 @@ where
                     self.swap(idx1, idx2);
                 }
             }
-            // value_mutate
-            1 => {
+            ArrayMutations::ValueMutate => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..N);
 
                 self[idx].mutate(random);
             }
-            // rotate_left_by_n
-            2 => {
+            ArrayMutations::RotateLeftByN => {
                 check_not_empty!(self);
                 let positions = random.random_range(0..N);
 
                 self.rotate_left(positions);
             }
-            // rotate_right_by_n
-            3 => {
+            ArrayMutations::RotateRightByN => {
                 check_not_empty!(self);
                 let positions = random.random_range(0..N);
 
                 self.rotate_right(positions);
             }
-            // shuffle_array
-            4 => {
+            ArrayMutations::ShuffleArray => {
                 self.shuffle(random);
             }
-            // reverse_array
-            5 => {
+            ArrayMutations::ReverseArray => {
                 check_not_empty!(self);
                 self.reverse();
             }
-            // slice_swap
-            6 => {
+            ArrayMutations::SliceSwap => {
                 check_not_smaller!(self, 2);
                 let idx1 = random.random_range(0..N);
                 let idx2 = random.random_range(0..N);
@@ -72,8 +68,7 @@ where
                     }
                 }
             }
-            // slice_mutate
-            7 => {
+            ArrayMutations::SliceMutate => {
                 check_not_empty!(self);
                 let start = random.random_range(0..N);
                 let end = start + random.random_range(0..N - start);
@@ -82,9 +77,7 @@ where
                     x.mutate(random);
                 });
             }
-            // signal to set `None`
-            8 => return true,
-            _ => unreachable!(),
+            ArrayMutations::SetNone => return true,
         }
         false
     }
@@ -93,66 +86,51 @@ where
 impl<const N: usize> InterestingMutations for [u8; N] {
     #[inline(always)]
     fn set_interesting(&mut self, random: &mut impl Rng) -> bool {
-        match random.random_range(0..=7) {
-            // set interesting `u8`
-            0 => {
+        let mutation = BytesSetInterestingMutations::random(random);
+
+        match mutation {
+            BytesSetInterestingMutations::SetInterestingU8 => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..N);
-
                 self[idx] = *INTERESTING_U8.choose(random).unwrap();
             }
-            // set interesting `u8` reversed
-            1 => {
+            BytesSetInterestingMutations::SetInterestingU8ReverseBits => {
                 check_not_empty!(self);
                 let idx = random.random_range(0..N);
-
                 self[idx] = INTERESTING_U8.choose(random).unwrap().reverse_bits();
             }
-            // set interesting `u16` (little endian)
-            2 => {
+            BytesSetInterestingMutations::SetInterestingU16LE => {
                 check_not_smaller!(self, 2);
                 let idx = random.random_range(0..=N - 2);
                 let value = INTERESTING_U16.choose(random).unwrap().to_le_bytes();
-
                 self[idx..idx + 2].copy_from_slice(&value);
             }
-            // set interesting `u16` (big endian)
-            3 => {
+            BytesSetInterestingMutations::SetInterestingU16BE => {
                 check_not_smaller!(self, 2);
                 let idx = random.random_range(0..=N - 2);
                 let value = INTERESTING_U16.choose(random).unwrap().to_be_bytes();
-
                 self[idx..idx + 2].copy_from_slice(&value);
             }
-            // set interesting `u32` (little endian)
-            4 => {
+            BytesSetInterestingMutations::SetInterestingU32LE => {
                 check_not_smaller!(self, 4);
                 let idx = random.random_range(0..=N - 4);
                 let value = INTERESTING_U32.choose(random).unwrap().to_le_bytes();
-
                 self[idx..idx + 4].copy_from_slice(&value);
             }
-            // set interesting `u32` (big endian)
-            5 => {
+            BytesSetInterestingMutations::SetInterestingU32BE => {
                 check_not_smaller!(self, 4);
                 let idx = random.random_range(0..=N - 4);
                 let value = INTERESTING_U32.choose(random).unwrap().to_be_bytes();
-
                 self[idx..idx + 4].copy_from_slice(&value);
             }
-            // set invalid utf8 sequence
-            6 => {
+            BytesSetInterestingMutations::SetInvalidUtf8 => {
                 check_not_empty!(self);
                 let utf8 = INVALID_UTF8_SEQUENCES.choose(random).unwrap().to_vec();
-
                 check_not_smaller!(self, utf8.len());
                 let idx = random.random_range(0..=N - utf8.len());
-
                 self[idx..idx + utf8.len()].copy_from_slice(&utf8);
             }
-            // signal to set `None`
-            7 => return true,
-            _ => unreachable!(),
+            BytesSetInterestingMutations::SetNone => return true,
         }
         false
     }

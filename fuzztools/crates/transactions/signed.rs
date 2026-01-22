@@ -1,8 +1,9 @@
 //! Signed transaction type.
 
-use super::transaction::Transaction;
-use alloy::signers::Signature;
+use alloy::{consensus::TxType, signers::Signature};
 use alloy_rlp::{BufMut, Encodable, Header};
+
+use super::transaction::Transaction;
 
 /// A `Transaction` with a `Signature` attached.
 #[derive(Clone)]
@@ -12,37 +13,37 @@ pub struct SignedTransaction {
 }
 
 impl SignedTransaction {
-    /// Returns `rlp(signed_transaction)`
+    /// Returns `rlp(signed_transaction)`.
     pub fn encode(&self) -> Vec<u8> {
         let mut length = self.rlp_encoded_length_with_signature();
 
-        // If tx type is not legacy we add the tx type prefix
-        if self.transaction.tx_type != 0 {
+        // If tx type is not legacy we add the tx type prefix.
+        if !matches!(self.transaction.tx_type, TxType::Legacy) {
             length += 1;
         }
 
         // If tx type is legacy we add eip155 signing fields,
-        // else do as normal
+        // else do as normal.
         let mut out = Vec::with_capacity(length);
-        if self.transaction.tx_type == 0 {
-            // Encode the header
+        if matches!(self.transaction.tx_type, TxType::Legacy) {
+            // Encode the header.
             let payload_length = self.transaction.fields_length() +
                 self.signature.rlp_rs_len() +
                 self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length();
             let header = Header { list: true, payload_length };
             header.encode(&mut out);
 
-            // Encode the transaction fields
+            // Encode the transaction fields.
             self.transaction.encode_fields(&mut out);
 
-            // Encode the signature
+            // Encode the signature.
             self.signature.write_rlp_vrs(
                 &mut out,
                 self.to_eip155_value(self.signature.v(), self.transaction.chain_id),
             );
         } else {
-            // Encode the tx type
-            out.put_u8(self.transaction.tx_type);
+            // Encode the tx type.
+            out.put_u8(self.transaction.tx_type as u8);
 
             // Encode the header
             let payload_length = self.transaction.fields_length() +
@@ -51,19 +52,19 @@ impl SignedTransaction {
             let header = Header { list: true, payload_length };
             header.encode(&mut out);
 
-            // Encode the transaction fields
+            // Encode the transaction fields.
             self.transaction.encode_fields(&mut out);
 
-            // Encode the signature
+            // Encode the signature.
             self.signature.write_rlp_vrs(&mut out, self.signature.v());
         }
 
         out
     }
 
-    // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html
+    // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html.
     fn rlp_encoded_length_with_signature(&self) -> usize {
-        let v_length = if self.transaction.tx_type == 0 {
+        let v_length = if matches!(self.transaction.tx_type, TxType::Legacy) {
             self.to_eip155_value(self.signature.v(), self.transaction.chain_id).length()
         } else {
             self.signature.v().length()
@@ -75,7 +76,7 @@ impl SignedTransaction {
         header.length_with_payload()
     }
 
-    // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html
+    // Taken from alloy https://docs.rs/alloy-primitives/1.3.1/src/alloy_primitives/signature/utils.rs.html.
     #[inline(always)]
     const fn to_eip155_value(&self, y_parity: bool, chain_id: Option<u64>) -> u128 {
         match chain_id {

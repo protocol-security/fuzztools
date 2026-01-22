@@ -1,4 +1,4 @@
-//! Mutation implementations for fuzzing.
+//! This crate implements the `Mutable` trait for common Rust and Alloy types.
 
 #[macro_use]
 mod macros;

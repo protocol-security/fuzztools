@@ -1,153 +1,129 @@
-//! Mutation implementations for unsigned integer types.
+use std::mem::size_of;
+
+use rand::{seq::IndexedRandom, Rng};
 
 use super::{
     constants::{EVEN, INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, ODD},
-    traits::{InterestingMutations, Mutable},
+    traits::{InterestingMutations, Mutable, UintMutations},
 };
-use rand::{seq::IndexedRandom, Rng};
-use std::mem::size_of;
 
 macro_rules! impl_mutable {
     ($type:ty) => {
         impl Mutable for $type {
             fn mutate(&mut self, random: &mut impl Rng) -> bool {
-                match random.random_range(0..=28) {
-                    // flip_bit
-                    0 => {
-                        let bit = random.random_range(0..size_of::<$type>() * 8);
+                const BITS: usize = size_of::<$type>() * 8;
+                let mutation = UintMutations::random(random);
+
+                match mutation {
+                    UintMutations::FlipBit => {
+                        let bit = random.random_range(0..BITS);
                         *self ^= 1 << bit;
                     }
-                    // add
-                    1 => {
+                    UintMutations::Add => {
                         let value = random.random::<$type>();
                         *self = self.saturating_add(value);
                     }
-                    // add_one
-                    2 => {
+                    UintMutations::AddOne => {
                         *self = self.saturating_add(1);
                     }
-                    // add_mod
-                    3 => {
+                    UintMutations::AddMod => {
                         let value = random.random::<$type>();
                         let modulus = random.random::<$type>();
                         if modulus != 0 {
                             *self = self.saturating_add(value) % modulus;
                         }
                     }
-                    // sub
-                    4 => {
+                    UintMutations::Sub => {
                         let value = random.random::<$type>();
                         *self = self.saturating_sub(value);
                     }
-                    // sub_one
-                    5 => {
+                    UintMutations::SubOne => {
                         *self = self.saturating_sub(1);
                     }
-                    // sub_mod
-                    6 => {
+                    UintMutations::SubMod => {
                         let value = random.random::<$type>();
                         let modulus = random.random::<$type>();
                         if modulus != 0 {
                             *self = self.saturating_sub(value) % modulus;
                         }
                     }
-                    // mul
-                    7 => {
+                    UintMutations::Mul => {
                         let value = random.random::<$type>();
                         *self = self.saturating_mul(value);
                     }
-                    // mul_mod
-                    8 => {
+                    UintMutations::MulMod => {
                         let value = random.random::<$type>();
                         let modulus = random.random::<$type>();
                         if modulus != 0 {
                             *self = self.saturating_mul(value) % modulus;
                         }
                     }
-                    // div
-                    9 => {
+                    UintMutations::Div => {
                         let value = random.random::<$type>();
                         if value != 0 {
                             *self = self.saturating_div(value);
                         }
                     }
-                    // remainder
-                    10 => {
+                    UintMutations::Remainder => {
                         let value = random.random::<$type>();
                         if value != 0 {
                             *self %= value;
                         }
                     }
-                    // set_zero
-                    11 => {
+                    UintMutations::SetZero => {
                         *self = 0;
                     }
-                    // set_one
-                    12 => {
+                    UintMutations::SetOne => {
                         *self = 1;
                     }
-                    // set_max
-                    13 => {
+                    UintMutations::SetMax => {
                         *self = <$type>::MAX;
                     }
-                    // set_random
-                    14 => {
+                    UintMutations::SetRandom => {
                         *self = random.random::<$type>();
                     }
-                    // xor
-                    15 => {
+                    UintMutations::Xor => {
                         let value = random.random::<$type>();
                         *self ^= value;
                     }
-                    // and
-                    16 => {
+                    UintMutations::And => {
                         let value = random.random::<$type>();
                         *self &= value;
                     }
-                    // or
-                    17 => {
+                    UintMutations::Or => {
                         let value = random.random::<$type>();
                         *self |= value;
                     }
-                    // not
-                    18 => {
+                    UintMutations::Not => {
                         *self = !*self;
                     }
-                    // rotate_left
-                    19 => {
-                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                    UintMutations::RotateLeft => {
+                        let positions = random.random_range(0..BITS);
                         *self = (*self).rotate_left(positions as u32);
                     }
-                    // rotate_right
-                    20 => {
-                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                    UintMutations::RotateRight => {
+                        let positions = random.random_range(0..BITS);
                         *self = (*self).rotate_right(positions as u32);
                     }
-                    // shift_left
-                    21 => {
-                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                    UintMutations::ShiftLeft => {
+                        let positions = random.random_range(0..BITS);
                         *self = self.wrapping_shl(positions as u32);
                     }
-                    // shift_right
-                    22 => {
-                        let positions = random.random_range(0..size_of::<$type>() * 8);
+                    UintMutations::ShiftRight => {
+                        let positions = random.random_range(0..BITS);
                         *self = self.wrapping_shr(positions as u32);
                     }
-                    // reverse_bits
-                    23 => {
+                    UintMutations::ReverseBits => {
                         *self = (*self).reverse_bits();
                     }
-                    // set_interesting
-                    24 => {
+                    UintMutations::SetInteresting => {
                         self.set_interesting(random);
                     }
-                    // swap_adjacent_bits
-                    25 => {
+                    UintMutations::SwapAdjacentBits => {
                         let v = *self as u128;
                         *self = (((v >> 1) & EVEN) | ((v << 1) & ODD)) as $type;
                     }
-                    // fisher_yates_shuffle
-                    26 => {
+                    UintMutations::FisherYatesShuffle => {
                         let mut bytes = self.to_le_bytes();
                         for i in (1..bytes.len()).rev() {
                             let j = random.random_range(0..=i);
@@ -155,13 +131,10 @@ macro_rules! impl_mutable {
                         }
                         *self = <$type>::from_le_bytes(bytes);
                     }
-                    // gray_code_encoding
-                    27 => {
+                    UintMutations::GrayCodeEncoding => {
                         *self ^= *self >> 1;
                     }
-                    // signal to set None
-                    28 => return true,
-                    _ => unreachable!(),
+                    UintMutations::SetNone => return true,
                 }
                 false
             }

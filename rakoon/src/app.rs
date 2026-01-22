@@ -1,9 +1,19 @@
-use crate::constants::{TransactionType, AUTH_PRIVATE_KEY, CLEAR_SCREEN, GREEN, RED, RESET};
+use std::{
+    io::{self, Write},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
 use alloy::{
-    eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder, signers::SignerSync,
+    consensus::TxType, eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder,
+    signers::SignerSync,
 };
 use alloy_signer_local::Secp256k1Signer;
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use fuzztools::{
     builders::{contracts::AccessListTarget, TransactionBuilder},
     mutations::Mutable,
@@ -12,221 +22,186 @@ use fuzztools::{
 };
 use rand::Rng;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::{
-    io::{self, Write},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::{Duration, Instant},
-};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct Context {
-    pub rpc_timeout: u64,
-    pub tx_channel_capacity: usize,
-    pub completion_channel_capacity: usize,
-    pub block_poll_interval: u64,
-    pub txs_per_core: usize,
-    pub chunk_size: usize,
-    pub screen_update_interval: u128,
-}
+use crate::{
+    constants::{AUTH_PRIVATE_KEY, CLEAR_SCREEN, GREEN, RED, RESET},
+    context::Config,
+};
 
 pub(crate) struct App {
-    /// Header being displayed on the screen
-    prelude: String,
-    /// Context of the application
-    ctx: Context,
-    /// RPC client connection
-    client: Arc<RpcClient>,
-    /// Transaction type to fuzz
-    tx_type: TransactionType,
-    /// If true, the transactions will be mutated
-    fuzzing: bool,
+    /// Header being displayed on the screen.
+    header: String,
+    /// Config of the run.
+    config: Config,
     /// Transaction builder
     builder: TransactionBuilder,
-    /// Transaction signer
-    signer: Arc<Secp256k1Signer>,
-    /// Authorization signer
-    auth_signer: Arc<Secp256k1Signer>,
-
-    /// Channel to send transactions to the dispatcher
-    tx_sender: Sender<Vec<String>>,
-    /// Channel where the dispatcher is listening
-    tx_receiver: Option<Receiver<Vec<String>>>,
-    /// Channel to send completion counts to the main thread
-    completion_sender: Option<Sender<u64>>,
-    /// Channel where the main thread is listening
-    completion_receiver: Receiver<u64>,
-    /// Atomic boolean to signal the main thread and other threads that the connection to the RPC
-    /// client has been lost
-    connection_lost: Arc<AtomicBool>,
+    /// RPC client connection.
+    client: Arc<RpcClient>,
+    /// Transaction signer.
+    signer: Secp256k1Signer,
+    /// Authorization signer.
+    auth_signer: Secp256k1Signer,
+    /// Transaction type to fuzz.
+    tx_type: TxType,
+    /// If true, the transactions will be mutated.
+    fuzzing: bool,
+    /// This is the time to wait between batches.
+    sleep: Duration,
 }
 
 impl App {
     pub(crate) async fn new(
-        tx_type: TransactionType,
+        tx_type: String,
         key: String,
         url: String,
         fuzzing: bool,
-        prelude: String,
-        ctx: Context,
+        sleep: u64,
+        header: String,
+        config: Config,
     ) -> Result<Self> {
-        let client = RpcClient::new(url.clone(), Duration::from_secs(ctx.rpc_timeout));
+        let signer = Secp256k1Signer::from_slice(&hex::decode(&key)?)?;
+        let deployer_signer = Secp256k1Signer::from_slice(&hex::decode(key)?)?;
+        let auth_signer = Secp256k1Signer::from_slice(&hex::decode(AUTH_PRIVATE_KEY)?)?;
 
-        // First, query the node for basic info about the chain
-        let methods = &["eth_chainId", "eth_gasPrice", "eth_maxPriorityFeePerGas"];
-        let [chain_id, gas_price, priority_fee] =
-            client.batch_call_no_params(methods).await?.try_into().unwrap();
+        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
+        let access_list_target = *AccessListTarget::deploy(&deployer).await?.address();
+        // @todo PrecompileTarget
 
-        // Then, create the needed signers
-        let key_bytes = hex::decode(&key)?;
-        let signer = Secp256k1Signer::from_slice(&key_bytes)?;
-        let deployer_signer = Secp256k1Signer::from_slice(&key_bytes)?;
-        let auth_key_bytes = hex::decode(AUTH_PRIVATE_KEY)?;
-        let auth_signer = Secp256k1Signer::from_slice(&auth_key_bytes)?;
+        let client = RpcClient::new(url.to_owned(), Duration::from_secs(config.rpc_timeout));
+        let [chain_id, gas_price, priority_fee]: [u128; 3] = client
+            .payload()
+            .add("eth_chainId", None)
+            .add("eth_gasPrice", None)
+            .add("eth_maxPriorityFeePerGas", None)
+            .execute()
+            .await?
+            .try_into()
+            .map_err(|_| anyhow!("expected 3 RPC results"))?;
 
-        // Then, deploy the target contracts
-        let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(url.as_str()).await?;
-        let access_list_target = AccessListTarget::deploy(&deployer).await?;
-        let access_list_target_address = *access_list_target.address();
-
-        // Finally, create the transaction builder
-        let builder = TransactionBuilder::from_values(
-            access_list_target_address,
-            chain_id as u64,
-            gas_price,
-            priority_fee,
-        );
-
-        // And the communication channels
-        let (tx_sender, tx_receiver) = channel::<Vec<String>>(ctx.tx_channel_capacity);
-        let (completion_sender, completion_receiver) =
-            channel::<u64>(ctx.completion_channel_capacity);
+        let tx_type = match tx_type.as_str() {
+            "legacy" => TxType::Legacy,
+            "eip2930" => TxType::Eip2930,
+            "eip1559" => TxType::Eip1559,
+            "eip7702" => TxType::Eip7702,
+            _ => bail!("unsupported transaction type: {tx_type}"),
+        };
 
         Ok(Self {
-            prelude,
-            ctx,
+            builder: TransactionBuilder::from_values(
+                access_list_target,
+                chain_id as u64,
+                gas_price,
+                priority_fee,
+            ),
+            config,
+            header,
             client: Arc::new(client),
+            signer,
+            auth_signer,
+            sleep: Duration::from_millis(sleep),
             tx_type,
             fuzzing,
-            builder,
-            signer: Arc::new(signer),
-            auth_signer: Arc::new(auth_signer),
-            tx_sender,
-            tx_receiver: Some(tx_receiver),
-            completion_sender: Some(completion_sender),
-            completion_receiver,
-            connection_lost: Arc::new(AtomicBool::new(false)),
         })
     }
 
     pub(crate) async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
-        // This will spawn a thread that will be listening for incoming transactions and will
-        // broadcast them in chunks to the RPC client
-        self.spawn_dispatcher();
+        let crash_signal = Arc::new(AtomicBool::new(false));
+        let total_sent = Arc::new(AtomicUsize::new(0));
+        let (tx_sender, tx_receiver) = channel::<Vec<String>>(self.config.tx_channel_capacity);
 
-        let num_cores = std::thread::available_parallelism()?.get();
-        let batch_size = (self.ctx.txs_per_core * num_cores).max(1000);
-        let mut txs: Vec<Transaction> = (0..batch_size).map(|_| self.build_tx(random)).collect();
+        self.spawn_dispatcher(crash_signal.clone(), total_sent.clone(), tx_receiver);
 
-        let mut total_txs_sent = 0;
-        let mut txs_since_last_update = 0;
-        let mut last_update = Instant::now();
+        // ────────────────────────────────────────────────────────────────────────────────
+        // Main fuzzy loop
+        // ────────────────────────────────────────────────────────────────────────────────
+
+        let poll_interval = Duration::from_secs(self.config.block_poll_interval);
+        let update_interval = Duration::from_millis(self.config.screen_update_interval);
         let start_time = Instant::now();
-        let mut last_block_tick = Instant::now();
+        let mut last_poll = Instant::now();
+        let mut last_update = Instant::now();
         let mut current_block = 0;
+        let mut last_total = 0;
+
+        let batch_size = (self.config.txs_per_core * self.num_cores()).max(1000);
+        let mut txs: Vec<Transaction> =
+            (0..batch_size).map(|_| self.build_tx(random)).collect::<Result<_>>()?;
 
         loop {
-            if self.connection_lost.load(Ordering::Relaxed) {
-                eprintln!("\n\n\x1b[1;31m[!] Node crashed, exiting...\x1b[0m");
+            if crash_signal.load(Ordering::Relaxed) {
+                eprintln!("\n\n\x1b[1;31m[!] Crash detected, exiting...\x1b[0m");
                 return Ok(());
             }
 
-            // Drain stats from the dispatcher
-            while let Ok(count) = self.completion_receiver.try_recv() {
-                total_txs_sent += count;
-                txs_since_last_update += count;
+            if last_poll.elapsed() >= poll_interval {
+                self.poll_gas_prices(&mut current_block).await?;
+                last_poll = Instant::now();
             }
 
-            // Poll for new blocks every second so that we create transactions with up to date gas
-            // prices
-            if last_block_tick.elapsed() >= Duration::from_secs(self.ctx.block_poll_interval) {
-                last_block_tick = Instant::now();
-                if let Ok(height) = self.client.call("eth_blockNumber", json!([])).await {
-                    if height > current_block {
-                        current_block = height;
-                        let _ = self.refresh_gas_prices().await;
-                    }
-                }
-            }
-
-            // Update screen
-            if last_update.elapsed().as_millis() >= self.ctx.screen_update_interval {
-                self.screen(total_txs_sent, txs_since_last_update, start_time)?;
-                txs_since_last_update = 0;
+            if last_update.elapsed() >= update_interval {
+                let total = total_sent.load(Ordering::Relaxed);
+                self.screen(total, total - last_total, start_time)?;
+                last_total = total;
                 last_update = Instant::now();
             }
 
-            // Mutate if fuzzing is enabled
             if self.fuzzing {
                 for tx in &mut txs {
                     tx.mutate(random);
                 }
             }
 
-            // Sign in parallel
-            let signer = self.signer.clone();
-            let auth_signer = self.auth_signer.clone();
-            let signed: Vec<String> =
-                txs.par_iter().map(|tx| Self::sign_and_encode(tx, &signer, &auth_signer)).collect();
+            let signer = &self.signer;
+            let auth_signer = &self.auth_signer;
+            let signed: Vec<String> = txs
+                .par_iter_mut()
+                .map(|tx| Self::sign_and_encode(tx, signer, auth_signer))
+                .collect();
 
-            // Send the signed transactions to the dispatcher
-            if self.tx_sender.send(signed).await.is_err() {
+            if tx_sender.send(signed).await.is_err() {
                 return Ok(());
             }
 
-            // Create new transactions in place to avoid allocations
             for tx in &mut txs {
-                *tx = self.build_tx(random);
+                *tx = self.build_tx(random)?;
             }
+
+            // This is used to avoid 429 errors, as the fuzzer goes so damn fast that no EL node can
+            // handle the load.
+            thread::sleep(self.sleep);
         }
     }
 
-    // ---------------------
-    // Dispatcher
-    // ---------------------
-
-    fn spawn_dispatcher(&mut self) {
-        let mut rx = self.tx_receiver.take().unwrap();
-        let tx = self.completion_sender.take().unwrap();
-        let signal = self.connection_lost.clone();
+    fn spawn_dispatcher(
+        &self,
+        signal: Arc<AtomicBool>,
+        total_sent: Arc<AtomicUsize>,
+        mut tx_receiver: Receiver<Vec<String>>,
+    ) {
         let client = self.client.clone();
-        let chunk_size = self.ctx.chunk_size;
+        let chunk_size = self.config.chunk_size;
 
         tokio::spawn(async move {
-            while let Some(batch) = rx.recv().await {
+            while let Some(batch) = tx_receiver.recv().await {
                 if signal.load(Ordering::Relaxed) {
                     break;
                 }
 
                 for chunk in batch.chunks(chunk_size) {
+                    let count = chunk.len();
+                    let txs = chunk.to_vec();
                     let client = client.clone();
                     let signal = signal.clone();
-                    let tx = tx.clone();
-                    let chunk: Vec<_> = chunk.to_vec();
-                    let count = chunk.len() as u64;
+                    let total_sent = total_sent.clone();
 
                     tokio::spawn(async move {
-                        match client.send_raw_transactions(chunk).await {
-                            Err(e) if e.is_connect() => {
+                        match client.send_raw_transactions(txs).await {
+                            Err(e) if e.is_connection_error() => {
                                 signal.store(true, Ordering::Relaxed);
                             }
                             _ => {
-                                let _ = tx.send(count).await;
+                                total_sent.fetch_add(count, Ordering::Relaxed);
                             }
                         }
                     });
@@ -235,30 +210,42 @@ impl App {
         });
     }
 
-    // ---------------------
-    // Tx building & signing
-    // ---------------------
+    async fn poll_gas_prices(&mut self, current_block: &mut u128) -> Result<()> {
+        let [height]: [u128; 1] = self
+            .client
+            .payload()
+            .add("eth_blockNumber", None)
+            .execute()
+            .await?
+            .try_into()
+            .map_err(|_| anyhow!("eth_blockNumber: expected 1 result"))?;
 
-    #[inline(always)]
-    fn build_tx(&mut self, random: &mut impl Rng) -> Transaction {
-        match self.tx_type {
-            TransactionType::Legacy => self.builder.legacy(random),
-            TransactionType::Eip2930 => self.builder.eip2930(random),
-            TransactionType::Eip1559 => self.builder.eip1559(random),
-            TransactionType::Eip7702 => self.builder.eip7702(random),
+        if height > *current_block {
+            let [gas_price, priority_fee]: [u128; 2] = self
+                .client
+                .payload()
+                .add("eth_gasPrice", None)
+                .add("eth_maxPriorityFeePerGas", None)
+                .execute()
+                .await?
+                .try_into()
+                .map_err(|_| anyhow!("gas prices: expected 2 results"))?;
+
+            self.builder.set_gas_prices(gas_price, priority_fee);
+            *current_block = height;
         }
+        Ok(())
     }
 
     fn sign_and_encode(
-        tx: &Transaction,
+        tx: &mut Transaction,
         signer: &Secp256k1Signer,
         auth_signer: &Secp256k1Signer,
     ) -> String {
-        let mut tx = tx.clone();
-        if let Some(auths) = tx.authorization_list.as_ref() {
+        if let Some(auths) = tx.authorization_list.take() {
             tx.signed_authorization_list = Some(
                 auths
-                    .par_iter()
+                    .into_iter()
                     .map(|auth| {
                         let sig = auth_signer.sign_hash_sync(&auth.signature_hash()).unwrap();
                         SignedAuthorization::new_unchecked(
@@ -273,40 +260,38 @@ impl App {
         }
 
         let sig = signer.sign_hash_sync(&tx.signing_hash()).unwrap();
-        format!("0x{}", hex::encode(SignedTransaction { transaction: tx, signature: sig }.encode()))
+        let encoded =
+            SignedTransaction { transaction: std::mem::take(tx), signature: sig }.encode();
+
+        format!("0x{}", hex::encode(encoded))
     }
 
-    // ---------------------
-    // Helpers
-    // ---------------------
-
-    /// Refreshes the gas prices from the RPC client
-    async fn refresh_gas_prices(&mut self) -> Result<()> {
-        let [gas_price, priority_fee] = self
-            .client
-            .batch_call_no_params(&["eth_gasPrice", "eth_maxPriorityFeePerGas"])
-            .await?
-            .try_into()
-            .unwrap();
-        self.builder.set_gas_prices(gas_price, priority_fee);
-        Ok(())
-    }
-
-    /// Updates the screen with the current stats
-    #[inline(always)]
-    fn screen(
-        &self,
-        total_txs_sent: u64,
-        txs_since_last_update: u64,
-        start_time: Instant,
-    ) -> Result<()> {
-        let secs = start_time.elapsed().as_secs();
+    fn screen(&self, total: usize, tick: usize, start: Instant) -> io::Result<()> {
+        let s = start.elapsed().as_secs();
         print!(
-            "{CLEAR_SCREEN}{}[{GREEN}+{RESET}] Total: {RED}{}{RESET} | Tick: {RED}{}{RESET} | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
-            self.prelude, total_txs_sent, txs_since_last_update,
-            secs / 3600, (secs % 3600) / 60, secs % 60,
+            "{CLEAR_SCREEN}{}[{GREEN}+{RESET}] Total: {RED}{total}{RESET} | \
+             Tick: {RED}{tick}{RESET} | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
+            self.header,
+            s / 3600,
+            (s % 3600) / 60,
+            s % 60,
         );
-        io::stdout().flush()?;
-        Ok(())
+        io::stdout().flush()
+    }
+
+    #[inline(always)]
+    fn build_tx(&mut self, random: &mut impl Rng) -> Result<Transaction> {
+        match self.tx_type {
+            TxType::Legacy => Ok(self.builder.legacy(random)),
+            TxType::Eip2930 => Ok(self.builder.eip2930(random)),
+            TxType::Eip1559 => Ok(self.builder.eip1559(random)),
+            TxType::Eip7702 => Ok(self.builder.eip7702(random)),
+            _ => bail!("Transaction type not supported"),
+        }
+    }
+
+    #[inline(always)]
+    fn num_cores(&self) -> usize {
+        std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1)
     }
 }
