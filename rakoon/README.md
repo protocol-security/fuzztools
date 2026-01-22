@@ -88,3 +88,27 @@ use the next command to run `rakoon`:
 ```sh
 cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97
 ```
+
+To see more flags, run:
+
+```sh
+cargo run --release --package rakoon -- --help
+```
+
+with output:
+
+```sh
+Transaction Fuzzer for the Ethereum Protocol
+
+Usage: rakoon [OPTIONS] --tx-type <TX_TYPE> --key <KEY>
+
+Options:
+      --tx-type <TX_TYPE>  Transaction type to fuzz (legacy, eip2930, eip1559, eip7702)
+      --key <KEY>          Private key for signing transactions
+      --seed <SEED>        Seed for the random generator [default: 0]
+      --url <URL>          URL to send transactions to [default: http://127.0.0.1:8545]
+      --fuzzing            Wether to mutate txs or not before sending them
+      --sleep <SLEEP>      Time to wait between tx batches (in ms) [default: 0]
+      --config <CONFIG>    Path to the config file [default: ./configs/rakoon.json]
+  -h, --help               Print help
+```
