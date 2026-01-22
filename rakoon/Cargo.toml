@@ -13,7 +13,6 @@ alloy-signer-local.workspace = true
 alloy.workspace = true
 anyhow.workspace = true
 clap.workspace = true
-crossbeam.workspace = true
 fuzztools.workspace = true
 rand.workspace = true
 rayon.workspace = true
