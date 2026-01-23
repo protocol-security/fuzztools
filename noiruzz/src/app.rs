@@ -89,14 +89,7 @@ enum TestResult {
         t2: Duration,
     },
 
-    /// Both failed to compile (not interesting)
-    BothFailedCompile { t1: Duration },
-    /// Both failed to execute (not interesting)
-    BothFailedExecute { t1: Duration },
-    /// Both failed to prove (not interesting)
-    BothFailedProve { t1: Duration, t2: Duration },
-    /// Both failed to verify (not interesting)
-    BothFailedVerify { t1: Duration, t2: Duration },
+    NotInteresting { t1: Duration, t2: Option<Duration>, is_proof: bool, is_verification: bool},
 
     /// Known error (overflow, underflow, etc.) - not a bug
     KnownError { t1: Duration },
@@ -355,7 +348,7 @@ impl App {
                                     break 'executions;
                                 }
 
-                                // Initial stages (T1): Execute (witness generation)
+                                // Initial stages (T1)): Execute (witness generation)
                                 let exec_start = Instant::now();
                                 let orig_exec = execute_project(&orig_dir).await;
                                 let rewr_exec = execute_project(&rewr_dir).await;
@@ -438,13 +431,13 @@ impl App {
                                                         }
                                                         _ => {
                                                             let _ = worker_tx
-                                                                .send(
-                                                                    TestResult::BothFailedVerify {
-                                                                        t1,
-                                                                        t2,
-                                                                    },
-                                                                )
-                                                                .await; // @todo should be a bug?
+                                                                .send(TestResult::NotInteresting {
+                                                                    t1,
+                                                                    t2: Some(t2),
+                                                                    is_proof: false,
+                                                                    is_verification: true
+                                                                })
+                                                                .await; // @todo shuld be a bug?
                                                         }
                                                     }
                                                 }
@@ -500,9 +493,11 @@ impl App {
                                                 }
                                                 _ => {
                                                     let _ = worker_tx
-                                                        .send(TestResult::BothFailedProve {
+                                                        .send(TestResult::NotInteresting {
                                                             t1,
-                                                            t2,
+                                                            t2: Some(t2),
+                                                            is_proof: true,
+                                                            is_verification: false
                                                         })
                                                         .await;
                                                 }
@@ -532,35 +527,8 @@ impl App {
                                             break 'executions;
                                         }
                                     }
-                                    (Err(orig_err), Ok(rewr_out)) => {
-                                        if is_expected_execution_error(orig_err) {
-                                            let _ =
-                                                worker_tx.send(TestResult::KnownError { t1 }).await;
-                                        } else {
-                                            let _ = worker_tx
-                                                .send(TestResult::ExecutionMismatch {
-                                                    original_code: job.original_code.clone(),
-                                                    rewritten_code: job.rewritten_code.clone(),
-                                                    prover_toml,
-                                                    original_output: format!(
-                                                        "UNKNOWN EXECUTION ERROR: {}",
-                                                        orig_err
-                                                    ),
-                                                    rewritten_output: rewr_out.clone(),
-                                                    job_id: job.job_id,
-                                                    t1,
-                                                })
-                                                .await;
-                                            found_bug = true;
-                                            break 'executions;
-                                        }
-                                    }
-                                    (Err(_), Err(_)) => {
-                                        // @todo imo due to the rewritten code may have errors
-                                        // before, i dont count this as a soundness bug
-                                        let _ = worker_tx
-                                            .send(TestResult::BothFailedExecute { t1 })
-                                            .await;
+                                    _ => {
+                                        let _ = worker_tx.send(TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false });
                                     }
                                 }
                             }
@@ -587,25 +555,8 @@ impl App {
                                     .await;
                             }
                         }
-                        (Err(e), Ok(())) => {
-                            if is_expected_execution_error(&e) {
-                                let _ = worker_tx.send(TestResult::KnownError { t1 }).await;
-                            } else {
-                                let _ = worker_tx
-                                    .send(TestResult::CompilationMismatch {
-                                        original_code: job.original_code.clone(),
-                                        rewritten_code: job.rewritten_code.clone(),
-                                        original_compiled: false,
-                                        error: e,
-                                        job_id: job.job_id,
-                                        t1,
-                                    })
-                                    .await;
-                            }
-                        }
-                        // Both failed to compile
                         _ => {
-                            let _ = worker_tx.send(TestResult::BothFailedCompile { t1 }).await;
+                            let _ = worker_tx.send(TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false });
                         }
                     }
 
@@ -715,19 +666,20 @@ impl App {
                         &rewritten_result,
                     );
                 }
-                TestResult::BothFailedCompile { t1 } | TestResult::BothFailedExecute { t1 } => {
+                TestResult::NotInteresting { t1, t2, is_proof, is_verification } => {
                     self.power_schedule.add_t1(t1);
-                }
-                TestResult::BothFailedProve { t1, t2 } => {
-                    self.power_schedule.add_t1(t1);
-                    self.power_schedule.add_t2(t2);
-                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
-                }
-                TestResult::BothFailedVerify { t1, t2 } => {
-                    self.power_schedule.add_t1(t1);
-                    self.power_schedule.add_t2(t2);
-                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
-                    self.total_verifications.fetch_add(1, Ordering::Relaxed);
+                    if let Some(t2) = t2 {
+                        self.power_schedule.add_t2(t2);
+                    }
+
+                    if is_proof {
+                        self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                    }
+
+                    if is_verification {
+                        self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                        self.total_verifications.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
                 TestResult::KnownError { t1 } => {
                     self.power_schedule.add_t1(t1);
