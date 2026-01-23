@@ -1,3 +1,5 @@
+//! Implements `TransactionBuilder`, whose task is to create **VALID** Ethereum transactions.
+
 use crate::{mutations::Random, transactions::Transaction};
 use alloy::{
     consensus::TxType,
@@ -6,7 +8,6 @@ use alloy::{
 };
 use rand::Rng;
 
-/// Handles the logic of creating **VALID** transactions per mempool rules.
 pub struct TransactionBuilder {
     pub chain_id: u64,
     pub auth_nonce: u64,
@@ -17,9 +18,8 @@ pub struct TransactionBuilder {
 }
 
 impl TransactionBuilder {
-    /// Creates a new `TransactionBuilder` from raw values.
     #[inline(always)]
-    pub const fn from_values(
+    pub const fn new(
         access_list_target: Address,
         chain_id: u64,
         gas_price: u128,
@@ -84,7 +84,6 @@ impl TransactionBuilder {
     // Transaction builders
     // ────────────────────────────────────────────────────────────────────────────────
 
-    /// Common fields for all transaction types.
     fn base_tx(&self, random: &mut impl Rng) -> Transaction {
         let to = Address::random(random);
         let input = Bytes::random(random);
@@ -112,8 +111,7 @@ impl TransactionBuilder {
         tx
     }
 
-    /// Builds an EIP-2930 (type 1) transaction with access list.
-    /// and `input` fields.
+    /// Builds an EIP-2930 (type 1) transaction.
     pub fn eip2930(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_tx(random);
         let nonce = self.next_signer_nonce();
@@ -128,7 +126,7 @@ impl TransactionBuilder {
         tx
     }
 
-    /// Builds an EIP-1559 (type 2) transaction with access list.
+    /// Builds an EIP-1559 (type 2) transaction.
     pub fn eip1559(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_tx(random);
         let nonce = self.next_signer_nonce();
@@ -145,7 +143,7 @@ impl TransactionBuilder {
         tx
     }
 
-    /// Builds an EIP-7702 (type 4) transaction with authorization.
+    /// Builds an EIP-7702 (type 4) transaction.
     pub fn eip7702(&mut self, random: &mut impl Rng) -> Transaction {
         let mut tx = self.base_tx(random);
         let nonce = self.next_signer_nonce();

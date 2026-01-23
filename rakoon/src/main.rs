@@ -1,14 +1,10 @@
 mod app;
 mod constants;
-mod context;
-
-use std::{fs, path::Path};
 
 use anyhow::Result;
 use app::App;
 use clap::Parser;
 use constants::{GREEN, HEADER, RED, RESET};
-use context::Config;
 use rand::{rngs::SmallRng, SeedableRng};
 
 #[derive(Parser)]
@@ -33,11 +29,14 @@ struct Cli {
     #[arg(long, help = "Wether to mutate txs or not before sending them", default_value_t = true)]
     fuzzing: bool,
 
-    #[arg(long, help = "Time to wait between tx batches (in ms)", default_value_t = 0)]
-    sleep: u64,
+    #[arg(long, help = "Poll interval to query gas prices (in seconds)")]
+    poll_interval: u64,
 
-    #[arg(long, help = "Path to the config file", default_value = "./configs/rakoon.json")]
-    config: String,
+    #[arg(long, help = "Number of concurrent RPC batches")]
+    workers: usize,
+
+    #[arg(long, help = "Number of txs per batch")]
+    batch_size: usize
 }
 
 #[tokio::main]
@@ -45,11 +44,6 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut random = SmallRng::seed_from_u64(cli.seed);
 
-    if !Path::new(&cli.config).exists() {
-        return Err(anyhow::anyhow!("Config file not found: {}", cli.config));
-    }
-
-    let config: Config = serde_json::from_str(&fs::read_to_string(&cli.config)?)?;
     let header = format!(
         "{HEADER}\n\
         {GREEN}INFO{RESET}      Tx type:         {RED}{}{RESET}\n\
@@ -57,14 +51,15 @@ async fn main() -> Result<()> {
         {GREEN}INFO{RESET}      Seed:            {RED}{}{RESET}\n\
         {GREEN}INFO{RESET}      Url:             {RED}{}{RESET}\n\
         {GREEN}INFO{RESET}      Fuzzing enabled: {RED}{}{RESET}\n\
-        {GREEN}INFO{RESET}      Sleep time:      {RED}{}s{RESET}\n\
-        {GREEN}INFO{RESET}      Config:          {RED}{}{RESET}\n\n",
-        cli.tx_type, cli.key, cli.seed, cli.url, cli.fuzzing, cli.sleep, cli.config
+        {GREEN}INFO{RESET}      Workers:         {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Poll interval:   {RED}{}{RESET}\n\
+        {GREEN}INFO{RESET}      Batch size:      {RED}{}{RESET}\n\n",
+        cli.tx_type, cli.key, cli.seed, cli.url, cli.fuzzing, cli.poll_interval, cli.workers, cli.batch_size
     );
 
     // Run the application
     let mut app =
-        App::new(cli.tx_type, cli.key, cli.url, cli.fuzzing, cli.sleep, header, config).await?;
+        App::new(cli.tx_type, header, cli.key, cli.url, cli.fuzzing, cli.workers, cli.poll_interval, cli.batch_size).await?;
 
     let result = app.run(&mut random).await;
     if let Err(e) = result {

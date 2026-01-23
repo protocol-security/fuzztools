@@ -8,8 +8,6 @@ rust-version.workspace = true
 [dependencies]
 alloy-rlp.workspace = true
 alloy.workspace = true
-anyhow.workspace = true
-arbitrary = { version = "1.4.2", features = ["derive"] }
 mutable.workspace = true
 petgraph.workspace = true
 rand.workspace = true
@@ -17,8 +15,6 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true

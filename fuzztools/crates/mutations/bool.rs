@@ -1,6 +1,5 @@
-use rand::Rng;
-
 use super::traits::Mutable;
+use rand::Rng;
 
 impl Mutable for bool {
     #[inline(always)]

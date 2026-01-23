@@ -1,7 +1,6 @@
-use super::traits::Mutable;
-use crate::mutations::{
+use super::{
     constants::{INTERESTING_ADDRESSES, INTERESTING_CHAIN_IDS, STORAGE_KEYS},
-    traits::{Phantom, Random},
+    traits::{Mutable, Phantom, Random},
 };
 use alloy::{
     consensus::TxType,
@@ -11,6 +10,7 @@ use alloy::{
     rpc::types::{AccessList, AccessListItem, Authorization},
 };
 use rand::{seq::IndexedRandom, Rng};
+
 // ────────────────────────────────────────────────────────────────────────────────
 // Address
 // ────────────────────────────────────────────────────────────────────────────────

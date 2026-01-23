@@ -1,6 +1,4 @@
-//! This module contains the `Transaction` type, which is a wrapper around all
-//! possible fields an Ethereum transaction can have (without taking into
-//! account EIP-4844 sidecars, which I don't think I will be using for now).
+//! Transaction type.
 
 use alloy::{
     consensus::TxType,
@@ -15,7 +13,6 @@ use rand::Rng;
 use crate::mutations::Mutable;
 
 #[derive(Debug, Clone, Default, Mutable)]
-/// A wrapper around all possible fields an Ethereum transaction can have.
 pub struct Transaction {
     // Transaction type.
     pub tx_type: TxType,
@@ -82,7 +79,7 @@ impl Transaction {
         out
     }
 
-    pub fn encode_fields(&self, out: &mut dyn BufMut) {
+    pub(crate) fn encode_fields(&self, out: &mut dyn BufMut) {
         // For legacy transactions (type 0), chain_id is NOT encoded in regular fields
         // It's encoded in the EIP-155 signing fields.
         if !matches!(self.tx_type, TxType::Legacy) {
@@ -109,7 +106,7 @@ impl Transaction {
         encode_field!(self.signed_authorization_list, out);
     }
 
-    pub fn fields_length(&self) -> usize {
+    pub(crate) fn fields_length(&self) -> usize {
         // For legacy transactions (type 0), chain_id is NOT included in the regular
         // fields, it's included in the EIP-155 signing fields.
         let chain_id_len =

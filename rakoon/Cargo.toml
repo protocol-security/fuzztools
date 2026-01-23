@@ -20,3 +20,4 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+crossbeam.workspace = true

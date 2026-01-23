@@ -1,13 +1,3 @@
-use std::{
-    io::{self, Write},
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
-    thread,
-    time::{Duration, Instant},
-};
-
 use alloy::{
     consensus::TxType, eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder,
     signers::SignerSync,
@@ -22,18 +12,25 @@ use fuzztools::{
 };
 use rand::Rng;
 use rayon::prelude::*;
-use tokio::sync::mpsc::{channel, Receiver};
+use std::{
+    io::{self, Write},
+    process::Command,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+use tokio::sync::Semaphore;
 
 use crate::{
-    constants::{AUTH_PRIVATE_KEY, CLEAR_SCREEN, GREEN, RED, RESET},
-    context::Config,
+    constants::{AUTH_PRIVATE_KEY, GREEN, RED, RESET},
 };
+use crossbeam::channel::{bounded, Receiver};
 
 pub(crate) struct App {
     /// Header being displayed on the screen.
     header: String,
-    /// Config of the run.
-    config: Config,
     /// Transaction builder
     builder: TransactionBuilder,
     /// RPC client connection.
@@ -46,19 +43,24 @@ pub(crate) struct App {
     tx_type: TxType,
     /// If true, the transactions will be mutated.
     fuzzing: bool,
-    /// This is the time to wait between batches.
-    sleep: Duration,
+    /// Poll interval to query gas prices
+    poll_interval: u64,
+    /// Maximum concurrent RPC calls
+    workers: usize,
+    /// Batch size
+    batch_size: usize
 }
 
 impl App {
     pub(crate) async fn new(
         tx_type: String,
+        header: String,
         key: String,
         url: String,
         fuzzing: bool,
-        sleep: u64,
-        header: String,
-        config: Config,
+        workers: usize,
+        poll_interval: u64,
+        batch_size: usize
     ) -> Result<Self> {
         let signer = Secp256k1Signer::from_slice(&hex::decode(&key)?)?;
         let deployer_signer = Secp256k1Signer::from_slice(&hex::decode(key)?)?;
@@ -68,7 +70,7 @@ impl App {
         let access_list_target = *AccessListTarget::deploy(&deployer).await?.address();
         // @todo PrecompileTarget
 
-        let client = RpcClient::new(url.to_owned(), Duration::from_secs(config.rpc_timeout));
+        let client = RpcClient::new(url.to_owned());
         let [chain_id, gas_price, priority_fee]: [u128; 3] = client
             .payload()
             .add("eth_chainId", None)
@@ -88,27 +90,28 @@ impl App {
         };
 
         Ok(Self {
-            builder: TransactionBuilder::from_values(
+            builder: TransactionBuilder::new(
                 access_list_target,
                 chain_id as u64,
                 gas_price,
                 priority_fee,
             ),
-            config,
             header,
             client: Arc::new(client),
             signer,
             auth_signer,
-            sleep: Duration::from_millis(sleep),
             tx_type,
             fuzzing,
+            workers,
+            poll_interval,
+            batch_size
         })
     }
 
     pub(crate) async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
         let crash_signal = Arc::new(AtomicBool::new(false));
         let total_sent = Arc::new(AtomicUsize::new(0));
-        let (tx_sender, tx_receiver) = channel::<Vec<String>>(self.config.tx_channel_capacity);
+        let (tx_sender, tx_receiver) = bounded(self.workers * 10);
 
         self.spawn_dispatcher(crash_signal.clone(), total_sent.clone(), tx_receiver);
 
@@ -116,17 +119,16 @@ impl App {
         // Main fuzzy loop
         // ────────────────────────────────────────────────────────────────────────────────
 
-        let poll_interval = Duration::from_secs(self.config.block_poll_interval);
-        let update_interval = Duration::from_millis(self.config.screen_update_interval);
+        let poll_interval = Duration::from_secs(self.poll_interval);
+        let update_interval = Duration::from_secs(1);
         let start_time = Instant::now();
         let mut last_poll = Instant::now();
         let mut last_update = Instant::now();
         let mut current_block = 0;
         let mut last_total = 0;
 
-        let batch_size = (self.config.txs_per_core * self.num_cores()).max(1000);
         let mut txs: Vec<Transaction> =
-            (0..batch_size).map(|_| self.build_tx(random)).collect::<Result<_>>()?;
+            (0..self.batch_size).map(|_| self.build_tx(random)).collect::<Result<_>>()?;
 
         loop {
             if crash_signal.load(Ordering::Relaxed) {
@@ -159,17 +161,12 @@ impl App {
                 .map(|tx| Self::sign_and_encode(tx, signer, auth_signer))
                 .collect();
 
-            if tx_sender.send(signed).await.is_err() {
-                return Ok(());
-            }
+            // We handle errors through `crash_signal`, otherwise keep going
+            let _ = tx_sender.send(signed);
 
             for tx in &mut txs {
                 *tx = self.build_tx(random)?;
             }
-
-            // This is used to avoid 429 errors, as the fuzzer goes so damn fast that no EL node can
-            // handle the load.
-            thread::sleep(self.sleep);
         }
     }
 
@@ -177,36 +174,41 @@ impl App {
         &self,
         signal: Arc<AtomicBool>,
         total_sent: Arc<AtomicUsize>,
-        mut tx_receiver: Receiver<Vec<String>>,
+        tx_receiver: Receiver<Vec<String>>,
     ) {
         let client = self.client.clone();
-        let chunk_size = self.config.chunk_size;
-
+        let workers = self.workers;
+        
         tokio::spawn(async move {
-            while let Some(batch) = tx_receiver.recv().await {
+            let semaphore = Arc::new(Semaphore::new(workers));
+
+            while let Ok(txs) = tx_receiver.recv() {
                 if signal.load(Ordering::Relaxed) {
                     break;
                 }
 
-                for chunk in batch.chunks(chunk_size) {
-                    let count = chunk.len();
-                    let txs = chunk.to_vec();
-                    let client = client.clone();
-                    let signal = signal.clone();
-                    let total_sent = total_sent.clone();
+                let count = txs.len();
+                let client = client.clone();
+                let signal = signal.clone();
+                let total_sent = total_sent.clone();
+                let permit = semaphore.clone().acquire_owned().await.unwrap();
 
-                    tokio::spawn(async move {
-                        match client.send_raw_transactions(txs).await {
-                            Err(e) if e.is_connection_error() => {
-                                signal.store(true, Ordering::Relaxed);
-                            }
-                            _ => {
-                                total_sent.fetch_add(count, Ordering::Relaxed);
-                            }
+                tokio::spawn(async move {
+                    let _permit = permit;
+
+                    match client.send_raw_transactions(txs).await {
+                        Err(e) if e.is_connection_error() => {
+                            signal.store(true, Ordering::Relaxed);
                         }
-                    });
-                }
+                        _ => {
+                            total_sent.fetch_add(count, Ordering::Relaxed);
+                        }
+                    };
+                });
             }
+
+            // Channel closed, signal threads to bye bye
+            signal.store(true, Ordering::Relaxed);
         });
     }
 
@@ -267,9 +269,10 @@ impl App {
     }
 
     fn screen(&self, total: usize, tick: usize, start: Instant) -> io::Result<()> {
+        Command::new("clear").status()?;
         let s = start.elapsed().as_secs();
         print!(
-            "{CLEAR_SCREEN}{}[{GREEN}+{RESET}] Total: {RED}{total}{RESET} | \
+            "{}[{GREEN}+{RESET}] Total: {RED}{total}{RESET} | \
              Tick: {RED}{tick}{RESET} | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
             self.header,
             s / 3600,
@@ -288,10 +291,5 @@ impl App {
             TxType::Eip7702 => Ok(self.builder.eip7702(random)),
             _ => bail!("Transaction type not supported"),
         }
-    }
-
-    #[inline(always)]
-    fn num_cores(&self) -> usize {
-        std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1)
     }
 }

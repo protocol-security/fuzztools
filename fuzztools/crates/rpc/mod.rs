@@ -1,25 +1,20 @@
-use std::time::Duration;
+//! A custom client for sending arbitrary JSON-RPC request. Uses `reqwest::Client` under-the-hood.
 
+mod error;
+
+use error::RpcError;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-mod error;
-pub use error::RpcError;
-
-/// A custom client for sending arbitrary JSON-RPC request. Uses `reqwest::Client` under-the-hood.
 pub struct RpcClient {
     inner: Client,
     url: String,
 }
 
 impl RpcClient {
-    pub fn new(url: String, timeout: Duration) -> Self {
-        let inner = Client::builder()
-            .tcp_nodelay(true)
-            .pool_max_idle_per_host(100)
-            .timeout(timeout)
-            .build()
-            .unwrap();
+    pub fn new(url: String) -> Self {
+        let inner =
+            Client::builder().tcp_nodelay(true).pool_max_idle_per_host(100).build().unwrap();
 
         Self { inner, url }
     }
@@ -36,12 +31,7 @@ impl RpcClient {
             .map(|(i, tx)| json!({"jsonrpc": "2.0", "method": "eth_sendRawTransaction", "params": [tx], "id": i}))
             .collect();
 
-        let source = self.inner.post(&self.url).json(&payload).send().await?;
-        let text = format!("{:?}", source);
-        let result: Result<Vec<Value>, reqwest::Error> = source.json().await;
-        if result.is_err() {
-            println!("Error source {} error {}", text, result.unwrap_err());
-        }
+        let _ = self.inner.post(&self.url).json(&payload).send().await?;
 
         Ok(())
     }

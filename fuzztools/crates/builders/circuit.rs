@@ -1,4 +1,4 @@
-use std::{fs, process::Command};
+//! Implements `CircuitBuilder`, whose task is to create and format **VALID** Noir circuits.
 
 use crate::circuits::{
     ast::{
@@ -57,8 +57,66 @@ impl CircuitBuilder {
         (forest, scope)
     }
 
+    pub fn format_circuit(&self, scope: &Scope, forest: &Forest) -> Circuit {
+        let mut out = String::new();
+
+        for s in &scope.structs {
+            out.push_str(&format!("{s}\n"));
+        }
+
+        for (name, ty, value) in &scope.globals {
+            out.push_str(&format!("global {name}: {ty} = {value};\n\n"));
+        }
+
+        for func in &scope.functions {
+            out.push_str(&format!("{func}\n\n"));
+        }
+
+        let inputs = scope
+            .inputs
+            .iter()
+            .map(
+                |(name, ty, is_pub)| {
+                    if *is_pub {
+                        format!("{name}: pub {ty}")
+                    } else {
+                        format!("{name}: {ty}")
+                    }
+                },
+            )
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let ret_sig = match &scope.ret {
+            Some((ty, true)) => format!(" -> pub {ty}"),
+            Some((ty, false)) => format!(" -> {ty}"),
+            None => String::new(),
+        };
+
+        out.push_str(&format!("fn main({inputs}){ret_sig} {{\n"));
+        out.push_str(&forest.format_with_indent("    "));
+        out.push_str("}\n");
+
+        out
+    }
+
+    #[inline(always)]
+    pub fn generate_prover_toml(
+        &self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        scope: &Scope,
+    ) -> String {
+        scope
+            .inputs
+            .iter()
+            .map(|(name, ty, _)| format!("{name} = {}", ty.random_value(random, ctx, scope, false)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Create a scope with random structs, functions, globals, and inputs
-    pub fn create_scope(&self, random: &mut impl Rng, ctx: &Context) -> Scope {
+    pub(crate) fn create_scope(&self, random: &mut impl Rng, ctx: &Context) -> Scope {
         let mut scope = Scope::default();
 
         // Create structs (can be used in functions, globals or main)
@@ -112,105 +170,11 @@ impl CircuitBuilder {
 
         scope
     }
-
-    pub fn compile_circuit(circuit: Circuit, name: &str) {
-        let tmp_dir = std::env::temp_dir().join("fuzztools");
-        fs::create_dir_all(&tmp_dir).unwrap();
-
-        let output = Command::new("nargo")
-            .args(["new", name])
-            .current_dir(&tmp_dir)
-            .output()
-            .expect("Failed to execute nargo new");
-
-        assert!(
-            output.status.success(),
-            "nargo new failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        // Write circuit to the file
-        fs::write(tmp_dir.join(format!("{name}/src/main.nr")), circuit).unwrap();
-
-        // Compile
-        let output = Command::new("nargo")
-            .args(["compile"])
-            .current_dir(tmp_dir.join(name))
-            .output()
-            .expect("Failed to execute nargo compile");
-
-        assert!(
-            output.status.success(),
-            "nargo compile failed:\n{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        // Clean up on success
-        fs::remove_dir_all(tmp_dir.join(name)).unwrap();
-    }
-
-    pub fn generate_prover_toml(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-    ) -> String {
-        scope
-            .inputs
-            .iter()
-            .map(|(name, ty, _)| format!("{name} = {}", ty.random_value(random, ctx, scope, false)))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    pub fn format_circuit(&self, scope: &Scope, forest: &Forest) -> Circuit {
-        let mut out = String::new();
-
-        for s in &scope.structs {
-            out.push_str(&format!("{s}\n"));
-        }
-
-        for (name, ty, value) in &scope.globals {
-            out.push_str(&format!("global {name}: {ty} = {value};\n\n"));
-        }
-
-        for func in &scope.functions {
-            out.push_str(&format!("{func}\n\n"));
-        }
-
-        let inputs = scope
-            .inputs
-            .iter()
-            .map(
-                |(name, ty, is_pub)| {
-                    if *is_pub {
-                        format!("{name}: pub {ty}")
-                    } else {
-                        format!("{name}: {ty}")
-                    }
-                },
-            )
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let ret_sig = match &scope.ret {
-            Some((ty, true)) => format!(" -> pub {ty}"),
-            Some((ty, false)) => format!(" -> {ty}"),
-            None => String::new(),
-        };
-
-        out.push_str(&format!("fn main({inputs}){ret_sig} {{\n"));
-        out.push_str(&forest.format_with_indent("    "));
-        out.push_str("}\n");
-
-        out
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, process::Command};
 
     use super::*;
     use tempfile::TempDir;

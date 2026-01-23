@@ -1,6 +1,6 @@
 # Mutable
 
-This folder holds the code for a macro that recursively implements the `random` method for its fields. In short, creates random instances of said struct, without the boilerplate of implementing all the logic by hand.
+This package contains a macro that implements automatically the `Mutable` trait for a given struct, if and only if the inner fields do implement it. That way, it is as easy as doing `#[derive(Mutable)]` to be able to do structure-aware fuzzing (see [rakoon](../rakoon/README.md) as an example).
 
 ## Getting started
 

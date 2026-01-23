@@ -5,6 +5,7 @@ use crate::mutations::Mutable;
 use alloy::primitives::{FixedBytes, U256};
 use mutable::Mutable;
 use rand::Rng;
+
 pub type VersionedHash = FixedBytes<32>;
 pub type BlobIndex = u64;
 pub type KZGCommitment = FixedBytes<48>;

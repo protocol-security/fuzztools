@@ -65,7 +65,7 @@ geth --dev \
 		--http \
 		--http.addr "127.0.0.1" \
 		--http.port 8545 \
-		--http.api "eth,net,web3,debug"
+		--http.api "eth"
 ```
 
 use the next command to run `rakoon`:
@@ -81,6 +81,7 @@ and for a local reth instance with the `--dev` flag:
 		--dev \
 		--dev.block-time 12s \
 		--datadir ./tmp/reth-db
+    --rpc.max-connections max
 ```
 
 use the next command to run `rakoon`:

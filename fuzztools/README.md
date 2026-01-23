@@ -4,13 +4,12 @@ This crate implements many types as well as stuff I will be using in my fuzzers.
 
 ## Modules
 
-- [`blockchain`](#blockchain) - Implements the consensus and execution spec types and constants
-- [`builders`](#builders) - Handles the logic of creating **VALID** instances of *to-be-fuzzed* types
-- [`circuits`](#circuits) - Implements the Noir IR
-- [`math`](#math) - Math utilities for fuzzing (field elements, weighted selection, etc.)
-- [`mutations`](#mutations) - Implements the `Mutable` trait for various types
-- [`rpc`](#rpc) - Implements a blazingly fast `RpcClient` to send JSON-RPC requests
-- [`transactions`](#transactions) - Implements the `Transaction` and `SignedTransaction` types
+- [`blockchain`](#blockchain) - Implements the consensus and execution spec types and constants.
+- [`builders`](#builders) - Handles the logic of creating **VALID** instances of *to-be-fuzzed* types.
+- [`circuits`](#circuits) - Implements the Noir IR as well as stuff to create random circuits.
+- [`mutations`](#mutations) - Implements the `Mutable` trait for various types.
+- [`rpc`](#rpc) - Implements a blazingly fast `RpcClient` to send batched JSON-RPC requests.
+- [`transactions`](#transactions) - Implements the `Transaction` and `SignedTransaction` types.
 
 ## Builders
 
@@ -25,7 +24,7 @@ Implements the Noir IR to generate random circuits. I do follow a different appr
 
 ## Mutations
 
-Provides the `Mutable` trait for the next types:
+Implements the `Mutable` trait for the next types:
 
 - Alloy's `Address`, `Bytes`, `FixedBytes<N>`, `U256`, `Authorization`, `AccessList`, `Vec<Authorization>` and `Vec<SignedAuthorization>`
 - `[T; N]` and `[u8; N]` arrays
@@ -34,7 +33,7 @@ Provides the `Mutable` trait for the next types:
 
 ## Rpc
 
-Implements the `RpcClient` to make single RPC calls as well as batched ones, much faster than Alloy's ones.
+Implements a blazingly fast `RpcClient` to send batched JSON-RPC requests.
 
 ## Transactions
 

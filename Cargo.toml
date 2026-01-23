@@ -137,16 +137,13 @@ panic = "abort"
 codegen-units = 1
 
 [workspace.dependencies]
-afl = "*"
-alloy = { git = "https://github.com/alloy-rs/alloy.git", features = ["full"] }
+alloy = { git = "https://github.com/alloy-rs/alloy.git" }
 alloy-rlp = "0.3.12"
 alloy-signer-local = { git = "https://github.com/alloy-rs/alloy.git", features = ["secp256k1"] }
 anyhow = "1.0.100"
 clap = { version = "4.5.48", features = ["derive"] }
 crossbeam = "0.8"
-futures = "0.3.31"
 hex = "0.4.3"
-paste = { version = "1.0" }
 petgraph = { version = "0.8.3", features = ["rayon", "generate"] }
 proc-macro2 = "1.0.101"
 quote = "1.0.41"
@@ -155,11 +152,10 @@ rayon = "1.11.0"
 reqwest = "0.12.25"
 serde = "1.0.228"
 serde_json = "1.0.145"
-sha2 = "0.10"
 syn = "2.0.107"
 tempfile = "3.20"
 thiserror = "2.0.17"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "process"]}
 
 # Local dependencies
 fuzztools = { path = "fuzztools" }

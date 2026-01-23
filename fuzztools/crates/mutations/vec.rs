@@ -1,7 +1,5 @@
+use super::traits::{Mutable, Phantom, Random, VecMutations};
 use rand::{seq::SliceRandom, Rng};
-
-use super::traits::Mutable;
-use crate::mutations::traits::{Phantom, Random, VecMutations};
 
 impl<T> Mutable for Vec<T>
 where

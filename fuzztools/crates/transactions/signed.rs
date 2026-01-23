@@ -5,7 +5,6 @@ use alloy_rlp::{BufMut, Encodable, Header};
 
 use super::transaction::Transaction;
 
-/// A `Transaction` with a `Signature` attached.
 #[derive(Clone)]
 pub struct SignedTransaction {
     pub transaction: Transaction,

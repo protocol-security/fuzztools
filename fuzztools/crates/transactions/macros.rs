@@ -1,6 +1,3 @@
-//! Macros for RLP encoding transaction fields.
-
-/// RLP encodes an `Option` field.
 #[macro_export]
 macro_rules! encode_field {
     ($field:expr, $out:expr) => {
@@ -10,7 +7,6 @@ macro_rules! encode_field {
     };
 }
 
-/// Gets the RLP length of an `Option` field.
 #[macro_export]
 macro_rules! field_len {
     ($field:expr) => {

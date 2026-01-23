@@ -19,10 +19,3 @@ cargo run --release -p noiruzz -- --workers 12
 and using the default [config](../configs/noiruzz.json), has a throughput of `~80` circuits per second through the whole lifecycle, that is, generation, rewrite, compilation, execution, proving and verification (with an average CPU usage of `53%`).
 
 **NOTE**: On very fast machines, power scheduler does not correctly compute usage, so it is better to pass `--always-run-later-stages`.
-
-## TODO
-
-- Add support for unstable features like ownership reference, oracle...
-- Fix the `@todo`s around the codebase
-- Make it possible to increase `max_rewrites_count` without blowing up memory
-- Restore usage of top level functions

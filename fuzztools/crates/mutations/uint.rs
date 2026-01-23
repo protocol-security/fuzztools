@@ -1,11 +1,9 @@
-use std::mem::size_of;
-
-use rand::{seq::IndexedRandom, Rng};
-
 use super::{
     constants::{EVEN, INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, ODD},
     traits::{InterestingMutations, Mutable, UintMutations},
 };
+use rand::{seq::IndexedRandom, Rng};
+use std::mem::size_of;
 
 macro_rules! impl_mutable {
     ($type:ty) => {

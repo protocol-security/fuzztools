@@ -1,14 +1,10 @@
+use super::{
+    constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
+    traits::{ArrayMutations, BytesSetInterestingMutations, InterestingMutations, Mutable},
+};
 use rand::{
     seq::{IndexedRandom, SliceRandom},
     Rng,
-};
-
-use super::{
-    constants::{INTERESTING_U16, INTERESTING_U32, INTERESTING_U8, INVALID_UTF8_SEQUENCES},
-    traits::Mutable,
-};
-use crate::mutations::traits::{
-    ArrayMutations, BytesSetInterestingMutations, InterestingMutations,
 };
 
 impl<T, const N: usize> Mutable for [T; N]

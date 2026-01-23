@@ -31,7 +31,6 @@ pub const ENDIANNESS: &str = "little";
 pub const BLS_WITHDRAWAL_PREFIX: FixedBytes<1> = FixedBytes([0]);
 pub const ETH1_ADDRESS_WITHDRAWAL_PREFIX: FixedBytes<1> = FixedBytes([0x01]);
 
-// @audit revisit cause little endian or shit
 pub const DOMAIN_BEACON_PROPOSER: DomainType = FixedBytes([0x00, 0x00, 0x00, 0x00]);
 pub const DOMAIN_BEACON_ATTESTER: DomainType = FixedBytes([0x01, 0x00, 0x00, 0x00]);
 pub const DOMAIN_RANDAO: DomainType = FixedBytes([0x02, 0x00, 0x00, 0x00]);

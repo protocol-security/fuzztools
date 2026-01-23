@@ -1,9 +1,8 @@
-use std::sync::LazyLock;
-
 use alloy::{
     hex::FromHex,
     primitives::{FixedBytes, B256},
 };
+use std::sync::LazyLock;
 
 /// Bitmask for even-positioned bits.
 pub(crate) const EVEN: u128 = 0x5555_5555_5555_5555_5555_5555_5555_5555;
