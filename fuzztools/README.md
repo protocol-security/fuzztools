@@ -1,7 +1,6 @@
 # Fuzztools
 
-This crate implements many types as well as stuff I will be using in my fuzzers. The reason why is because I am lazy as fuck and do not wanna copy-paste the same code over and over again :P
-
+This crate implements many types as well as stuff I will be using in my fuzzers.
 ## Modules
 
 - [`blockchain`](#blockchain) - Implements the consensus and execution spec types and constants.
