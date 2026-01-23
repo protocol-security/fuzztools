@@ -53,6 +53,7 @@ pub(crate) async fn setup_project(dir: &std::path::Path, code: &str) -> Result<(
 pub(crate) async fn compile_project(dir: &std::path::Path) -> Result<(), String> {
     let output = Command::new("nargo")
         .args(["compile", "--silence-warnings", "--force"])
+        .env("RUST_BACKTRACE", "full")
         .current_dir(dir)
         .output()
         .await
@@ -68,6 +69,7 @@ pub(crate) async fn compile_project(dir: &std::path::Path) -> Result<(), String>
 pub(crate) async fn execute_project(dir: &std::path::Path) -> Result<String, String> {
     let output = Command::new("nargo")
         .args(["execute", "--silence-warnings", "--force"])
+        .env("RUST_BACKTRACE", "full")
         .current_dir(dir)
         .output()
         .await
