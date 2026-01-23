@@ -48,7 +48,7 @@ For anyone interested in the bugs it has found, you can check [my submissions](h
 
 ## Rakoon
 
-A blazingly-fast transaction fuzzer for the Ethereum Protocol. Huge thanks to [Marius van der Wijden](https://github.com/MariusVanDerWijden) for building [tx-fuzz](https://github.com/MariusVanDerWijden/tx-fuzz), which I used as reference in many parts of this project, as well as to the [alloy team](https://github.com/alloy-rs), as I leveraged heavily on them to build this.
+A transaction fuzzer for the Ethereum Protocol. Huge thanks to [Marius van der Wijden](https://github.com/MariusVanDerWijden) for building [tx-fuzz](https://github.com/MariusVanDerWijden/tx-fuzz), which I used as reference in many parts of this project, as well as to the [alloy team](https://github.com/alloy-rs), as I leveraged heavily on them to build this.
 
 ### Hall of fame 🏆
 - Crash in anvil -> [PR link](https://github.com/foundry-rs/foundry/issues/10444)
