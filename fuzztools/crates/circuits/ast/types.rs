@@ -1,5 +1,5 @@
 use crate::circuits::{
-    ast::{forest::Forest, nodes::NodeKind},
+    ast::forest::Forest,
     context::Context,
     scope::Scope,
     utils::{bernoulli, random_field_element, random_string},
@@ -350,8 +350,7 @@ impl Lambda {
 
         let mut body = Forest::default();
         self.params.iter().for_each(|(n, t)| {
-            let idx = body.input(n.clone(), t.clone());
-            body.register(random, idx, NodeKind::Input, t, None);
+            body.input(random, n.clone(), t.clone());
         });
 
         body.random_with_bounds(

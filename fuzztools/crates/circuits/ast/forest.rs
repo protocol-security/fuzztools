@@ -82,25 +82,33 @@ impl Forest {
     // ────────────────────────────────────────────────────────────────────────────────
 
     #[inline(always)]
-    pub fn input(&mut self, name: String, ty: Type) -> NodeIndex {
-        self.graph.add_node(Node::Input { name, ty })
+    pub fn input(&mut self, random: &mut impl Rng, name: String, ty: Type) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Input { name, ty: ty.clone() });
+        self.register(random, idx, NodeKind::Input, &ty, None);
+
+        idx
     }
 
     #[inline(always)]
-    pub fn literal(&mut self, value: String, ty: Type) -> NodeIndex {
-        self.graph.add_node(Node::Literal { value, ty })
+    pub fn literal(&mut self, random: &mut impl Rng, value: String, ty: Type) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Literal { value, ty: ty.clone() });
+        self.register(random, idx, NodeKind::Input, &ty, None);
+
+        idx
     }
 
     #[inline(always)]
     pub fn variable(
         &mut self,
+        random: &mut impl Rng,
         name: String,
         ty: Type,
         mutable: bool,
         shadow: bool,
         value: NodeIndex,
     ) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Variable { name, ty, mutable, shadow });
+        let idx = self.graph.add_node(Node::Variable { name, ty: ty.clone(), mutable, shadow });
+        self.register(random, idx, NodeKind::Variable, &ty, None);
         self.graph.add_edge(idx, value, 0);
 
         idx
@@ -109,12 +117,14 @@ impl Forest {
     #[inline(always)]
     pub fn operator(
         &mut self,
+        random: &mut impl Rng,
         op: Operator,
         ret: Type,
         lhs: NodeIndex,
         rhs: Option<NodeIndex>,
     ) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Operator { op, ret });
+        let idx = self.graph.add_node(Node::Operator { op, ret: ret.clone() });
+        self.register(random, idx, NodeKind::Operator, &ret, Some(op));
         self.graph.add_edge(idx, lhs, 0);
 
         // In unary operations, there is no right operand, so `rhs` is `None`
@@ -126,24 +136,27 @@ impl Forest {
     }
 
     #[inline(always)]
-    pub fn index(&mut self, parent: NodeIndex, value: usize) -> NodeIndex {
+    pub fn index(&mut self, random: &mut impl Rng, parent: NodeIndex, value: usize, ty: &Type) -> NodeIndex {
         let idx = self.graph.add_node(Node::Index { value });
+        self.register(random, idx, NodeKind::Index, ty, None);
         self.graph.add_edge(idx, parent, 0);
 
         idx
     }
 
     #[inline(always)]
-    pub fn tuple_index(&mut self, parent: NodeIndex, value: usize) -> NodeIndex {
+    pub fn tuple_index(&mut self, random: &mut impl Rng, parent: NodeIndex, value: usize, ty: &Type) -> NodeIndex {
         let idx = self.graph.add_node(Node::TupleIndex { value });
+        self.register(random, idx, NodeKind::TupleIndex, ty, None);
         self.graph.add_edge(idx, parent, 0);
 
         idx
     }
 
     #[inline(always)]
-    pub fn field_access(&mut self, parent: NodeIndex, name: String) -> NodeIndex {
+    pub fn field_access(&mut self, random: &mut impl Rng, parent: NodeIndex, name: String, ty: &Type) -> NodeIndex {
         let idx = self.graph.add_node(Node::FieldAccess { name });
+        self.register(random, idx, NodeKind::FieldAccess, ty, None);
         self.graph.add_edge(idx, parent, 0);
 
         idx
@@ -152,12 +165,14 @@ impl Forest {
     #[inline(always)]
     pub fn call(
         &mut self,
+        random: &mut impl Rng,
         name: String,
         ret: Type,
         args: Vec<NodeIndex>,
         parent: NodeIndex,
     ) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Call { name, ret });
+        let idx = self.graph.add_node(Node::Call { name, ret: ret.clone() });
+        self.register(random, idx, NodeKind::Call, &ret, None);
         self.graph.add_edge(idx, parent, 0);
 
         for (pos, arg) in args.into_iter().enumerate() {
@@ -168,8 +183,9 @@ impl Forest {
     }
 
     #[inline(always)]
-    pub fn cast(&mut self, source: NodeIndex, target: Type) -> NodeIndex {
-        let idx = self.graph.add_node(Node::Cast { target });
+    pub fn cast(&mut self, random: &mut impl Rng, source: NodeIndex, target: Type) -> NodeIndex {
+        let idx = self.graph.add_node(Node::Cast { target: target.clone() });
+        self.register(random, idx, NodeKind::Cast, &target, None);
         self.graph.add_edge(idx, source, 0);
 
         idx
@@ -183,11 +199,14 @@ impl Forest {
     #[inline(always)]
     pub fn assignment(
         &mut self,
+        random: &mut impl Rng,
         source: NodeIndex,
         value: NodeIndex,
         op: Option<Operator>,
+        ty: &Type
     ) -> NodeIndex {
         let idx = self.graph.add_node(Node::Assignment { op });
+        self.register(random, idx, NodeKind::Assignment, ty, op);
         self.graph.add_edge(idx, source, 0); // source variable
         self.graph.add_edge(idx, value, 1); // value expression
 
@@ -370,7 +389,7 @@ impl Forest {
         format!("v{n}")
     }
 
-    pub fn register(
+    fn register(
         &mut self,
         random: &mut impl Rng,
         idx: NodeIndex,
@@ -604,14 +623,16 @@ mod tests {
     #[test]
     fn test_forest() {
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
         // Add two literal nodes
         let lhs =
-            forest.literal("1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
+            forest.literal(&mut random, "1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
         let rhs =
-            forest.literal("2".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
+            forest.literal(&mut random, "2".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
         // Add operator node for addition
         let op = forest.operator(
+            &mut random,
             Operator::Add,
             Type::Integer(Integer { bits: 32, signed: true }),
             lhs,
@@ -620,6 +641,7 @@ mod tests {
 
         // Add variable node
         let _ = forest.variable(
+            &mut random,
             "result".to_string(),
             Type::Integer(Integer { bits: 32, signed: true }),
             false,
@@ -634,13 +656,15 @@ mod tests {
     #[test]
     fn test_swap_operands() {
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
         // Add two literal nodes
         let lhs =
-            forest.literal("1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
-        let rhs = forest.literal("2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
+            forest.literal(&mut random, "1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
+        let rhs = forest.literal(&mut random, "2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
         // Add operator node for addition
         let op = forest.operator(
+            &mut random,
             Operator::Add,
             Type::Integer(Integer { bits: 32, signed: true }),
             lhs,
@@ -659,13 +683,15 @@ mod tests {
     #[test]
     fn test_replace_operand() {
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
         // Add two literal nodes
         let lhs =
-            forest.literal("1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
-        let rhs = forest.literal("2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
+            forest.literal(&mut random, "1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
+        let rhs = forest.literal(&mut random, "2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
         // Add operator node for addition
         let op = forest.operator(
+            &mut random,
             Operator::Add,
             Type::Integer(Integer { bits: 32, signed: true }),
             lhs,
@@ -677,7 +703,7 @@ mod tests {
 
         // Add a new literal node
         let new =
-            forest.literal("3".to_string(), Type::Integer(Integer { bits: 1, signed: false }));
+            forest.literal(&mut random, "3".to_string(), Type::Integer(Integer { bits: 1, signed: false }));
         forest.replace_operand(op, 0, new);
 
         // Only the left operand should be replaced
@@ -688,13 +714,15 @@ mod tests {
     #[test]
     fn test_remove_operand() {
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
         // Add two literal nodes
         let lhs =
-            forest.literal("1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
-        let rhs = forest.literal("2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
+            forest.literal(&mut random, "1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
+        let rhs = forest.literal(&mut random, "2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
         // Add operator node for addition
         let op = forest.operator(
+            &mut random,
             Operator::Add,
             Type::Integer(Integer { bits: 32, signed: true }),
             lhs,
@@ -713,13 +741,15 @@ mod tests {
     #[test]
     fn test_remove_all_operands() {
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
         // Add two literal nodes
         let lhs =
-            forest.literal("1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
-        let rhs = forest.literal("2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
+            forest.literal(&mut random, "1".to_string(), Type::Integer(Integer { bits: 32, signed: true }));
+        let rhs = forest.literal(&mut random, "2".to_string(), Type::Integer(Integer { bits: 8, signed: true }));
         // Add operator node for addition
         let op = forest.operator(
+            &mut random,
             Operator::Add,
             Type::Integer(Integer { bits: 32, signed: true }),
             lhs,

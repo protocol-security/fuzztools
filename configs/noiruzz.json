@@ -51,7 +51,7 @@
     "max_assert_count": 2,
     "max_lambda_count": 2,
 
-    "max_forest_size": 100,
+    "max_forest_size": 250,
 
     "field_weight": 10,
     "unsigned_weight": 10,

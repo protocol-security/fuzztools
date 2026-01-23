@@ -142,14 +142,15 @@ impl Forest {
         let expr_idx = self.build_expr_tree(random, &ctx, scope, &ty, 0);
 
         let name = self.next_var();
-        let var_idx = self.variable(
+        let mutable = random.random_bool(ctx.mutable_probability);
+        self.variable(
+            random,
             name,
             ty.clone(),
-            random.random_bool(ctx.mutable_probability),
+            mutable,
             false,
             expr_idx,
         );
-        self.register(random, var_idx, NodeKind::Variable, &ty, None);
     }
 
     /// Build an expression tree of the given type
@@ -224,7 +225,8 @@ impl Forest {
         }
 
         // Generate a new literal (don't register in types - literals are not for reuse)
-        self.literal(ty.random_value(random, ctx, scope, true), ty.clone())
+        let value = ty.random_value(random, ctx, scope, true);
+        self.literal(random, value, ty.clone())
     }
 
     /// Get nodes of a type that can be reused (only Variable and Input nodes)
@@ -262,9 +264,7 @@ impl Forest {
 
         let op = *ops.choose(random).unwrap();
         let inner = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
-        let idx = self.operator(op, ty.clone(), inner, None);
-        self.register(random, idx, NodeKind::Operator, ty, Some(op));
-        idx
+        self.operator(random, op, ty.clone(), inner, None)
     }
 
     /// Build a binary expression: EXPR OP EXPR
@@ -303,18 +303,15 @@ impl Forest {
             if let Some((left, right)) =
                 self.build_mixed_operands(random, ctx, scope, ty, depth + 1)
             {
-                let idx = self.operator(op, ty.clone(), left, Some(right));
-                self.register(random, idx, NodeKind::Operator, ty, Some(op));
-                return idx;
+                return self.operator(random, op, ty.clone(), left, Some(right));
             }
         }
 
         // Fall back to same-type operands
         let left = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
         let right = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
-        let idx = self.operator(op, ty.clone(), left, Some(right));
-        self.register(random, idx, NodeKind::Operator, ty, Some(op));
-        idx
+        
+        self.operator(random, op, ty.clone(), left, Some(right))
     }
 
     /// Build operands of potentially different types and cast them to the target type
@@ -360,9 +357,7 @@ impl Forest {
             if ty == *target_ty {
                 expr
             } else {
-                let cast_idx = self.cast(expr, target_ty.clone());
-                self.register(random, cast_idx, NodeKind::Cast, target_ty, None);
-                cast_idx
+                self.cast(random, expr, target_ty.clone())
             }
         } else {
             self.build_expr_tree(random, ctx, scope, target_ty, depth)
@@ -423,9 +418,7 @@ impl Forest {
         let left = self.build_expr_tree(random, ctx, scope, &operand_ty, depth + 1);
         let right = self.build_expr_tree(random, ctx, scope, &operand_ty, depth + 1);
 
-        let idx = self.operator(op, Type::Boolean, left, Some(right));
-        self.register(random, idx, NodeKind::Operator, &Type::Boolean, Some(op));
-        idx
+        self.operator(random, op, Type::Boolean, left, Some(right))
     }
 
     /// Build an index expression that produces the target type
@@ -480,9 +473,7 @@ impl Forest {
         };
 
         let index_val = random.random_range(0..size);
-        let idx = self.index(arr_idx, index_val);
-        self.register(random, idx, NodeKind::Index, ty, None);
-        idx
+        self.index(random, arr_idx, index_val, ty)
     }
 
     /// Build a tuple index expression that produces the target type
@@ -528,10 +519,10 @@ impl Forest {
             .collect();
 
         // Either use existing or create on-the-fly
-        let (tuple_idx, target_pos) = if !existing.is_empty() && random.random_bool(0.5) {
-            let (_, positions, idx) = existing.choose(random).unwrap();
+        let (tuple_idx, target_pos, ty) = if !existing.is_empty() && random.random_bool(0.5) {
+            let (ty, positions, idx) = existing.choose(random).unwrap();
             let pos = *positions.choose(random).unwrap();
-            (*idx, pos)
+            (*idx, pos, ty.clone())
         } else {
             // Create on-the-fly
             // Tuples need at least 2 elements (1-element is just parenthesized expression)
@@ -554,12 +545,10 @@ impl Forest {
 
             let tuple_ty = Type::Tuple(Tuple { elements });
             let idx = self.build_expr_tree(random, ctx, scope, &tuple_ty, depth + 1);
-            (idx, target_pos)
+            (idx, target_pos, tuple_ty)
         };
 
-        let idx = self.tuple_index(tuple_idx, target_pos);
-        self.register(random, idx, NodeKind::TupleIndex, ty, None);
-        idx
+        self.tuple_index(random, tuple_idx, target_pos, &ty)
     }
 
     /// Build a field access expression that produces the target type
@@ -605,12 +594,10 @@ impl Forest {
 
         // Either use existing or create on-the-fly
         if !existing.is_empty() && random.random_bool(0.5) {
-            let (_, fields, struct_idx) = existing.choose(random).unwrap();
+            let (ty, fields, struct_idx) = existing.choose(random).unwrap();
             let field_name = fields.choose(random).unwrap().clone();
 
-            let idx = self.field_access(*struct_idx, field_name);
-            self.register(random, idx, NodeKind::FieldAccess, ty, None);
-            return idx;
+            return self.field_access(random, *struct_idx, field_name, ty);
         }
 
         // Create on-the-fly: find a struct definition with the target field type
@@ -621,9 +608,7 @@ impl Forest {
                     let struct_idx =
                         self.build_expr_tree(random, ctx, scope, &struct_ty, depth + 1);
 
-                    let idx = self.field_access(struct_idx, field.name.clone());
-                    self.register(random, idx, NodeKind::FieldAccess, ty, None);
-                    return idx;
+                    return self.field_access(random, struct_idx, field.name.clone(), &struct_ty);
                 }
             }
         }
@@ -671,9 +656,7 @@ impl Forest {
         };
 
         let source_idx = self.build_expr_tree(random, ctx, scope, &source_ty, depth + 1);
-        let idx = self.cast(source_idx, ty.clone());
-        self.register(random, idx, NodeKind::Cast, ty, None);
-        idx
+        self.cast(random, source_idx, ty.clone())
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
@@ -741,12 +724,10 @@ impl Forest {
             args.push(idx);
         }
 
-        let call_idx = self.call(name, *lambda.ret.clone(), args, idx);
-        self.register(random, call_idx, NodeKind::Call, &lambda.ret.clone(), None);
+        let call_idx = self.call(random, name, *lambda.ret.clone(), args, idx);
 
         let var_name = self.next_var();
-        let var_idx = self.variable(var_name, *lambda.ret.clone(), false, false, call_idx);
-        self.register(random, var_idx, NodeKind::Variable, &lambda.ret, None);
+        self.variable(random, var_name, *lambda.ret.clone(), false, false, call_idx);
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
@@ -785,9 +766,7 @@ impl Forest {
             return;
         }
 
-        let assign_idx = self.assignment(source_idx, value_idx, compound_op);
-        self.register(random, assign_idx, NodeKind::Assignment, &source_ty, None); 
-        // @todo should this be `compound_op` instead of `None`?
+        self.assignment(random, source_idx, value_idx, compound_op, &source_ty);
     }
 
     #[inline(always)]
@@ -820,8 +799,7 @@ impl Forest {
         // Register outer variables as inputs in the nested body
         for &idx in self.nodes.get(&NodeKind::Variable).into_iter().flatten() {
             if let Node::Variable { name, ty, mutable, .. } = &self.graph[idx] {
-                let input_idx = body.input(name.clone(), ty.clone());
-                body.register(random, input_idx, NodeKind::Input, ty, None);
+                let input_idx = body.input(random, name.clone(), ty.clone());
 
                 if *mutable {
                     body.mutable_refs.insert(name.clone(), input_idx);
@@ -988,8 +966,7 @@ mod tests {
         let mut forest = Forest::default();
 
         for (name, ty, _) in &scope.inputs {
-            let idx = forest.input(name.clone(), ty.clone());
-            forest.register(&mut random, idx, NodeKind::Input, ty, None);
+            forest.input(&mut random, name.clone(), ty.clone());
         }
 
         forest.random(&mut random, &ctx, &scope);

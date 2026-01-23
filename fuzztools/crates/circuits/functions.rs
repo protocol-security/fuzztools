@@ -1,5 +1,5 @@
 use crate::circuits::{
-    ast::{forest::Forest, nodes::NodeKind, types::Type},
+    ast::{forest::Forest, types::Type},
     context::Context,
     generators::types::TypeLocation,
     scope::Scope,
@@ -39,8 +39,7 @@ impl Function {
 
         // Make arguments as inputs into the forest
         for (n, t) in &params {
-            let idx = body.input(n.clone(), t.clone());
-            body.register(random, idx, NodeKind::Input, t, None);
+            body.input(random, n.clone(), t.clone());
         }
 
         // Generate

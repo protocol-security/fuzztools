@@ -185,38 +185,38 @@ impl Rewriter {
         match kind {
             // Structural
             RuleKind::SwapOperands { .. } => forest.swap_operands(n),
-            RuleKind::Associate { .. } => do_associate(forest, n),
-            RuleKind::AssociateSub => do_associate_sub(forest, n),
-            RuleKind::AssociateDiv => do_associate_div(forest, n),
-            RuleKind::DivCommute => do_div_commute(forest, n),
-            RuleKind::Distribute { outer, inner } => do_distribute(forest, n, *outer, *inner),
+            RuleKind::Associate { .. } => do_associate(random, forest, n),
+            RuleKind::AssociateSub => do_associate_sub(random, forest, n),
+            RuleKind::AssociateDiv => do_associate_div(random, forest, n),
+            RuleKind::DivCommute => do_div_commute(random, forest, n),
+            RuleKind::Distribute { outer, inner } => do_distribute(random, forest, n, *outer, *inner),
 
             // Identity / Absorb
             RuleKind::Identity { op, identity_right } => {
-                do_identity(forest, n, *op, *identity_right)
+                do_identity(random, forest, n, *op, *identity_right)
             }
-            RuleKind::Absorb { op } => do_absorb(forest, n, *op),
-            RuleKind::SelfInverse { op } => do_self_inverse(forest, n, *op),
-            RuleKind::Idempotent { op } => do_idempotent(forest, n, *op),
+            RuleKind::Absorb { op } => do_absorb(random, forest, n, *op),
+            RuleKind::SelfInverse { op } => do_self_inverse(random, forest, n, *op),
+            RuleKind::Idempotent { op } => do_idempotent(random, forest, n, *op),
 
             // Unary
-            RuleKind::DoubleUnary { op } => do_double_unary(forest, n, *op),
-            RuleKind::AddNegSub => do_add_neg_sub(forest, n),
-            RuleKind::NegZeroSub => do_neg_zero_sub(forest, n),
+            RuleKind::DoubleUnary { op } => do_double_unary(random, forest, n, *op),
+            RuleKind::AddNegSub => do_add_neg_sub(random, forest, n),
+            RuleKind::NegZeroSub => do_neg_zero_sub(random, forest, n),
 
             // Comparison
             RuleKind::FlipComparison => do_flip_comparison(forest, n),
-            RuleKind::NegateComparison => do_negate_comparison(forest, n, condition_nodes),
-            RuleKind::ExpandComparison => do_expand_comparison(forest, n),
+            RuleKind::NegateComparison => do_negate_comparison(random, forest, n, condition_nodes),
+            RuleKind::ExpandComparison => do_expand_comparison(random, forest, n),
 
             // Boolean logic
-            RuleKind::DeMorgan => do_demorgan(forest, n),
-            RuleKind::ComplementXor => do_complement_xor(forest, n),
-            RuleKind::XorToAndOr => do_xor_to_and_or(forest, n),
+            RuleKind::DeMorgan => do_demorgan(random, forest, n),
+            RuleKind::ComplementXor => do_complement_xor(random, forest, n),
+            RuleKind::XorToAndOr => do_xor_to_and_or(random, forest, n),
 
             // Modulo
-            RuleKind::ModOne => do_mod_one(forest, n),
-            RuleKind::AndToMod => do_and_to_mod(forest, n),
+            RuleKind::ModOne => do_mod_one(random, forest, n),
+            RuleKind::AndToMod => do_and_to_mod(random, forest, n),
 
             // Shift
             RuleKind::ShiftZero => do_shift_zero(forest, n),
@@ -233,12 +233,12 @@ impl Rewriter {
                 do_inject(random, forest, n, Operator::Xor, Operator::Xor, ctx, scope)
             }
             RuleKind::InjectDivDiv => do_inject_div_div(random, forest, n, ctx, scope),
-            RuleKind::InjectOrZero => do_inject_or_zero(forest, n),
-            RuleKind::InjectAndSelf => do_inject_and_self(forest, n),
+            RuleKind::InjectOrZero => do_inject_or_zero(random, forest, n),
+            RuleKind::InjectAndSelf => do_inject_and_self(random, forest, n),
 
             // Simplification
-            RuleKind::DoubleMulTwo => do_double_mul_two(forest, n),
-            RuleKind::MulNegOneNeg => do_mul_neg_one_neg(forest, n),
+            RuleKind::DoubleMulTwo => do_double_mul_two(random, forest, n),
+            RuleKind::MulNegOneNeg => do_mul_neg_one_neg(random, forest, n),
         }
 
         // Remove the node if it is orphaned
@@ -703,7 +703,7 @@ const fn uses_redirect(kind: &RuleKind) -> bool {
 // Rule implementations
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn do_associate(f: &mut Forest, n: NodeIndex) {
+fn do_associate(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     let op = match op_of(f, n) {
         Some(op) => op,
         None => return,
@@ -714,7 +714,7 @@ fn do_associate(f: &mut Forest, n: NodeIndex) {
     // (a op b) op c -> a op (b op c)
     if let Some(l) = left.filter(|&l| op_of(f, l) == Some(op)) {
         let (a, b, c) = (f.left(l).unwrap(), f.right(l).unwrap(), right.unwrap());
-        let new_right = f.operator(op, ret, b, Some(c));
+        let new_right = f.operator(random, op, ret, b, Some(c));
         f.replace_operand(n, 0, a);
         f.replace_operand(n, 1, new_right);
         return;
@@ -722,14 +722,14 @@ fn do_associate(f: &mut Forest, n: NodeIndex) {
     // a op (b op c) -> (a op b) op c
     if let Some(r) = right.filter(|&r| op_of(f, r) == Some(op)) {
         let (a, b, c) = (left.unwrap(), f.left(r).unwrap(), f.right(r).unwrap());
-        let new_left = f.operator(op, ret, a, Some(b));
+        let new_left = f.operator(random, op, ret, a, Some(b));
         f.replace_operand(n, 0, new_left);
         f.replace_operand(n, 1, c);
     }
 }
 
 /// ((a - b) - c) ↔ (a - (b + c))
-fn do_associate_sub(f: &mut Forest, n: NodeIndex) {
+fn do_associate_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     if op_of(f, n) != Some(Operator::Sub) {
         return;
     }
@@ -739,7 +739,7 @@ fn do_associate_sub(f: &mut Forest, n: NodeIndex) {
     // (a - b) - c -> a - (b + c)
     if let Some(l) = left.filter(|&l| op_of(f, l) == Some(Operator::Sub)) {
         let (a, b, c) = (f.left(l).unwrap(), f.right(l).unwrap(), right.unwrap());
-        let new_right = f.operator(Operator::Add, ret, b, Some(c));
+        let new_right = f.operator(random, Operator::Add, ret, b, Some(c));
         f.replace_operand(n, 0, a);
         f.replace_operand(n, 1, new_right);
         return;
@@ -747,14 +747,14 @@ fn do_associate_sub(f: &mut Forest, n: NodeIndex) {
     // a - (b + c) -> (a - b) - c
     if let Some(r) = right.filter(|&r| op_of(f, r) == Some(Operator::Add)) {
         let (a, b, c) = (left.unwrap(), f.left(r).unwrap(), f.right(r).unwrap());
-        let new_left = f.operator(Operator::Sub, ret, a, Some(b));
+        let new_left = f.operator(random, Operator::Sub, ret, a, Some(b));
         f.replace_operand(n, 0, new_left);
         f.replace_operand(n, 1, c);
     }
 }
 
 /// ((a / b) * c) ↔ (a * (c / b))
-fn do_associate_div(f: &mut Forest, n: NodeIndex) {
+fn do_associate_div(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     if op_of(f, n) != Some(Operator::Mul) {
         return;
     }
@@ -764,7 +764,7 @@ fn do_associate_div(f: &mut Forest, n: NodeIndex) {
     // (a / b) * c -> a * (c / b)
     if let Some(l) = left.filter(|&l| op_of(f, l) == Some(Operator::Div)) {
         let (a, b, c) = (f.left(l).unwrap(), f.right(l).unwrap(), right.unwrap());
-        let new_right = f.operator(Operator::Div, ret, c, Some(b));
+        let new_right = f.operator(random, Operator::Div, ret, c, Some(b));
         f.replace_operand(n, 0, a);
         f.replace_operand(n, 1, new_right);
         return;
@@ -772,14 +772,14 @@ fn do_associate_div(f: &mut Forest, n: NodeIndex) {
     // a * (c / b) -> (a / b) * c
     if let Some(r) = right.filter(|&r| op_of(f, r) == Some(Operator::Div)) {
         let (a, c, b) = (left.unwrap(), f.left(r).unwrap(), f.right(r).unwrap());
-        let new_left = f.operator(Operator::Div, ret, a, Some(b));
+        let new_left = f.operator(random, Operator::Div, ret, a, Some(b));
         f.replace_operand(n, 0, new_left);
         f.replace_operand(n, 1, c);
     }
 }
 
 /// (a / b) → ((1 / b) * a)
-fn do_div_commute(f: &mut Forest, n: NodeIndex) {
+fn do_div_commute(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     if op_of(f, n) != Some(Operator::Div) {
         return;
     }
@@ -789,14 +789,14 @@ fn do_div_commute(f: &mut Forest, n: NodeIndex) {
     };
 
     let ty = ret_of(f, n);
-    let one = make_one(f, &ty);
-    let one_div_b = f.operator(Operator::Div, ty.clone(), one, Some(b));
+    let one = make_one(random, f, &ty);
+    let one_div_b = f.operator(random, Operator::Div, ty.clone(), one, Some(b));
     set_op(f, n, Operator::Mul);
     f.replace_operand(n, 1, a);
     f.replace_operand(n, 0, one_div_b);
 }
 
-fn do_distribute(f: &mut Forest, n: NodeIndex, outer: Operator, inner: Operator) {
+fn do_distribute(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, outer: Operator, inner: Operator) {
     if op_of(f, n) != Some(outer) {
         return;
     }
@@ -807,14 +807,14 @@ fn do_distribute(f: &mut Forest, n: NodeIndex, outer: Operator, inner: Operator)
 
     let ret = ret_of(f, n);
     let (a, b, c) = (f.left(left).unwrap(), f.right(left).unwrap(), f.right(n).unwrap());
-    let new_left = f.operator(outer, ret.clone(), a, Some(c));
-    let new_right = f.operator(outer, ret, b, Some(c));
+    let new_left = f.operator(random, outer, ret.clone(), a, Some(c));
+    let new_right = f.operator(random, outer, ret, b, Some(c));
     set_op(f, n, inner);
     f.replace_operand(n, 0, new_left);
     f.replace_operand(n, 1, new_right);
 }
 
-fn do_identity(f: &mut Forest, n: NodeIndex, op: Operator, identity_right: bool) {
+fn do_identity(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator, identity_right: bool) {
     // Simplification: a op identity → a
     if op_of(f, n) == Some(op) {
         let (keep, check) =
@@ -830,13 +830,13 @@ fn do_identity(f: &mut Forest, n: NodeIndex, op: Operator, identity_right: bool)
     // Injection: x → x op identity (only when there's no operator)
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
-    let id = make_identity(f, &ty, op);
+    let id = make_identity(random, f, &ty, op);
     let (lhs, rhs) = if identity_right { (n, id) } else { (id, n) };
-    let new = f.operator(op, ty, lhs, Some(rhs));
+    let new = f.operator(random, op, ty, lhs, Some(rhs));
     f.redirect_edges(n, new, &edges);
 }
 
-fn do_absorb(f: &mut Forest, n: NodeIndex, op: Operator) {
+fn do_absorb(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
     // Simplification: a * 0 → 0, a & 0 → 0, a | true → true
     // Only applies when we have the operator and one operand is absorbing
     if op_of(f, n) == Some(op) {
@@ -846,7 +846,7 @@ fn do_absorb(f: &mut Forest, n: NodeIndex, op: Operator) {
             right.is_some_and(|r| is_absorbing(f, r, op))
         {
             let ty = f.ty(n);
-            let absorb = make_absorbing(f, &ty, op);
+            let absorb = make_absorbing(random, f, &ty, op);
             redirect(f, n, absorb);
         }
     }
@@ -854,13 +854,13 @@ fn do_absorb(f: &mut Forest, n: NodeIndex, op: Operator) {
     // which needs access to random/ctx/scope. Could be added as a separate InjectAbsorb rule.
 }
 
-fn do_self_inverse(f: &mut Forest, n: NodeIndex, op: Operator) {
+fn do_self_inverse(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
     // Simplification: a op a → identity (0 for Sub/Xor, 1 for Div)
     if op_of(f, n) == Some(op) && f.left(n) == f.right(n) {
         let ty = f.ty(n);
         let lit = match op {
-            Operator::Sub | Operator::Xor => make_zero(f, &ty),
-            Operator::Div => make_one(f, &ty),
+            Operator::Sub | Operator::Xor => make_zero(random, f, &ty),
+            Operator::Div => make_one(random, f, &ty),
             _ => return,
         };
         redirect(f, n, lit);
@@ -869,7 +869,7 @@ fn do_self_inverse(f: &mut Forest, n: NodeIndex, op: Operator) {
     // which needs access to random/ctx/scope, so injection is done via separate InjectXorXor etc.
 }
 
-fn do_idempotent(f: &mut Forest, n: NodeIndex, op: Operator) {
+fn do_idempotent(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
     // Simplification: a op a → a (for And/Or)
     if op_of(f, n) == Some(op) {
         if f.left(n) == f.right(n) {
@@ -883,12 +883,12 @@ fn do_idempotent(f: &mut Forest, n: NodeIndex, op: Operator) {
     // Injection: a → a op a (only for booleans, only when there's no operator)
     if matches!(f.ty(n), Type::Boolean) {
         let edges = f.incoming_edges(n);
-        let new = f.operator(op, Type::Boolean, n, Some(n));
+        let new = f.operator(random, op, Type::Boolean, n, Some(n));
         f.redirect_edges(n, new, &edges);
     }
 }
 
-fn do_double_unary(f: &mut Forest, n: NodeIndex, op: Operator) {
+fn do_double_unary(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
     // Simplification: op(op(x)) → x (e.g., --a → a, !!a → a)
     if op_of(f, n) == Some(op) && f.right(n).is_none() {
         if let Some(inner) = f.left(n).filter(|&i| op_of(f, i) == Some(op) && f.right(i).is_none())
@@ -903,16 +903,16 @@ fn do_double_unary(f: &mut Forest, n: NodeIndex, op: Operator) {
     // Injection: x → op(op(x)) (only when there's no operator)
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
-    let inner = f.operator(op, ty.clone(), n, None);
-    let outer = f.operator(op, ty, inner, None);
+    let inner = f.operator(random, op, ty.clone(), n, None);
+    let outer = f.operator(random, op, ty, inner, None);
     f.redirect_edges(n, outer, &edges);
 }
 
-fn do_add_neg_sub(f: &mut Forest, n: NodeIndex) {
+fn do_add_neg_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Sub) => {
             let right = f.right(n).unwrap();
-            let neg = f.operator(Operator::Neg, f.ty(right), right, None);
+            let neg = f.operator(random, Operator::Neg, f.ty(right), right, None);
             set_op(f, n, Operator::Add);
             f.replace_operand(n, 1, neg);
         }
@@ -925,13 +925,13 @@ fn do_add_neg_sub(f: &mut Forest, n: NodeIndex) {
     }
 }
 
-fn do_neg_zero_sub(f: &mut Forest, n: NodeIndex) {
+fn do_neg_zero_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Neg) => {
             // -x → 0 - x
             let operand = f.left(n).unwrap();
             let ty = ret_of(f, n);
-            let zero = make_zero(f, &ty);
+            let zero = make_zero(random, f, &ty);
             set_op(f, n, Operator::Sub);
             f.add_operand(n, 1, operand);
             f.replace_operand(n, 0, zero);
@@ -968,7 +968,7 @@ fn do_flip_comparison(f: &mut Forest, n: NodeIndex) {
     f.swap_operands(n);
 }
 
-fn do_negate_comparison(f: &mut Forest, n: NodeIndex, condition_nodes: &HashSet<NodeIndex>) {
+fn do_negate_comparison(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, condition_nodes: &HashSet<NodeIndex>) {
     // not(a cmp b) -> a neg_cmp b
     if op_of(f, n) == Some(Operator::Not) {
         if let Some(inner) = f.left(n) {
@@ -987,30 +987,30 @@ fn do_negate_comparison(f: &mut Forest, n: NodeIndex, condition_nodes: &HashSet<
     if let Some(negated) = op_of(f, n).and_then(negate_cmp) {
         let edges = f.incoming_edges(n);
         set_op(f, n, negated);
-        let not_node = f.operator(Operator::Not, Type::Boolean, n, None);
+        let not_node = f.operator(random, Operator::Not, Type::Boolean, n, None);
         f.redirect_edges(n, not_node, &edges);
     }
 }
 
 /// (a <= b) ↔ ((a < b) || (a == b))
-fn do_expand_comparison(f: &mut Forest, n: NodeIndex) {
+fn do_expand_comparison(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::LessOrEqual) => {
             // a <= b -> (a < b) || (a == b)
             let (a, b) = (f.left(n).unwrap(), f.right(n).unwrap());
             let edges = f.incoming_edges(n);
-            let less = f.operator(Operator::Less, Type::Boolean, a, Some(b));
-            let eq = f.operator(Operator::Equal, Type::Boolean, a, Some(b));
-            let new = f.operator(Operator::Or, Type::Boolean, less, Some(eq));
+            let less = f.operator(random, Operator::Less, Type::Boolean, a, Some(b));
+            let eq = f.operator(random, Operator::Equal, Type::Boolean, a, Some(b));
+            let new = f.operator(random, Operator::Or, Type::Boolean, less, Some(eq));
             f.redirect_edges(n, new, &edges);
         }
         Some(Operator::GreaterOrEqual) => {
             // a >= b -> (a > b) || (a == b)
             let (a, b) = (f.left(n).unwrap(), f.right(n).unwrap());
             let edges = f.incoming_edges(n);
-            let greater = f.operator(Operator::Greater, Type::Boolean, a, Some(b));
-            let eq = f.operator(Operator::Equal, Type::Boolean, a, Some(b));
-            let new = f.operator(Operator::Or, Type::Boolean, greater, Some(eq));
+            let greater = f.operator(random, Operator::Greater, Type::Boolean, a, Some(b));
+            let eq = f.operator(random, Operator::Equal, Type::Boolean, a, Some(b));
+            let new = f.operator(random, Operator::Or, Type::Boolean, greater, Some(eq));
             f.redirect_edges(n, new, &edges);
         }
         Some(Operator::Or) => {
@@ -1021,14 +1021,14 @@ fn do_expand_comparison(f: &mut Forest, n: NodeIndex) {
                 let a = f.left(left).unwrap();
                 let b = f.right(left).unwrap();
                 let edges = f.incoming_edges(n);
-                let new = f.operator(Operator::LessOrEqual, Type::Boolean, a, Some(b));
+                let new = f.operator(random, Operator::LessOrEqual, Type::Boolean, a, Some(b));
                 f.redirect_edges(n, new, &edges);
             } else if left_op == Some(Operator::Greater) && op_of(f, right) == Some(Operator::Equal)
             {
                 let a = f.left(left).unwrap();
                 let b = f.right(left).unwrap();
                 let edges = f.incoming_edges(n);
-                let new = f.operator(Operator::GreaterOrEqual, Type::Boolean, a, Some(b));
+                let new = f.operator(random, Operator::GreaterOrEqual, Type::Boolean, a, Some(b));
                 f.redirect_edges(n, new, &edges);
             }
         }
@@ -1036,7 +1036,7 @@ fn do_expand_comparison(f: &mut Forest, n: NodeIndex) {
     }
 }
 
-fn do_demorgan(f: &mut Forest, n: NodeIndex) {
+fn do_demorgan(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     let op = op_of(f, n);
 
     // not(a and/or b) -> not(a) or/and not(b)
@@ -1049,9 +1049,9 @@ fn do_demorgan(f: &mut Forest, n: NodeIndex) {
             };
             let edges = f.incoming_edges(n);
             let (a, b) = (f.left(inner).unwrap(), f.right(inner).unwrap());
-            let not_a = f.operator(Operator::Not, Type::Boolean, a, None);
-            let not_b = f.operator(Operator::Not, Type::Boolean, b, None);
-            let new = f.operator(dual, Type::Boolean, not_a, Some(not_b));
+            let not_a = f.operator(random, Operator::Not, Type::Boolean, a, None);
+            let not_b = f.operator(random, Operator::Not, Type::Boolean, b, None);
+            let new = f.operator(random, dual, Type::Boolean, not_a, Some(not_b));
             f.redirect_edges(n, new, &edges);
             return;
         }
@@ -1066,18 +1066,18 @@ fn do_demorgan(f: &mut Forest, n: NodeIndex) {
             let edges = f.incoming_edges(n);
             let dual = if op == Some(Operator::And) { Operator::Or } else { Operator::And };
             let (a, b) = (f.left(left.unwrap()).unwrap(), f.left(right.unwrap()).unwrap());
-            let inner = f.operator(dual, Type::Boolean, a, Some(b));
-            let new = f.operator(Operator::Not, Type::Boolean, inner, None);
+            let inner = f.operator(random, dual, Type::Boolean, a, Some(b));
+            let new = f.operator(random, Operator::Not, Type::Boolean, inner, None);
             f.redirect_edges(n, new, &edges);
         }
     }
 }
 
-fn do_complement_xor(f: &mut Forest, n: NodeIndex) {
+fn do_complement_xor(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Not) => {
             let ty = ret_of(f, n);
-            let one = make_one(f, &ty);
+            let one = make_one(random, f, &ty);
             set_op(f, n, Operator::Xor);
             f.add_operand(n, 1, one);
         }
@@ -1090,17 +1090,17 @@ fn do_complement_xor(f: &mut Forest, n: NodeIndex) {
 }
 
 /// (a ^ b) ↔ ((!a & b) | (a & !b))
-fn do_xor_to_and_or(f: &mut Forest, n: NodeIndex) {
+fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Xor) => {
             // a ^ b -> (!a & b) | (a & !b)
             let (a, b) = (f.left(n).unwrap(), f.right(n).unwrap());
             let edges = f.incoming_edges(n);
-            let not_a = f.operator(Operator::Not, Type::Boolean, a, None);
-            let not_b = f.operator(Operator::Not, Type::Boolean, b, None);
-            let left_and = f.operator(Operator::And, Type::Boolean, not_a, Some(b));
-            let right_and = f.operator(Operator::And, Type::Boolean, a, Some(not_b));
-            let new = f.operator(Operator::Or, Type::Boolean, left_and, Some(right_and));
+            let not_a = f.operator(random, Operator::Not, Type::Boolean, a, None);
+            let not_b = f.operator(random, Operator::Not, Type::Boolean, b, None);
+            let left_and = f.operator(random, Operator::And, Type::Boolean, not_a, Some(b));
+            let right_and = f.operator(random, Operator::And, Type::Boolean, a, Some(not_b));
+            let new = f.operator(random, Operator::Or, Type::Boolean, left_and, Some(right_and));
             f.redirect_edges(n, new, &edges);
         }
         Some(Operator::Or) => {
@@ -1119,7 +1119,7 @@ fn do_xor_to_and_or(f: &mut Forest, n: NodeIndex) {
                     let b_from_right = f.left(rr).unwrap();
                     if a_from_left == a_from_right && b_from_left == b_from_right {
                         let edges = f.incoming_edges(n);
-                        let new = f.operator(
+                        let new = f.operator(random, 
                             Operator::Xor,
                             Type::Boolean,
                             a_from_left,
@@ -1135,38 +1135,38 @@ fn do_xor_to_and_or(f: &mut Forest, n: NodeIndex) {
 }
 
 /// a % 1 ↔ 0
-fn do_mod_one(f: &mut Forest, n: NodeIndex) {
+fn do_mod_one(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     if op_of(f, n) == Some(Operator::Mod) && f.right(n).is_some_and(|r| is_one(f, r)) {
         // a % 1 -> 0
         let ty = f.ty(n);
-        let zero = make_zero(f, &ty);
+        let zero = make_zero(random, f, &ty);
         redirect(f, n, zero);
     } else if is_zero(f, n) {
         // 0 -> r % 1 (inject)
         let ty = f.ty(n);
         if matches!(ty, Type::Integer(_)) {
             let edges = f.incoming_edges(n);
-            let one = make_one(f, &ty);
-            let new = f.operator(Operator::Mod, ty, n, Some(one));
+            let one = make_one(random, f, &ty);
+            let new = f.operator(random, Operator::Mod, ty, n, Some(one));
             f.redirect_edges(n, new, &edges);
         }
     }
 }
 
 /// a & 1 ↔ a % 2
-fn do_and_to_mod(f: &mut Forest, n: NodeIndex) {
+fn do_and_to_mod(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::And) if f.right(n).is_some_and(|r| is_one(f, r)) => {
             // a & 1 -> a % 2
             let ty = ret_of(f, n);
-            let two = make_two(f, &ty);
+            let two = make_two(random, f, &ty);
             set_op(f, n, Operator::Mod);
             f.replace_operand(n, 1, two);
         }
         Some(Operator::Mod) if f.right(n).is_some_and(|r| is_two(f, r)) => {
             // a % 2 -> a & 1
             let ty = ret_of(f, n);
-            let one = make_one(f, &ty);
+            let one = make_one(random, f, &ty);
             set_op(f, n, Operator::And);
             f.replace_operand(n, 1, one);
         }
@@ -1196,9 +1196,10 @@ fn do_inject(
 ) {
     let ty = f.ty(n);
     let edges = f.incoming_edges(n);
-    let r = f.literal(ty.random_value(random, ctx, scope, true), ty.clone());
-    let first = f.operator(op1, ty.clone(), n, Some(r));
-    let second = f.operator(op2, ty, first, Some(r));
+    let value = ty.random_value(random, ctx, scope, true);
+    let r = f.literal(random, value, ty.clone());
+    let first = f.operator(random, op1, ty.clone(), n, Some(r));
+    let second = f.operator(random, op2, ty, first, Some(r));
     f.redirect_edges(n, second, &edges);
 }
 
@@ -1216,9 +1217,9 @@ fn do_inject_nonzero(
         return;
     }
     let edges = f.incoming_edges(n);
-    let r = f.literal(value, ty.clone());
-    let first = f.operator(Operator::Mul, ty.clone(), n, Some(r));
-    let second = f.operator(Operator::Div, ty, first, Some(r));
+    let r = f.literal(random, value, ty.clone());
+    let first = f.operator(random, Operator::Mul, ty.clone(), n, Some(r));
+    let second = f.operator(random, Operator::Div, ty, first, Some(r));
     f.redirect_edges(n, second, &edges);
 }
 
@@ -1240,35 +1241,35 @@ fn do_inject_div_div(
         return;
     }
     let edges = f.incoming_edges(n);
-    let r = f.literal(value, ty.clone());
-    let new = f.operator(Operator::Div, ty, r, Some(r));
+    let r = f.literal(random, value, ty.clone());
+    let new = f.operator(random, Operator::Div, ty, r, Some(r));
     f.redirect_edges(n, new, &edges);
 }
 
 /// a → a | 0
-fn do_inject_or_zero(f: &mut Forest, n: NodeIndex) {
+fn do_inject_or_zero(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     let ty = f.ty(n);
     if !matches!(ty, Type::Integer(_)) {
         return;
     }
     let edges = f.incoming_edges(n);
-    let zero = make_zero(f, &ty);
-    let new = f.operator(Operator::Or, ty, n, Some(zero));
+    let zero = make_zero(random, f, &ty);
+    let new = f.operator(random, Operator::Or, ty, n, Some(zero));
     f.redirect_edges(n, new, &edges);
 }
 
 /// a → a & a
-fn do_inject_and_self(f: &mut Forest, n: NodeIndex) {
+fn do_inject_and_self(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     let ty = f.ty(n);
     if !matches!(ty, Type::Integer(_)) {
         return;
     }
     let edges = f.incoming_edges(n);
-    let new = f.operator(Operator::And, ty, n, Some(n));
+    let new = f.operator(random, Operator::And, ty, n, Some(n));
     f.redirect_edges(n, new, &edges);
 }
 
-fn do_double_mul_two(f: &mut Forest, n: NodeIndex) {
+fn do_double_mul_two(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     // Safety check: don't apply for u1 types - can't hold value 2
     let ty = f.ty(n);
     if matches!(&ty, Type::Integer(i) if i.bits == 1) {
@@ -1277,7 +1278,7 @@ fn do_double_mul_two(f: &mut Forest, n: NodeIndex) {
 
     match op_of(f, n) {
         Some(Operator::Add) if f.left(n) == f.right(n) => {
-            let two = make_two(f, &ty);
+            let two = make_two(random, f, &ty);
             set_op(f, n, Operator::Mul);
             f.replace_operand(n, 1, two);
         }
@@ -1290,7 +1291,7 @@ fn do_double_mul_two(f: &mut Forest, n: NodeIndex) {
     }
 }
 
-fn do_mul_neg_one_neg(f: &mut Forest, n: NodeIndex) {
+fn do_mul_neg_one_neg(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     match op_of(f, n) {
         Some(Operator::Mul) if f.right(n).is_some_and(|r| is_neg_one(f, r)) => {
             set_op(f, n, Operator::Neg);
@@ -1298,7 +1299,7 @@ fn do_mul_neg_one_neg(f: &mut Forest, n: NodeIndex) {
         }
         Some(Operator::Neg) => {
             let ty = ret_of(f, n);
-            let neg_one = make_neg_one(f, &ty);
+            let neg_one = make_neg_one(random, f, &ty);
             set_op(f, n, Operator::Mul);
             f.add_operand(n, 1, neg_one);
         }
@@ -1489,7 +1490,7 @@ const fn negate_cmp(op: Operator) -> Option<Operator> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Create a literal node with the given numeric value
-fn make_literal(f: &mut Forest, ty: &Type, num: i8) -> NodeIndex {
+fn make_literal(random: &mut impl Rng, f: &mut Forest, ty: &Type, num: i8) -> NodeIndex {
     let val = match (num, ty) {
         (0, Type::Boolean) => "false".into(),
         (1, Type::Boolean) => "true".into(),
@@ -1499,51 +1500,51 @@ fn make_literal(f: &mut Forest, ty: &Type, num: i8) -> NodeIndex {
         (2, Type::Integer(i)) => format!("2{}{}", if i.signed { "i" } else { "u" }, i.bits),
         (n, _) => format!("{n}{ty}"),
     };
-    f.literal(val, ty.clone())
+    f.literal(random, val, ty.clone())
 }
 
 #[inline(always)]
-fn make_zero(f: &mut Forest, ty: &Type) -> NodeIndex {
-    make_literal(f, ty, 0)
+fn make_zero(random: &mut impl Rng, f: &mut Forest, ty: &Type) -> NodeIndex {
+    make_literal(random, f, ty, 0)
 }
 
 #[inline(always)]
-fn make_one(f: &mut Forest, ty: &Type) -> NodeIndex {
-    make_literal(f, ty, 1)
+fn make_one(random: &mut impl Rng, f: &mut Forest, ty: &Type) -> NodeIndex {
+    make_literal(random, f, ty, 1)
 }
 
 #[inline(always)]
-fn make_neg_one(f: &mut Forest, ty: &Type) -> NodeIndex {
-    make_literal(f, ty, -1)
+fn make_neg_one(random: &mut impl Rng, f: &mut Forest, ty: &Type) -> NodeIndex {
+    make_literal(random, f, ty, -1)
 }
 
 #[inline(always)]
-fn make_two(f: &mut Forest, ty: &Type) -> NodeIndex {
-    make_literal(f, ty, 2)
+fn make_two(random: &mut impl Rng, f: &mut Forest, ty: &Type) -> NodeIndex {
+    make_literal(random, f, ty, 2)
 }
 
 #[inline(always)]
-fn make_identity(f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
+fn make_identity(random: &mut impl Rng, f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
     if matches!(op, Operator::Mul | Operator::Div | Operator::And) {
-        make_one(f, ty)
+        make_one(random, f, ty)
     } else {
-        make_zero(f, ty)
+        make_zero(random, f, ty)
     }
 }
 
 #[inline(always)]
-fn make_absorbing(f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
+fn make_absorbing(random: &mut impl Rng, f: &mut Forest, ty: &Type, op: Operator) -> NodeIndex {
     if op == Operator::Or {
-        make_one(f, ty)
+        make_one(random, f, ty)
     } else {
-        make_zero(f, ty)
+        make_zero(random, f, ty)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{builders::CircuitBuilder, circuits::ast::nodes::NodeKind};
+    use crate::builders::CircuitBuilder;
     use std::fs;
 
     const RED: &str = "\x1b[31m";
@@ -1640,15 +1641,14 @@ mod tests {
         let scope = builder.create_scope(&mut random, &ctx);
 
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rewriter = Rewriter::default();
 
         for (name, ty, _) in &scope.inputs {
-            let idx = forest.input(name.clone(), ty.clone());
-            forest.register(&mut random, idx, NodeKind::Input, ty, None);
+            forest.input(&mut random, name.clone(), ty.clone());
         }
         for (name, ty, _) in &scope.globals {
-            let idx = forest.input(name.clone(), ty.clone());
-            forest.register(&mut random, idx, NodeKind::Input, ty, None);
+            forest.input(&mut random, name.clone(), ty.clone());
         }
 
         forest.random(&mut random, &ctx, &scope);
@@ -1671,16 +1671,17 @@ mod tests {
     fn test_associate() {
         // Test Associate rule: (a + b) + c ↔ a + (b + c)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Associate { ops: &[Operator::Add] };
 
         // Create inputs: a, b, c
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
-        let c = forest.input("c".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
+        let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a + b) + c (left-associated)
-        let a_plus_b = forest.operator(Operator::Add, Type::Field, a, Some(b));
-        let root = forest.operator(Operator::Add, Type::Field, a_plus_b, Some(c));
+        let a_plus_b = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Add, Type::Field, a_plus_b, Some(c));
 
         // Verify initial structure: left child is (a + b), right child is c
         assert_eq!(forest.left(root), Some(a_plus_b));
@@ -1690,7 +1691,7 @@ mod tests {
 
         // Apply associate: (a + b) + c -> a + (b + c)
         assert_matches(&forest, root, &rule);
-        do_associate(&mut forest, root);
+        do_associate(&mut random, &mut forest, root);
         println!("After associate: {}", forest.get_expr_for_node(root));
 
         // Verify new structure: left child is a, right child is (b + c)
@@ -1702,7 +1703,7 @@ mod tests {
 
         // Apply associate again (reverse direction): a + (b + c) -> (a + b) + c
         assert_matches(&forest, root, &rule);
-        do_associate(&mut forest, root);
+        do_associate(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         // Verify we're back to left-associated form: (a + b) + c
@@ -1719,16 +1720,17 @@ mod tests {
     fn test_associate_sub() {
         // Test AssociateSub rule: (a - b) - c ↔ a - (b + c)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::AssociateSub;
 
         // Create inputs: a, b, c
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
-        let c = forest.input("c".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
+        let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a - b) - c
-        let a_minus_b = forest.operator(Operator::Sub, Type::Field, a, Some(b));
-        let root = forest.operator(Operator::Sub, Type::Field, a_minus_b, Some(c));
+        let a_minus_b = forest.operator(&mut random, Operator::Sub, Type::Field, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Sub, Type::Field, a_minus_b, Some(c));
 
         // Verify initial structure: (a - b) - c
         assert_eq!(forest.left(root), Some(a_minus_b));
@@ -1738,7 +1740,7 @@ mod tests {
 
         // Apply associate_sub: (a - b) - c -> a - (b + c)
         assert_matches(&forest, root, &rule);
-        do_associate_sub(&mut forest, root);
+        do_associate_sub(&mut random, &mut forest, root);
         println!("After associate_sub: {}", forest.get_expr_for_node(root));
 
         // Verify new structure: a - (b + c)
@@ -1750,7 +1752,7 @@ mod tests {
 
         // Apply associate_sub again (reverse direction): a - (b + c) -> (a - b) - c
         assert_matches(&forest, root, &rule);
-        do_associate_sub(&mut forest, root);
+        do_associate_sub(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         // Verify we're back to (a - b) - c form
@@ -1765,12 +1767,13 @@ mod tests {
     fn test_swap_operands() {
         // Test SwapOperands rule: (a + b) ↔ (b + a)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::SwapOperands { ops: &[Operator::Add] };
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(b));
 
         // Initial: a + b
         assert_eq!(forest.left(root), Some(a));
@@ -1798,15 +1801,16 @@ mod tests {
     fn test_associate_div() {
         // Test AssociateDiv rule: ((a / b) * c) ↔ (a * (c / b))
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::AssociateDiv;
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
-        let c = forest.input("c".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
+        let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a / b) * c
-        let a_div_b = forest.operator(Operator::Div, Type::Field, a, Some(b));
-        let root = forest.operator(Operator::Mul, Type::Field, a_div_b, Some(c));
+        let a_div_b = forest.operator(&mut random, Operator::Div, Type::Field, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a_div_b, Some(c));
 
         // Verify initial: (a / b) * c
         assert_eq!(forest.left(root), Some(a_div_b));
@@ -1815,7 +1819,7 @@ mod tests {
 
         // Apply: (a / b) * c -> a * (c / b)
         assert_matches(&forest, root, &rule);
-        do_associate_div(&mut forest, root);
+        do_associate_div(&mut random, &mut forest, root);
         println!("After associate_div: {}", forest.get_expr_for_node(root));
 
         // Verify: a * (c / b)
@@ -1827,7 +1831,7 @@ mod tests {
 
         // Reverse: a * (c / b) -> (a / b) * c
         assert_matches(&forest, root, &rule);
-        do_associate_div(&mut forest, root);
+        do_associate_div(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         let new_left = forest.left(root).unwrap();
@@ -1841,15 +1845,16 @@ mod tests {
     fn test_distribute() {
         // Test Distribute rule: ((a + b) * c) ↔ ((a * c) + (b * c))
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Distribute { outer: Operator::Mul, inner: Operator::Add };
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
-        let c = forest.input("c".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
+        let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a + b) * c
-        let a_plus_b = forest.operator(Operator::Add, Type::Field, a, Some(b));
-        let root = forest.operator(Operator::Mul, Type::Field, a_plus_b, Some(c));
+        let a_plus_b = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a_plus_b, Some(c));
 
         // Verify initial: (a + b) * c
         assert_eq!(op_of(&forest, root), Some(Operator::Mul));
@@ -1858,7 +1863,7 @@ mod tests {
 
         // Apply distribute: (a + b) * c -> (a * c) + (b * c)
         assert_matches(&forest, root, &rule);
-        do_distribute(&mut forest, root, Operator::Mul, Operator::Add);
+        do_distribute(&mut random, &mut forest, root, Operator::Mul, Operator::Add);
         println!("After distribute: {}", forest.get_expr_for_node(root));
 
         // Verify: (a * c) + (b * c)
@@ -1880,16 +1885,17 @@ mod tests {
     fn test_identity_add() {
         // Test Identity rule for Add: (a + 0) ↔ a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Identity { op: Operator::Add, identity_right: true };
 
-        let a = forest.input("a".into(), Type::Field);
-        let zero = forest.literal("0Field".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let zero = forest.literal(&mut random, "0Field".into(), Type::Field);
 
         // Build a + 0
-        let root = forest.operator(Operator::Add, Type::Field, a, Some(zero));
+        let root = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(zero));
 
         // Add an incoming edge so redirect works
-        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
 
         // Verify initial: a + 0
         assert_eq!(forest.left(root), Some(a));
@@ -1898,7 +1904,7 @@ mod tests {
 
         // Apply identity: a + 0 -> a (redirects var to point to a)
         assert_matches(&forest, root, &rule);
-        do_identity(&mut forest, root, Operator::Add, true);
+        do_identity(&mut random, &mut forest, root, Operator::Add, true);
         println!("After identity: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         // The variable should now point to a
@@ -1909,18 +1915,19 @@ mod tests {
     fn test_identity_mul() {
         // Test Identity rule for Mul: (a * 1) ↔ a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Identity { op: Operator::Mul, identity_right: true };
 
-        let a = forest.input("a".into(), Type::Field);
-        let one = forest.literal("1Field".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let one = forest.literal(&mut random, "1Field".into(), Type::Field);
 
-        let root = forest.operator(Operator::Mul, Type::Field, a, Some(one));
-        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a, Some(one));
+        let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply identity: a * 1 -> a
         assert_matches(&forest, root, &rule);
-        do_identity(&mut forest, root, Operator::Mul, true);
+        do_identity(&mut random, &mut forest, root, Operator::Mul, true);
         println!("After identity: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -1930,17 +1937,18 @@ mod tests {
     fn test_self_inverse_sub() {
         // Test SelfInverse rule for Sub: (a - a) -> 0
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::SelfInverse { op: Operator::Sub };
 
-        let a = forest.input("a".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
 
-        let root = forest.operator(Operator::Sub, Type::Field, a, Some(a));
-        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        let root = forest.operator(&mut random, Operator::Sub, Type::Field, a, Some(a));
+        let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a - a -> 0
         assert_matches(&forest, root, &rule);
-        do_self_inverse(&mut forest, root, Operator::Sub);
+        do_self_inverse(&mut random, &mut forest, root, Operator::Sub);
 
         // var should now point to a zero literal
         let new_target = forest.left(var).unwrap();
@@ -1952,17 +1960,20 @@ mod tests {
     fn test_self_inverse_xor() {
         // Test SelfInverse rule for Xor: (a ^ a) -> 0
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::SelfInverse { op: Operator::Xor };
 
-        let a = forest.input("a".into(), Type::Integer(Integer { bits: 32, signed: false }));
+        let a = forest.input(&mut random, "a".into(), Type::Integer(Integer { bits: 32, signed: false }));
 
         let root = forest.operator(
+            &mut random,
             Operator::Xor,
             Type::Integer(Integer { bits: 32, signed: false }),
             a,
             Some(a),
         );
         let var = forest.variable(
+            &mut random,
             "v".into(),
             Type::Integer(Integer { bits: 32, signed: false }),
             false,
@@ -1972,7 +1983,7 @@ mod tests {
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         assert_matches(&forest, root, &rule);
-        do_self_inverse(&mut forest, root, Operator::Xor);
+        do_self_inverse(&mut random, &mut forest, root, Operator::Xor);
 
         let new_target = forest.left(var).unwrap();
         println!("After self_inverse: {}", forest.get_expr_for_node(new_target));
@@ -1983,15 +1994,16 @@ mod tests {
     fn test_idempotent_and() {
         // Test Idempotent rule for And: (a & a) ↔ a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
-        let root = forest.operator(Operator::And, Type::Boolean, a, Some(a));
-        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        let root = forest.operator(&mut random, Operator::And, Type::Boolean, a, Some(a));
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a & a -> a
-        do_idempotent(&mut forest, root, Operator::And);
+        do_idempotent(&mut random, &mut forest, root, Operator::And);
         println!("After idempotent: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -2001,15 +2013,16 @@ mod tests {
     fn test_idempotent_or() {
         // Test Idempotent rule for Or: (a | a) ↔ a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
-        let root = forest.operator(Operator::Or, Type::Boolean, a, Some(a));
-        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        let root = forest.operator(&mut random, Operator::Or, Type::Boolean, a, Some(a));
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a | a -> a
-        do_idempotent(&mut forest, root, Operator::Or);
+        do_idempotent(&mut random, &mut forest, root, Operator::Or);
         println!("After idempotent: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -2019,17 +2032,18 @@ mod tests {
     fn test_double_unary_neg() {
         // Test DoubleUnary rule for Neg: --a ↔ a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
 
         // Build --a
-        let neg_a = forest.operator(Operator::Neg, Type::Field, a, None);
-        let neg_neg_a = forest.operator(Operator::Neg, Type::Field, neg_a, None);
-        let var = forest.variable("v".into(), Type::Field, false, false, neg_neg_a);
+        let neg_a = forest.operator(&mut random, Operator::Neg, Type::Field, a, None);
+        let neg_neg_a = forest.operator(&mut random, Operator::Neg, Type::Field, neg_a, None);
+        let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, neg_neg_a);
         println!("Initial: {}", forest.get_expr_for_node(neg_neg_a));
 
         // Apply: --a -> a
-        do_double_unary(&mut forest, neg_neg_a, Operator::Neg);
+        do_double_unary(&mut random, &mut forest, neg_neg_a, Operator::Neg);
         println!("After double_unary: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -2039,16 +2053,17 @@ mod tests {
     fn test_double_unary_not() {
         // Test DoubleUnary rule for Not: !!a ↔ a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
-        let not_a = forest.operator(Operator::Not, Type::Boolean, a, None);
-        let not_not_a = forest.operator(Operator::Not, Type::Boolean, not_a, None);
-        let var = forest.variable("v".into(), Type::Boolean, false, false, not_not_a);
+        let not_a = forest.operator(&mut random, Operator::Not, Type::Boolean, a, None);
+        let not_not_a = forest.operator(&mut random, Operator::Not, Type::Boolean, not_a, None);
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, not_not_a);
         println!("Initial: {}", forest.get_expr_for_node(not_not_a));
 
         // Apply: !!a -> a
-        do_double_unary(&mut forest, not_not_a, Operator::Not);
+        do_double_unary(&mut random, &mut forest, not_not_a, Operator::Not);
         println!("After double_unary: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -2058,16 +2073,17 @@ mod tests {
     fn test_add_neg_sub() {
         // Test AddNegSub rule: (a - b) ↔ (a + (-b))
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
 
         // Build a - b
-        let root = forest.operator(Operator::Sub, Type::Field, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Sub, Type::Field, a, Some(b));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a - b -> a + (-b)
-        do_add_neg_sub(&mut forest, root);
+        do_add_neg_sub(&mut random, &mut forest, root);
         println!("After add_neg_sub: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Add));
@@ -2077,7 +2093,7 @@ mod tests {
         assert_eq!(forest.left(neg_b), Some(b));
 
         // Reverse: a + (-b) -> a - b
-        do_add_neg_sub(&mut forest, root);
+        do_add_neg_sub(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Sub));
@@ -2089,15 +2105,16 @@ mod tests {
     fn test_neg_zero_sub() {
         // Test NegZeroSub rule: (-a) ↔ (0 - a)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
 
         // Build -a
-        let root = forest.operator(Operator::Neg, Type::Field, a, None);
+        let root = forest.operator(&mut random, Operator::Neg, Type::Field, a, None);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: -a -> 0 - a
-        do_neg_zero_sub(&mut forest, root);
+        do_neg_zero_sub(&mut random, &mut forest, root);
         println!("After neg_zero_sub: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Sub));
@@ -2105,7 +2122,7 @@ mod tests {
         assert_eq!(forest.right(root), Some(a));
 
         // Reverse: 0 - a -> -a
-        do_neg_zero_sub(&mut forest, root);
+        do_neg_zero_sub(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Neg));
@@ -2117,11 +2134,12 @@ mod tests {
     fn test_flip_comparison() {
         // Test FlipComparison rule: (a < b) ↔ (b > a)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(Operator::Less, Type::Boolean, a, Some(b));
+        let root = forest.operator(&mut random, Operator::Less, Type::Boolean, a, Some(b));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a < b -> b > a
@@ -2145,17 +2163,18 @@ mod tests {
     fn test_negate_comparison() {
         // Test NegateComparison rule: (a < b) ↔ !(a >= b)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(Operator::Less, Type::Boolean, a, Some(b));
-        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        let root = forest.operator(&mut random, Operator::Less, Type::Boolean, a, Some(b));
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a < b -> !(a >= b)
         let empty_conditions = HashSet::new();
-        do_negate_comparison(&mut forest, root, &empty_conditions);
+        do_negate_comparison(&mut random, &mut forest, root, &empty_conditions);
 
         // root is now a >= b, and var points to a Not node
         assert_eq!(op_of(&forest, root), Some(Operator::GreaterOrEqual));
@@ -2165,7 +2184,7 @@ mod tests {
         println!("After negate_comparison: {}", forest.get_expr_for_node(not_node));
 
         // Reverse: !(a >= b) -> a < b
-        do_negate_comparison(&mut forest, not_node, &empty_conditions);
+        do_negate_comparison(&mut random, &mut forest, not_node, &empty_conditions);
         println!("After reverse: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Less));
@@ -2175,18 +2194,19 @@ mod tests {
     fn test_expand_comparison() {
         // Test ExpandComparison rule: (a <= b) ↔ ((a < b) | (a == b))
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::ExpandComparison;
 
-        let a = forest.input("a".into(), Type::Field);
-        let b = forest.input("b".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(Operator::LessOrEqual, Type::Boolean, a, Some(b));
-        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        let root = forest.operator(&mut random, Operator::LessOrEqual, Type::Boolean, a, Some(b));
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a <= b -> (a < b) | (a == b)
         assert_matches(&forest, root, &rule);
-        do_expand_comparison(&mut forest, root);
+        do_expand_comparison(&mut random, &mut forest, root);
 
         // var should now point to the new Or node
         let or_node = forest.left(var).unwrap();
@@ -2200,7 +2220,7 @@ mod tests {
 
         // Reverse: (a < b) | (a == b) -> a <= b
         assert_matches(&forest, or_node, &rule);
-        do_expand_comparison(&mut forest, or_node);
+        do_expand_comparison(&mut random, &mut forest, or_node);
 
         let leq_node = forest.left(var).unwrap();
         println!("After reverse: {}", forest.get_expr_for_node(leq_node));
@@ -2211,20 +2231,21 @@ mod tests {
     fn test_demorgan_and() {
         // Test DeMorgan rule: !(a & b) ↔ (!a | !b)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::DeMorgan;
 
-        let a = forest.input("a".into(), Type::Boolean);
-        let b = forest.input("b".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
+        let b = forest.input(&mut random, "b".into(), Type::Boolean);
 
         // Build !(a & b)
-        let a_and_b = forest.operator(Operator::And, Type::Boolean, a, Some(b));
-        let not_and = forest.operator(Operator::Not, Type::Boolean, a_and_b, None);
-        let var = forest.variable("v".into(), Type::Boolean, false, false, not_and);
+        let a_and_b = forest.operator(&mut random, Operator::And, Type::Boolean, a, Some(b));
+        let not_and = forest.operator(&mut random, Operator::Not, Type::Boolean, a_and_b, None);
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, not_and);
         println!("Initial: {}", forest.get_expr_for_node(not_and));
 
         // Apply: !(a & b) -> (!a | !b)
         assert_matches(&forest, not_and, &rule);
-        do_demorgan(&mut forest, not_and);
+        do_demorgan(&mut random, &mut forest, not_and);
 
         let or_node = forest.left(var).unwrap();
         assert_eq!(op_of(&forest, or_node), Some(Operator::Or));
@@ -2239,7 +2260,7 @@ mod tests {
 
         // Reverse: (!a | !b) -> !(a & b)
         assert_matches(&forest, or_node, &rule);
-        do_demorgan(&mut forest, or_node);
+        do_demorgan(&mut random, &mut forest, or_node);
 
         let not_and_new = forest.left(var).unwrap();
         assert_eq!(op_of(&forest, not_and_new), Some(Operator::Not));
@@ -2252,17 +2273,18 @@ mod tests {
     fn test_complement_xor() {
         // Test ComplementXor rule: !a ↔ (a ^ true)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::ComplementXor;
 
-        let a = forest.input("a".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
         // Build !a
-        let not_a = forest.operator(Operator::Not, Type::Boolean, a, None);
+        let not_a = forest.operator(&mut random, Operator::Not, Type::Boolean, a, None);
         println!("Initial: {}", forest.get_expr_for_node(not_a));
 
         // Apply: !a -> a ^ true
         assert_matches(&forest, not_a, &rule);
-        do_complement_xor(&mut forest, not_a);
+        do_complement_xor(&mut random, &mut forest, not_a);
         println!("After complement_xor: {}", forest.get_expr_for_node(not_a));
 
         assert_eq!(op_of(&forest, not_a), Some(Operator::Xor));
@@ -2271,7 +2293,7 @@ mod tests {
 
         // Reverse: a ^ true -> !a
         assert_matches(&forest, not_a, &rule);
-        do_complement_xor(&mut forest, not_a);
+        do_complement_xor(&mut random, &mut forest, not_a);
         println!("After reverse: {}", forest.get_expr_for_node(not_a));
 
         assert_eq!(op_of(&forest, not_a), Some(Operator::Not));
@@ -2283,18 +2305,19 @@ mod tests {
     fn test_xor_to_and_or() {
         // Test XorToAndOr rule: (a ^ b) ↔ ((!a & b) | (a & !b))
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::XorToAndOr;
 
-        let a = forest.input("a".into(), Type::Boolean);
-        let b = forest.input("b".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
+        let b = forest.input(&mut random, "b".into(), Type::Boolean);
 
-        let xor = forest.operator(Operator::Xor, Type::Boolean, a, Some(b));
-        let var = forest.variable("v".into(), Type::Boolean, false, false, xor);
+        let xor = forest.operator(&mut random, Operator::Xor, Type::Boolean, a, Some(b));
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, xor);
         println!("Initial: {}", forest.get_expr_for_node(xor));
 
         // Apply: a ^ b -> (!a & b) | (a & !b)
         assert_matches(&forest, xor, &rule);
-        do_xor_to_and_or(&mut forest, xor);
+        do_xor_to_and_or(&mut random, &mut forest, xor);
 
         let or_node = forest.left(var).unwrap();
         assert_eq!(op_of(&forest, or_node), Some(Operator::Or));
@@ -2307,7 +2330,7 @@ mod tests {
 
         // Reverse: (!a & b) | (a & !b) -> a ^ b
         assert_matches(&forest, or_node, &rule);
-        do_xor_to_and_or(&mut forest, or_node);
+        do_xor_to_and_or(&mut random, &mut forest, or_node);
 
         let new_xor = forest.left(var).unwrap();
         println!("After reverse: {}", forest.get_expr_for_node(new_xor));
@@ -2318,18 +2341,21 @@ mod tests {
     fn test_mod_one() {
         // Test ModOne rule: (a % 1) -> 0
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::ModOne;
 
-        let a = forest.input("a".into(), Type::Integer(Integer { bits: 32, signed: false }));
-        let one = forest.literal("1u32".into(), Type::Integer(Integer { bits: 32, signed: false }));
+        let a = forest.input(&mut random, "a".into(), Type::Integer(Integer { bits: 32, signed: false }));
+        let one = forest.literal(&mut random, "1u32".into(), Type::Integer(Integer { bits: 32, signed: false }));
 
         let root = forest.operator(
+            &mut random,
             Operator::Mod,
             Type::Integer(Integer { bits: 32, signed: false }),
             a,
             Some(one),
         );
         let var = forest.variable(
+            &mut random,
             "v".into(),
             Type::Integer(Integer { bits: 32, signed: false }),
             false,
@@ -2340,7 +2366,7 @@ mod tests {
 
         // Apply: a % 1 -> 0
         assert_matches(&forest, root, &rule);
-        do_mod_one(&mut forest, root);
+        do_mod_one(&mut random, &mut forest, root);
 
         let result = forest.left(var).unwrap();
         println!("After mod_one: {}", forest.get_expr_for_node(result));
@@ -2351,18 +2377,19 @@ mod tests {
     fn test_and_to_mod() {
         // Test AndToMod rule: (a & 1) ↔ (a % 2)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::AndToMod;
         let ty = Type::Integer(Integer { bits: 32, signed: false });
 
-        let a = forest.input("a".into(), ty.clone());
-        let one = forest.literal("1u32".into(), ty.clone());
+        let a = forest.input(&mut random, "a".into(), ty.clone());
+        let one = forest.literal(&mut random, "1u32".into(), ty.clone());
 
-        let root = forest.operator(Operator::And, ty.clone(), a, Some(one));
+        let root = forest.operator(&mut random, Operator::And, ty.clone(), a, Some(one));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a & 1 -> a % 2
         assert_matches(&forest, root, &rule);
-        do_and_to_mod(&mut forest, root);
+        do_and_to_mod(&mut random, &mut forest, root);
         println!("After and_to_mod: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Mod));
@@ -2371,7 +2398,7 @@ mod tests {
 
         // Reverse: a % 2 -> a & 1
         assert_matches(&forest, root, &rule);
-        do_and_to_mod(&mut forest, root);
+        do_and_to_mod(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::And));
@@ -2383,14 +2410,15 @@ mod tests {
     fn test_shift_zero() {
         // Test ShiftZero rule: (a << 0) -> a
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::ShiftZero;
         let ty = Type::Integer(Integer { bits: 32, signed: false });
 
-        let a = forest.input("a".into(), ty.clone());
-        let zero = forest.literal("0u32".into(), ty.clone());
+        let a = forest.input(&mut random, "a".into(), ty.clone());
+        let zero = forest.literal(&mut random, "0u32".into(), ty.clone());
 
-        let root = forest.operator(Operator::Shl, ty.clone(), a, Some(zero));
-        let var = forest.variable("v".into(), ty.clone(), false, false, root);
+        let root = forest.operator(&mut random, Operator::Shl, ty.clone(), a, Some(zero));
+        let var = forest.variable(&mut random, "v".into(), ty.clone(), false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a << 0 -> a
@@ -2405,16 +2433,17 @@ mod tests {
     fn test_double_mul_two() {
         // Test DoubleMulTwo rule: (a + a) ↔ (a * 2)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::DoubleMulTwo;
 
-        let a = forest.input("a".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
 
-        let root = forest.operator(Operator::Add, Type::Field, a, Some(a));
+        let root = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(a));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a + a -> a * 2
         assert_matches(&forest, root, &rule);
-        do_double_mul_two(&mut forest, root);
+        do_double_mul_two(&mut random, &mut forest, root);
         println!("After double_mul_two: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Mul));
@@ -2423,7 +2452,7 @@ mod tests {
 
         // Reverse: a * 2 -> a + a
         assert_matches(&forest, root, &rule);
-        do_double_mul_two(&mut forest, root);
+        do_double_mul_two(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Add));
@@ -2435,17 +2464,18 @@ mod tests {
     fn test_mul_neg_one_neg() {
         // Test MulNegOneNeg rule: (a * -1) ↔ (-a)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::MulNegOneNeg;
 
-        let a = forest.input("a".into(), Type::Field);
-        let neg_one = forest.literal("-1Field".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let neg_one = forest.literal(&mut random, "-1Field".into(), Type::Field);
 
-        let root = forest.operator(Operator::Mul, Type::Field, a, Some(neg_one));
+        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a, Some(neg_one));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a * -1 -> -a
         assert_matches(&forest, root, &rule);
-        do_mul_neg_one_neg(&mut forest, root);
+        do_mul_neg_one_neg(&mut random, &mut forest, root);
         println!("After mul_neg_one_neg: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Neg));
@@ -2454,7 +2484,7 @@ mod tests {
 
         // Reverse: -a -> a * -1
         assert_matches(&forest, root, &rule);
-        do_mul_neg_one_neg(&mut forest, root);
+        do_mul_neg_one_neg(&mut random, &mut forest, root);
         println!("After reverse: {}", forest.get_expr_for_node(root));
 
         assert_eq!(op_of(&forest, root), Some(Operator::Mul));
@@ -2466,18 +2496,19 @@ mod tests {
     fn test_absorb_mul() {
         // Test Absorb rule for Mul: (a * 0) -> 0
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Absorb { op: Operator::Mul };
 
-        let a = forest.input("a".into(), Type::Field);
-        let zero = forest.literal("0Field".into(), Type::Field);
+        let a = forest.input(&mut random, "a".into(), Type::Field);
+        let zero = forest.literal(&mut random, "0Field".into(), Type::Field);
 
-        let root = forest.operator(Operator::Mul, Type::Field, a, Some(zero));
-        let var = forest.variable("v".into(), Type::Field, false, false, root);
+        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a, Some(zero));
+        let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a * 0 -> 0
         assert_matches(&forest, root, &rule);
-        do_absorb(&mut forest, root, Operator::Mul);
+        do_absorb(&mut random, &mut forest, root, Operator::Mul);
 
         let result = forest.left(var).unwrap();
         println!("After absorb: {}", forest.get_expr_for_node(result));
@@ -2488,18 +2519,19 @@ mod tests {
     fn test_absorb_and() {
         // Test Absorb rule for And: (a & 0) -> 0 (for booleans: a & false -> false)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Absorb { op: Operator::And };
 
-        let a = forest.input("a".into(), Type::Boolean);
-        let false_lit = forest.literal("false".into(), Type::Boolean);
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
+        let false_lit = forest.literal(&mut random, "false".into(), Type::Boolean);
 
-        let root = forest.operator(Operator::And, Type::Boolean, a, Some(false_lit));
-        let var = forest.variable("v".into(), Type::Boolean, false, false, root);
+        let root = forest.operator(&mut random, Operator::And, Type::Boolean, a, Some(false_lit));
+        let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a & false -> false
         assert_matches(&forest, root, &rule);
-        do_absorb(&mut forest, root, Operator::And);
+        do_absorb(&mut random, &mut forest, root, Operator::And);
 
         let result = forest.left(var).unwrap();
         println!("After absorb: {}", forest.get_expr_for_node(result));
@@ -2511,16 +2543,17 @@ mod tests {
         // Test that Identity rule for Sub does NOT match boolean operands
         // This prevents invalid transformations like (bool_expr - false)
         let mut forest = Forest::default();
+        let mut random = rand::rng();
         let rule = RuleKind::Identity { op: Operator::Sub, identity_right: true };
 
         // Create a boolean XOR expression
-        let a = forest.input("a".into(), Type::Boolean);
-        let b = forest.literal("true".into(), Type::Boolean);
-        let xor_expr = forest.operator(Operator::Xor, Type::Boolean, a, Some(b));
+        let a = forest.input(&mut random, "a".into(), Type::Boolean);
+        let b = forest.literal(&mut random, "true".into(), Type::Boolean);
+        let xor_expr = forest.operator(&mut random, Operator::Xor, Type::Boolean, a, Some(b));
 
         // Create Sub expression with boolean operands: xor_expr - false
-        let false_lit = forest.literal("false".into(), Type::Boolean);
-        let sub_expr = forest.operator(Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
+        let false_lit = forest.literal(&mut random, "false".into(), Type::Boolean);
+        let sub_expr = forest.operator(&mut random, Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
 
         // The Identity rule should NOT match this because Sub is not valid for booleans
         let op = op_of(&forest, sub_expr);

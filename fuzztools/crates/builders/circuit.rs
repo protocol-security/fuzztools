@@ -3,7 +3,6 @@
 use crate::circuits::{
     ast::{
         forest::Forest,
-        nodes::NodeKind,
         types::{Struct, Type, TypeKind},
     },
     context::Context,
@@ -22,12 +21,10 @@ impl CircuitBuilder {
         let mut forest = Forest::default();
 
         for (name, ty, _) in &scope.inputs {
-            let idx = forest.input(name.clone(), ty.clone());
-            forest.register(random, idx, NodeKind::Input, ty, None);
+            forest.input(random, name.clone(), ty.clone());
         }
         for (name, ty, _) in &scope.globals {
-            let idx = forest.input(name.clone(), ty.clone());
-            forest.register(random, idx, NodeKind::Input, ty, None);
+            forest.input(random, name.clone(), ty.clone());
         }
 
         // If main has a return type, boost its weight so that the odds of creating a more "linked"
