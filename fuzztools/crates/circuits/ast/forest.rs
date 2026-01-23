@@ -456,7 +456,7 @@ impl Forest {
                 .get(ret)
                 .into_iter()
                 .flatten()
-                .filter(|&&i| matches!(self.graph[i], Node::Variable { .. } | Node::Input { .. })) // @todo comor, pq no una expresión normal?, quizás una leaf¿?
+                .filter(|&&i| matches!(self.graph[i], Node::Variable { .. } | Node::Input { .. }))
                 .choose(random)
                 .map(|&i| self.get_expr_for_node(i))
                 .unwrap_or_else(|| ret.random_value(random, ctx, scope, true));

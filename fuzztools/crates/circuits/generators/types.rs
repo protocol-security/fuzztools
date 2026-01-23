@@ -232,8 +232,8 @@ impl Type {
 
                 let start = slots.len();
 
-                // Reserve slots for the parameter types and the return type @todo all lambdas are
-                // guaranteed to this? coverage?
+                // Reserve slots for the parameter types and the return type 
+                // @todo all lambdas are guaranteed to this? coverage?
                 slots.resize(start + count + 1, None);
                 let inners: Vec<_> = (start..start + count).collect();
                 let ret = start + count;

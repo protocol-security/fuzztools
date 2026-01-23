@@ -17,8 +17,6 @@ members = [
 resolver = "2"
 
 [workspace.lints]
-# @todo rust.missing_debug_implementations = "warn"
-# @todo rust.missing_docs = "warn"
 rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rust.rust_2024_incompatible_pat = "warn"
 rust.unreachable_pub = "warn"

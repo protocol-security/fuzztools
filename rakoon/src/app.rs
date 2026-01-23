@@ -144,6 +144,12 @@ impl App {
                 last_update = Instant::now();
             }
 
+            if self.fuzzing {
+                for tx in &mut txs {
+                    tx.mutate(random);
+                }
+            }
+
             let signer = &self.signer;
             let auth_signer = &self.auth_signer;
             let signed: Vec<String> = txs
@@ -155,10 +161,7 @@ impl App {
             let _ = tx_sender.send(signed);
 
             for tx in &mut txs {
-                let reset = if self.fuzzing { tx.mutate(random) } else { true };
-                if reset {
-                    *tx = self.build_tx(random)?;
-                }
+                *tx = self.build_tx(random)?;
             }
         }
     }

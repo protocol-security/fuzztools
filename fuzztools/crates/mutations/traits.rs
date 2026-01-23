@@ -11,7 +11,7 @@ pub trait Mutable {
 
 pub trait Random {
     /// - If this is a basic type, returns a random intance of itself.
-    /// - If it is a struct, calls `random` on each of its fields. @todo same macro as Mutable??
+    /// - If it is a struct, calls `random` on each of its fields.
     fn random(random: &mut impl Rng) -> Self;
 }
 

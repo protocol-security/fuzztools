@@ -58,7 +58,7 @@ impl Rewriter {
         ctx: &Context,
         scope: &Scope,
     ) -> Option<String> {
-        // Collect nodes that are If/Assert conditions (these can't be redirected safely) @todo
+        // Collect nodes that are If/Assert conditions (these can't be redirected safely)
         let condition_nodes = collect_condition_nodes(forest);
 
         // Collect all nodes that match a rule
@@ -134,8 +134,6 @@ impl Rewriter {
                     &condition_nodes,
                 );
                 return Some(selected_rule.name());
-            } else {
-                return None;
             }
         }
 

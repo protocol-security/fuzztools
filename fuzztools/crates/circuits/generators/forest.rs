@@ -786,10 +786,8 @@ impl Forest {
         }
 
         let assign_idx = self.assignment(source_idx, value_idx, compound_op);
-        self.register(random, assign_idx, NodeKind::Assignment, &source_ty, None); // @todo should
-                                                                                   // this be compound_op
-                                                                                   // instead of
-                                                                                   // None?
+        self.register(random, assign_idx, NodeKind::Assignment, &source_ty, None); 
+        // @todo should this be `compound_op` instead of `None`?
     }
 
     #[inline(always)]

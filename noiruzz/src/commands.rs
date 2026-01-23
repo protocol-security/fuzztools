@@ -18,8 +18,6 @@ const EXPECTED_EXECUTION_ERRORS: &[&str] = &[
     "error: Assertion failed: attempt to add with overflow",
     "error: Assertion failed: attempt to multiply with overflow",
     "error: Assertion failed: attempt to bit-shift with overflow",
-    "error: Assertion failed: assertion failed", // @todo is this correct?
-    "error: Failed constraint",                  // @todo is this correct?
 ];
 
 #[inline(always)]
