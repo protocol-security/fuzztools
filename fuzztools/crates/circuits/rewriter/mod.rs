@@ -1568,34 +1568,49 @@ mod tests {
 
     /// Find common prefix length between two strings
     fn common_prefix_len(a: &str, b: &str) -> usize {
-        a.chars().zip(b.chars()).take_while(|(ca, cb)| ca == cb).count()
-    }
-
-    /// Find common suffix length between two strings (after prefix)
-    fn common_suffix_len(a: &str, b: &str, prefix_len: usize) -> usize {
-        let a_remaining: Vec<char> = a.chars().skip(prefix_len).collect();
-        let b_remaining: Vec<char> = b.chars().skip(prefix_len).collect();
-        a_remaining
-            .iter()
-            .rev()
-            .zip(b_remaining.iter().rev())
+        a.chars()
+            .zip(b.chars())
             .take_while(|(ca, cb)| ca == cb)
             .count()
     }
 
+    /// Find common suffix length between two strings
+    fn common_suffix_len(a: &str, b: &str) -> usize {
+        a.chars()
+            .rev()
+            .zip(b.chars().rev())
+            .take_while(|(ca, cb)| ca == cb)
+            .count()
+    }
+
+    /// Highlight the different parts of a line compared to another line
     fn highlight_diff(line: &str, other: &str, color: &str) -> String {
+        // Handle empty cases
+        if line.is_empty() {
+            return String::new();
+        }
+        if other.is_empty() {
+            return format!("{color}{line}{RESET}");
+        }
+
         let prefix_len = common_prefix_len(line, other);
-        let suffix_len = common_suffix_len(line, other, prefix_len);
+        let suffix_len = common_suffix_len(line, other);
 
         let line_chars: Vec<char> = line.chars().collect();
-        let diff_end = line_chars.len().saturating_sub(suffix_len);
+        let line_len = line_chars.len();
 
-        if prefix_len >= diff_end {
+        // Ensure suffix doesn't overlap with prefix
+        let effective_suffix_len = suffix_len.min(line_len.saturating_sub(prefix_len));
+        let diff_start = prefix_len;
+        let diff_end = line_len.saturating_sub(effective_suffix_len);
+
+        // If there's no difference, return the line as-is
+        if diff_start >= diff_end {
             return line.to_string();
         }
 
-        let prefix: String = line_chars[..prefix_len].iter().collect();
-        let diff: String = line_chars[prefix_len..diff_end].iter().collect();
+        let prefix: String = line_chars[..diff_start].iter().collect();
+        let diff: String = line_chars[diff_start..diff_end].iter().collect();
         let suffix: String = line_chars[diff_end..].iter().collect();
 
         format!("{prefix}{color}{diff}{RESET}{suffix}")
@@ -1616,8 +1631,10 @@ mod tests {
             let after_line = after_lines.get(i).copied().unwrap_or("");
 
             if before_line == after_line {
+                // Lines are identical, print without modification
                 println!("  {before_line}");
             } else {
+                // Lines differ - highlight only the different parts
                 if !before_line.is_empty() {
                     let highlighted = highlight_diff(before_line, after_line, RED);
                     println!("- {highlighted}");
