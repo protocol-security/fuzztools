@@ -71,7 +71,7 @@ geth --dev \
 use the next command to run `rakoon`:
 
 ```sh
-cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xb71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291
+cargo run --release --package rakoon -- --key 0xb71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291
 ```
 
 and for a local reth instance with the `--dev` flag:
@@ -87,7 +87,7 @@ and for a local reth instance with the `--dev` flag:
 use the next command to run `rakoon`:
 
 ```sh
-cargo run --release --package rakoon -- --tx-type eip7702 --seed 123 --url http://127.0.0.1:8545 --fuzzing --key 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97
+cargo run --release --package rakoon -- --key 0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97
 ```
 
 To see more flags, run:
@@ -101,15 +101,16 @@ with output:
 ```sh
 Transaction Fuzzer for the Ethereum Protocol
 
-Usage: rakoon [OPTIONS] --tx-type <TX_TYPE> --key <KEY>
+Usage: rakoon [OPTIONS] --key <KEY>
 
 Options:
-      --tx-type <TX_TYPE>  Transaction type to fuzz (legacy, eip2930, eip1559, eip7702)
-      --key <KEY>          Private key for signing transactions
-      --seed <SEED>        Seed for the random generator [default: 0]
-      --url <URL>          URL to send transactions to [default: http://127.0.0.1:8545]
-      --fuzzing            Wether to mutate txs or not before sending them
-      --sleep <SLEEP>      Time to wait between tx batches (in ms) [default: 0]
-      --config <CONFIG>    Path to the config file [default: ./configs/rakoon.json]
-  -h, --help               Print help
+      --tx-type <TX_TYPE>              Transaction type to fuzz (legacy, eip2930, eip1559, eip7702) [default: eip7702]
+      --key <KEY>                      Private key for signing transactions
+      --seed <SEED>                    Seed for the random generator [default: 0]
+      --url <URL>                      URL to send transactions to [default: http://127.0.0.1:8545]
+      --fuzzing                        Wether to mutate txs or not before sending them
+      --poll-interval <POLL_INTERVAL>  Poll interval to query gas prices (in seconds) [default: 2]
+      --workers <WORKERS>              Number of concurrent RPC batches [default: 50]
+      --batch-size <BATCH_SIZE>        Number of txs per batch [default: 100]
+  -h, --help                           Print help
 ```

@@ -19,8 +19,7 @@ impl RpcClient {
         Self { inner, url }
     }
 
-    #[inline(always)]
-    pub fn payload(&self) -> Payload<'_> {
+    pub const fn payload(&self) -> Payload<'_> {
         Payload { client: self, calls: Vec::new() }
     }
 

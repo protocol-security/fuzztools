@@ -41,6 +41,8 @@ define_mutation!(VecMutations {
     SetNone,
 });
 
+define_mutation!(SliceMutations { Replace, Swap, Shuffle, Reverse, Mutate, MutateAll, SetNone });
+
 define_mutation!(ArrayMutations {
     ValueSwap,
     ValueMutate,

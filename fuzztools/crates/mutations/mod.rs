@@ -8,6 +8,7 @@ mod array;
 mod bool;
 mod bytes;
 mod constants;
+mod slice;
 mod traits;
 mod uint;
 mod vec;

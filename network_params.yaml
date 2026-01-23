@@ -1,32 +1,32 @@
 participants:
   - cl_type: teku
-    cl_image: consensys/teku:25.9.3
+    cl_image: consensys/teku:25.12.0
     el_type: geth
-    el_image: ethereum/client-go:v1.16.4
+    el_image: ethereum/client-go:v1.16.8
     supernode: true
 
   - cl_type: teku
-    cl_image: consensys/teku:25.9.3
+    cl_image: consensys/teku:25.12.0
     el_type: reth
     el_image: ghcr.io/paradigmxyz/reth:nightly
     supernode: true
 
   - cl_type: teku
-    cl_image: consensys/teku:25.9.3
+    cl_image: consensys/teku:25.12.0
     el_type: nethermind
-    el_image: nethermindeth/nethermind:release-1.34.0
+    el_image: nethermindeth/nethermind:release-1.36.0
     supernode: true
 
   - cl_type: teku
-    cl_image: consensys/teku:25.9.3
+    cl_image: consensys/teku:25.12.0
     el_type: besu
-    el_image: hyperledger/besu:25.9.0
+    el_image: hyperledger/besu:25.12.0
     supernode: true
 
   - cl_type: teku
-    cl_image: consensys/teku:25.9.3
+    cl_image: consensys/teku:25.12.0
     el_type: erigon
-    el_image: erigontech/erigon:v3.2.0-rc1
+    el_image: erigontech/erigon:v3.3.4
   
 network_params:
   fulu_fork_epoch: 1

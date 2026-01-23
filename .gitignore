@@ -11,3 +11,4 @@ Cargo.lock
 /.cursor
 /.idea
 /.claude
+/precompile_target.sol

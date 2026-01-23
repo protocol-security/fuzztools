@@ -43,6 +43,7 @@ impl Random for Bytes {
 
 impl Mutable for Bytes {
     fn mutate(&mut self, random: &mut impl Rng) -> bool {
+        // @todo should use `as_mut()` but seems `DerefMut` is not impl for `alloy_rlp::Bytes`
         let mut vec = self.to_vec();
         let result = vec.mutate(random);
         *self = Bytes::from(vec);

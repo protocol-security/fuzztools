@@ -1,9 +1,11 @@
+use crate::constants::{AUTH_PRIVATE_KEY, GREEN, RED, RESET};
 use alloy::{
     consensus::TxType, eips::eip7702::SignedAuthorization, hex, providers::ProviderBuilder,
     signers::SignerSync,
 };
 use alloy_signer_local::Secp256k1Signer;
 use anyhow::{anyhow, bail, Result};
+use crossbeam::channel::{bounded, Receiver};
 use fuzztools::{
     builders::{contracts::AccessListTarget, TransactionBuilder},
     mutations::Mutable,
@@ -22,11 +24,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Semaphore;
-
-use crate::{
-    constants::{AUTH_PRIVATE_KEY, GREEN, RED, RESET},
-};
-use crossbeam::channel::{bounded, Receiver};
 
 pub(crate) struct App {
     /// Header being displayed on the screen.
@@ -48,7 +45,7 @@ pub(crate) struct App {
     /// Maximum concurrent RPC calls
     workers: usize,
     /// Batch size
-    batch_size: usize
+    batch_size: usize,
 }
 
 impl App {
@@ -60,7 +57,7 @@ impl App {
         fuzzing: bool,
         workers: usize,
         poll_interval: u64,
-        batch_size: usize
+        batch_size: usize,
     ) -> Result<Self> {
         let signer = Secp256k1Signer::from_slice(&hex::decode(&key)?)?;
         let deployer_signer = Secp256k1Signer::from_slice(&hex::decode(key)?)?;
@@ -68,9 +65,8 @@ impl App {
 
         let deployer = ProviderBuilder::new().wallet(deployer_signer).connect(&url).await?;
         let access_list_target = *AccessListTarget::deploy(&deployer).await?.address();
-        // @todo PrecompileTarget
 
-        let client = RpcClient::new(url.to_owned());
+        let client = RpcClient::new(url);
         let [chain_id, gas_price, priority_fee]: [u128; 3] = client
             .payload()
             .add("eth_chainId", None)
@@ -104,7 +100,7 @@ impl App {
             fuzzing,
             workers,
             poll_interval,
-            batch_size
+            batch_size,
         })
     }
 
@@ -148,12 +144,6 @@ impl App {
                 last_update = Instant::now();
             }
 
-            if self.fuzzing {
-                for tx in &mut txs {
-                    tx.mutate(random);
-                }
-            }
-
             let signer = &self.signer;
             let auth_signer = &self.auth_signer;
             let signed: Vec<String> = txs
@@ -165,7 +155,10 @@ impl App {
             let _ = tx_sender.send(signed);
 
             for tx in &mut txs {
-                *tx = self.build_tx(random)?;
+                let reset = if self.fuzzing { tx.mutate(random) } else { true };
+                if reset {
+                    *tx = self.build_tx(random)?;
+                }
             }
         }
     }
@@ -178,7 +171,7 @@ impl App {
     ) {
         let client = self.client.clone();
         let workers = self.workers;
-        
+
         tokio::spawn(async move {
             let semaphore = Arc::new(Semaphore::new(workers));
 
@@ -250,12 +243,7 @@ impl App {
                     .into_iter()
                     .map(|auth| {
                         let sig = auth_signer.sign_hash_sync(&auth.signature_hash()).unwrap();
-                        SignedAuthorization::new_unchecked(
-                            auth.clone(),
-                            sig.v() as u8,
-                            sig.r(),
-                            sig.s(),
-                        )
+                        SignedAuthorization::new_unchecked(auth, sig.v() as u8, sig.r(), sig.s())
                     })
                     .collect(),
             );

@@ -16,7 +16,7 @@ This crate implements many types as well as stuff I will be using in my fuzzers.
 - `TransactionBuilder` - Handles the logic of creating **VALID** transactions per mempool rules.
 - `CircuitBuilder` - Handles the logic of creating **VALID** Noir circuits.
 
-It also contains a set of Solidity contracts to test on-chain, like sending transactions that `selfdestruct` contracts mid-construction and some other stuff.
+It also contains a set of Solidity contracts to test on-chain.
 
 ## Circuits
 
@@ -26,10 +26,11 @@ Implements the Noir IR to generate random circuits. I do follow a different appr
 
 Implements the `Mutable` trait for the next types:
 
-- Alloy's `Address`, `Bytes`, `FixedBytes<N>`, `U256`, `Authorization`, `AccessList`, `Vec<Authorization>` and `Vec<SignedAuthorization>`
-- `[T; N]` and `[u8; N]` arrays
-- `Vec<T>` and `Vec<u8>`
-- `bool`, `u8`, `u16`, `u32`, `u64`, `u128`
+- Alloy's `Address`, `Bytes`, `FixedBytes<N>`, `U256`, `Authorization`, `AccessList`, `Vec<Authorization>` and `Vec<SignedAuthorization>`.
+- `[T; N]` and `[u8; N]` arrays.
+- `&[T]` and `&[u8]` slices.
+- `Vec<T>` and `Vec<u8>`.
+- `bool`, `u8`, `u16`, `u32`, `u64`, `u128`.
 
 ## Rpc
 
