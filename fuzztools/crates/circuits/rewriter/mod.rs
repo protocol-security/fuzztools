@@ -586,9 +586,12 @@ fn matches_rule(
         }
 
         // (a ^ b) -> ((!a & b) | (a & !b))
+        // Exclude cases where an operand is a literal (handled by ComplementXor)
         (RuleKind::XorToAndOr, Some(Xor)) if is_binary => {
             let l = left.unwrap();
-            forest.ty(l).is_bool()
+            let r = right.unwrap();
+            forest.ty(l).is_bool() && !is_one(forest, l) && !is_one(forest, r)
+                && !is_zero(forest, l) && !is_zero(forest, r)
         }
         // ((!a & b) | (a & !b)) -> (a ^ b)
         (RuleKind::XorToAndOr, Some(Or)) if is_binary => {
@@ -1046,7 +1049,7 @@ fn do_absorb(
         if left.is_some_and(|l| is_absorbing(f, l, op, &f.ty(l))) ||
             right.is_some_and(|r| is_absorbing(f, r, op, &f.ty(r)))
         {
-            let ty = f.ty(idx);
+            let ty = ret_of(f, idx);
             let absorb = make_absorbing(random, f, &ty, op);
             f.redirect_edges(idx, absorb);
         }
@@ -1083,7 +1086,7 @@ fn do_self_inverse(
 ) {
     // Simplification: a op a -> identity (0 for Sub/Xor, 1 for Div)
     if op_of(f, idx) == Some(op) && f.left(idx) == f.right(idx) {
-        let ty = f.ty(idx);
+        let ty = ret_of(f, idx);
         let lit = match op {
             Operator::Sub | Operator::Xor => make_zero(random, f, &ty),
             Operator::Div => make_one(random, f, &ty),
@@ -1206,17 +1209,8 @@ fn do_neg_zero_sub(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
             // 0 - x -> -x
             let right = f.right(idx).unwrap();
             set_op(f, idx, Operator::Neg);
-            f.add_operand(idx, 0, right);
+            f.set_child(idx, 0, right);
             f.remove_operand(idx, 1);
-            // Remove old pos 0 (the duplicate edge)
-            if let Some(edge) = f
-                .graph
-                .edges_directed(idx, Direction::Outgoing)
-                .find(|e| *e.weight() == 0 && e.target() != right)
-            {
-                let id = edge.id();
-                f.graph.remove_edge(id);
-            }
         }
         _ => {}
     }
@@ -1337,9 +1331,10 @@ fn do_demorgan(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
             };
 
             let (a, b) = (f.left(inner).unwrap(), f.right(inner).unwrap());
-            let not_a = f.operator(random, Operator::Not, Type::Boolean, a, None);
-            let not_b = f.operator(random, Operator::Not, Type::Boolean, b, None);
-            let new = f.operator(random, dual, Type::Boolean, not_a, Some(not_b));
+            let ty = ret_of(f, inner);
+            let not_a = f.operator(random, Operator::Not, ty.clone(), a, None);
+            let not_b = f.operator(random, Operator::Not, ty.clone(), b, None);
+            let new = f.operator(random, dual, ty, not_a, Some(not_b));
             f.redirect_edges(idx, new);
             return;
         }
@@ -1353,8 +1348,9 @@ fn do_demorgan(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
         {
             let dual = if op == Some(Operator::And) { Operator::Or } else { Operator::And };
             let (a, b) = (f.left(left.unwrap()).unwrap(), f.left(right.unwrap()).unwrap());
-            let inner = f.operator(random, dual, Type::Boolean, a, Some(b));
-            let new = f.operator(random, Operator::Not, Type::Boolean, inner, None);
+            let ty = f.ty(a);
+            let inner = f.operator(random, dual, ty.clone(), a, Some(b));
+            let new = f.operator(random, Operator::Not, ty, inner, None);
             f.redirect_edges(idx, new);
         }
     }
@@ -1364,9 +1360,11 @@ fn do_complement_xor(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
     match op_of(f, idx) {
         // !a -> a ^ true
         Some(Operator::Not) => {
-            let ty = ret_of(f, idx);
+            let operand = f.left(idx).unwrap();
+            let ty = f.ty(operand);
             let one = make_one(random, f, &ty);
             set_op(f, idx, Operator::Xor);
+            set_ret(f, idx, ty);
             f.add_operand(idx, 1, one);
         }
         // a ^ true -> !a, or true ^ a -> !a
@@ -1375,12 +1373,16 @@ fn do_complement_xor(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
             let right = f.right(idx);
             if right.is_some_and(|r| is_one(f, r)) {
                 // a ^ true -> !a
+                let ty = f.ty(left.unwrap());
                 set_op(f, idx, Operator::Not);
+                set_ret(f, idx, ty);
                 f.remove_operand(idx, 1);
             } else if left.is_some_and(|l| is_one(f, l)) {
                 // true ^ a -> !a
                 let a = right.unwrap();
+                let ty = f.ty(a);
                 set_op(f, idx, Operator::Not);
+                set_ret(f, idx, ty);
                 f.set_child(idx, 0, a);
                 f.remove_operand(idx, 1);
             }
@@ -1395,12 +1397,13 @@ fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
         Some(Operator::Xor) => {
             // a ^ b -> (!a & b) | (a & !b)
             let (a, b) = (f.left(idx).unwrap(), f.right(idx).unwrap());
+            let ty = ret_of(f, idx);
 
-            let not_a = f.operator(random, Operator::Not, Type::Boolean, a, None);
-            let not_b = f.operator(random, Operator::Not, Type::Boolean, b, None);
-            let left_and = f.operator(random, Operator::And, Type::Boolean, not_a, Some(b));
-            let right_and = f.operator(random, Operator::And, Type::Boolean, a, Some(not_b));
-            let new = f.operator(random, Operator::Or, Type::Boolean, left_and, Some(right_and));
+            let not_a = f.operator(random, Operator::Not, ty.clone(), a, None);
+            let not_b = f.operator(random, Operator::Not, ty.clone(), b, None);
+            let left_and = f.operator(random, Operator::And, ty.clone(), not_a, Some(b));
+            let right_and = f.operator(random, Operator::And, ty.clone(), a, Some(not_b));
+            let new = f.operator(random, Operator::Or, ty, left_and, Some(right_and));
             f.redirect_edges(idx, new);
         }
         Some(Operator::Or) => {
@@ -1418,10 +1421,11 @@ fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
                     let b_from_left = lr;
                     let b_from_right = f.left(rr).unwrap();
                     if a_from_left == a_from_right && b_from_left == b_from_right {
+                        let ty = f.ty(a_from_left);
                         let new = f.operator(
                             random,
                             Operator::Xor,
-                            Type::Boolean,
+                            ty,
                             a_from_left,
                             Some(b_from_left),
                         );
@@ -1438,7 +1442,7 @@ fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
 fn do_mod_one(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
     if op_of(f, idx) == Some(Operator::Mod) && f.right(idx).is_some_and(|r| is_one(f, r)) {
         // a % 1 -> 0
-        let ty = f.ty(idx);
+        let ty = ret_of(f, idx);
         let zero = make_zero(random, f, &ty);
         f.redirect_edges(idx, zero);
     } else if is_zero(f, idx) {
@@ -1660,6 +1664,13 @@ fn ret_of(f: &Forest, idx: NodeIndex) -> Type {
 fn set_op(f: &mut Forest, idx: NodeIndex, new_op: Operator) {
     if let Node::Operator { op, .. } = &mut f.graph[idx] {
         *op = new_op;
+    }
+}
+
+#[inline(always)]
+fn set_ret(f: &mut Forest, idx: NodeIndex, new_ret: Type) {
+    if let Node::Operator { ret, .. } = &mut f.graph[idx] {
+        *ret = new_ret;
     }
 }
 
