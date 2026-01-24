@@ -35,6 +35,7 @@ pub(crate) struct TestJob {
     job_id: u64,
     seed: u64,
     run_later_stages: bool,
+    rules_applied: Vec<&'static str>,
 }
 
 /// Result of testing a circuit pair
@@ -54,6 +55,7 @@ enum TestResult {
         original_compiled: bool,
         error: String,
         t1: Duration,
+        rules_applied: Vec<&'static str>,
     },
     /// Both compiled but outputs diverged
     ExecutionMismatch {
@@ -64,6 +66,7 @@ enum TestResult {
         rewritten_output: String,
         job_id: u64,
         t1: Duration,
+        rules_applied: Vec<&'static str>,
     },
     /// Proof verification mismatch
     ProofMismatch {
@@ -75,6 +78,7 @@ enum TestResult {
         job_id: u64,
         t1: Duration,
         t2: Duration,
+        rules_applied: Vec<&'static str>,
     },
     /// Verification mismatch
     VerificationMismatch {
@@ -86,6 +90,7 @@ enum TestResult {
         job_id: u64,
         t1: Duration,
         t2: Duration,
+        rules_applied: Vec<&'static str>,
     },
 
     NotInteresting {
@@ -213,8 +218,11 @@ impl App {
 
             let rewrite_count =
                 random.random_range(self.ctx.min_rewrites_count..=self.ctx.max_rewrites_count);
+            let mut rules_applied = Vec::with_capacity(rewrite_count);
             for _ in 0..rewrite_count {
-                rewriter.apply_random(random, &mut forest, &self.ctx, &scope);
+                if let Some(rule_name) = rewriter.apply_random(random, &mut forest, &self.ctx, &scope) {
+                    rules_applied.push(rule_name);
+                }
             }
 
             let rewritten_code = builder.format_circuit(&scope, &forest);
@@ -231,6 +239,7 @@ impl App {
                 job_id,
                 seed: random.random(),
                 run_later_stages,
+                rules_applied,
             };
 
             // Send job while draining results periodically
@@ -372,6 +381,7 @@ impl App {
                                                     rewritten_output: rewr_out.clone(),
                                                     job_id: job.job_id,
                                                     t1,
+                                                    rules_applied: job.rules_applied.clone(),
                                                 })
                                                 .await;
                                             found_bug = true;
@@ -409,6 +419,7 @@ impl App {
                                                                 job_id: job.job_id,
                                                                 t1,
                                                                 t2,
+                                                                rules_applied: job.rules_applied.clone(),
                                                             }).await;
                                                             found_bug = true;
                                                             break 'executions;
@@ -423,6 +434,7 @@ impl App {
                                                                 job_id: job.job_id,
                                                                 t1,
                                                                 t2,
+                                                                rules_applied: job.rules_applied.clone(),
                                                             }).await;
                                                             found_bug = true;
                                                             break 'executions;
@@ -459,6 +471,7 @@ impl App {
                                                             job_id: job.job_id,
                                                             t1,
                                                             t2,
+                                                            rules_applied: job.rules_applied.clone(),
                                                         })
                                                         .await;
                                                     found_bug = true;
@@ -484,6 +497,7 @@ impl App {
                                                             job_id: job.job_id,
                                                             t1,
                                                             t2,
+                                                            rules_applied: job.rules_applied.clone(),
                                                         })
                                                         .await;
                                                     found_bug = true;
@@ -519,6 +533,7 @@ impl App {
                                                     ),
                                                     job_id: job.job_id,
                                                     t1,
+                                                    rules_applied: job.rules_applied.clone(),
                                                 })
                                                 .await;
                                             found_bug = true;
@@ -554,6 +569,7 @@ impl App {
                                         error: e,
                                         job_id: job.job_id,
                                         t1,
+                                        rules_applied: job.rules_applied.clone(),
                                     })
                                     .await;
                             }
@@ -596,6 +612,7 @@ impl App {
                     original_compiled,
                     error,
                     t1,
+                    rules_applied,
                 } => {
                     self.power_schedule.add_t1(t1);
                     self.compile_mismatches.fetch_add(1, Ordering::Relaxed);
@@ -605,6 +622,7 @@ impl App {
                         &rewritten_code,
                         original_compiled,
                         &error,
+                        &rules_applied,
                     );
                 }
                 TestResult::ExecutionMismatch {
@@ -615,6 +633,7 @@ impl App {
                     rewritten_output,
                     job_id,
                     t1,
+                    rules_applied,
                 } => {
                     self.power_schedule.add_t1(t1);
                     self.soundness_bugs.fetch_add(1, Ordering::Relaxed);
@@ -625,6 +644,7 @@ impl App {
                         &prover_toml,
                         &original_output,
                         &rewritten_output,
+                        &rules_applied,
                     );
                 }
                 TestResult::ProofMismatch {
@@ -636,6 +656,7 @@ impl App {
                     job_id,
                     t1,
                     t2,
+                    rules_applied,
                 } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
@@ -648,6 +669,7 @@ impl App {
                         &prover_toml,
                         &original_result,
                         &rewritten_result,
+                        &rules_applied,
                     );
                 }
                 TestResult::VerificationMismatch {
@@ -659,6 +681,7 @@ impl App {
                     job_id,
                     t1,
                     t2,
+                    rules_applied,
                 } => {
                     self.power_schedule.add_t1(t1);
                     self.power_schedule.add_t2(t2);
@@ -672,6 +695,7 @@ impl App {
                         &prover_toml,
                         &original_result,
                         &rewritten_result,
+                        &rules_applied,
                     );
                 }
                 TestResult::NotInteresting { t1, t2, is_proof, is_verification } => {
@@ -704,6 +728,7 @@ impl App {
         rewritten: &str,
         original_compiled: bool,
         error: &str,
+        rules_applied: &[&'static str],
     ) {
         let dir = format!("{}/compile_mismatch_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -714,6 +739,8 @@ impl App {
         let (passed, failed) =
             if original_compiled { ("original", "rewritten") } else { ("rewritten", "original") };
 
+        let rules_str = rules_applied.join(", ");
+
         if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
             eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
         }
@@ -722,7 +749,7 @@ impl App {
         }
         if let Err(e) = fs::write(
             format!("{}/info.txt", dir),
-            format!("Passed: {}\nFailed: {}\n\nError:\n{}", passed, failed, error),
+            format!("Rules applied: {}\n\nPassed: {}\nFailed: {}\n\nError:\n{}", rules_str, passed, failed, error),
         ) {
             eprintln!("{RED}[!] Failed to write info.txt: {}{RESET}", e);
         }
@@ -736,12 +763,15 @@ impl App {
         prover_toml: &str,
         original_output: &str,
         rewritten_output: &str,
+        rules_applied: &[&'static str],
     ) {
         let dir = format!("{}/possible_soundness_bug_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
             eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
             return;
         }
+
+        let rules_str = rules_applied.join(", ");
 
         if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
             eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
@@ -755,8 +785,8 @@ impl App {
         if let Err(e) = fs::write(
             format!("{}/divergence.txt", dir),
             format!(
-                "Original output:\n{}\n\nRewritten output:\n{}",
-                original_output, rewritten_output
+                "Rules applied: {}\n\nOriginal output:\n{}\n\nRewritten output:\n{}",
+                rules_str, original_output, rewritten_output
             ),
         ) {
             eprintln!("{RED}[!] Failed to write divergence.txt: {}{RESET}", e);
@@ -771,12 +801,15 @@ impl App {
         prover_toml: &str,
         original_result: &str,
         rewritten_result: &str,
+        rules_applied: &[&'static str],
     ) {
         let dir = format!("{}/proof_mismatch_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
             eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
             return;
         }
+
+        let rules_str = rules_applied.join(", ");
 
         if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
             eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
@@ -790,8 +823,8 @@ impl App {
         if let Err(e) = fs::write(
             format!("{}/proof_divergence.txt", dir),
             format!(
-                "Original proof result:\n{}\n\nRewritten proof result:\n{}",
-                original_result, rewritten_result
+                "Rules applied: {}\n\nOriginal proof result:\n{}\n\nRewritten proof result:\n{}",
+                rules_str, original_result, rewritten_result
             ),
         ) {
             eprintln!("{RED}[!] Failed to write proof_divergence.txt: {}{RESET}", e);
@@ -806,12 +839,15 @@ impl App {
         prover_toml: &str,
         original_result: &str,
         rewritten_result: &str,
+        rules_applied: &[&'static str],
     ) {
         let dir = format!("{}/verification_mismatch_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
             eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
             return;
         }
+
+        let rules_str = rules_applied.join(", ");
 
         if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
             eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
@@ -825,8 +861,8 @@ impl App {
         if let Err(e) = fs::write(
             format!("{}/verification_divergence.txt", dir),
             format!(
-                "Original verification result:\n{}\n\nRewritten verification result:\n{}",
-                original_result, rewritten_result
+                "Rules applied: {}\n\nOriginal verification result:\n{}\n\nRewritten verification result:\n{}",
+                rules_str, original_result, rewritten_result
             ),
         ) {
             eprintln!("{RED}[!] Failed to write verification_divergence.txt: {}{RESET}", e);

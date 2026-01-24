@@ -50,15 +50,15 @@ impl Rewriter {
         RULES.iter().map(|r| r.kind.name().to_string()).collect()
     }
 
-    /// Randomly select a rule, then apply it to ALL matching instances in the forest
-    /// Returns (rule name, count) if a rule was applied, None otherwise
+    /// Randomly select a rule, then apply it to a matching node in the forest
+    /// Returns the rule name if a rule was applied, None otherwise
     pub fn apply_random(
         &self,
         random: &mut impl Rng,
         forest: &mut Forest,
         ctx: &Context,
         scope: &Scope,
-    ) {
+    ) -> Option<&'static str> {
         // Collect nodes that are If/Assert conditions (these can't be redirected safely)
         let condition_nodes = collect_condition_nodes(forest);
 
@@ -129,6 +129,7 @@ impl Rewriter {
             // Randomly select which rule to apply
             let selected_rule_idx = matches.keys().choose(random).unwrap();
             let selected_rule = self.rules[*selected_rule_idx].clone().kind;
+            let rule_name = selected_rule.name();
 
             // Get all nodes that match this specific rule
             let nodes_for_rule = matches.get(selected_rule_idx).unwrap();
@@ -147,10 +148,12 @@ impl Rewriter {
                     scope,
                     &condition_nodes,
                 );
+                return Some(rule_name);
             }
         }
 
         // @todo apply to nested forests too
+        None
     }
 
     fn apply(
