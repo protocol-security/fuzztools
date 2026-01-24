@@ -13,7 +13,6 @@ use fuzztools::{
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::{
-    collections::HashMap,
     fs,
     io::{self, Write},
     process::Command,
@@ -131,9 +130,6 @@ pub(crate) struct App {
     circuits_per_tick: u64,
     start_time: Instant,
     last_update: Instant,
-
-    // Rule stats: rule_name -> application_count
-    rule_stats: HashMap<String, u64>,
 }
 
 impl App {
@@ -187,7 +183,6 @@ impl App {
             circuits_per_tick: 0,
             start_time: Instant::now(),
             last_update: Instant::now(),
-            rule_stats: HashMap::new(),
         })
     }
 
@@ -219,11 +214,7 @@ impl App {
             let rewrite_count =
                 random.random_range(self.ctx.min_rewrites_count..=self.ctx.max_rewrites_count);
             for _ in 0..rewrite_count {
-                if let Some(rule_name) =
-                    rewriter.apply_random(random, &mut forest, &self.ctx, &scope)
-                {
-                    *self.rule_stats.entry(rule_name).or_insert(0) += 1;
-                }
+                rewriter.apply_random(random, &mut forest, &self.ctx, &scope);
             }
 
             let rewritten_code = builder.format_circuit(&scope, &forest);
@@ -890,14 +881,6 @@ impl App {
             "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Proofs: {RED}{}{RESET} | Verifications: {RED}{}{RESET}",
             current_ratio, proofs, verifications,
         );
-
-        // Display rule stats in order defined in RULES
-        println!("[{GREEN}+{RESET}] Rule applications:");
-        for name in Rewriter::rule_names_ordered() {
-            if let Some(&count) = self.rule_stats.get(&name) {
-                println!("    {name}: {RED}{count}{RESET}");
-            }
-        }
 
         io::stdout().flush()?;
         Ok(())
