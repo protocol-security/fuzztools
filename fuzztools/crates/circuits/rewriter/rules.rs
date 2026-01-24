@@ -1,11 +1,11 @@
 /// Marker trait for rules - not used but kept for potential future extensions
 #[derive(Debug, Clone)]
-pub struct Rule {
+pub(crate) struct Rule {
     pub kind: RuleKind,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum RuleKind {
+pub(crate) enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Structural transformations
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -179,13 +179,13 @@ pub enum RuleKind {
 }
 
 impl Rule {
-    pub const fn new(kind: RuleKind) -> Self {
+    pub(crate) const fn new(kind: RuleKind) -> Self {
         Self { kind }
     }
 }
 
 impl RuleKind {
-    pub fn name(&self) -> &'static str {
+    pub(crate) const fn name(&self) -> &'static str {
         match self {
             Self::SwapOperands => "SwapOperands",
             Self::Associate => "Associate",
@@ -239,7 +239,7 @@ impl RuleKind {
     }
 }
 
-pub const RULES: &[Rule] = &[
+pub(crate) const RULES: &[Rule] = &[
     // ─────────────────────────────────────────────────────────────────────────────
     // Structural
     // ─────────────────────────────────────────────────────────────────────────────
