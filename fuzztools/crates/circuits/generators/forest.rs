@@ -282,35 +282,22 @@ impl Forest {
 
         let castable_kind =
             castable.iter().filter(|k| self.type_kinds.contains_key(k)).choose(random).copied();
-        let (left, right) =
-            if random.random_bool(ctx.mixed_types_probability) && let Some(castable_kind) = castable_kind {
-                // Build a binary expression where one or both of the operands have been casted to
-                // the `Operator` type.
-                (
-                    self.build_casted_operand(
-                        random,
-                        ctx,
-                        scope,
-                        ty,
-                        &castable_kind,
-                        depth + 1,
-                    ),
-                    self.build_casted_operand(
-                        random,
-                        ctx,
-                        scope,
-                        ty,
-                        &castable_kind,
-                        depth + 1,
-                    ),
-                )
-            } else {
-                // Fall back to same-type operands.
-                (
-                    self.build_expr_tree(random, ctx, scope, ty, depth + 1),
-                    self.build_expr_tree(random, ctx, scope, ty, depth + 1),
-                )
-            };
+        let (left, right) = if random.random_bool(ctx.mixed_types_probability) &&
+            let Some(castable_kind) = castable_kind
+        {
+            // Build a binary expression where one or both of the operands have been casted to
+            // the `Operator` type.
+            (
+                self.build_casted_operand(random, ctx, scope, ty, &castable_kind, depth + 1),
+                self.build_casted_operand(random, ctx, scope, ty, &castable_kind, depth + 1),
+            )
+        } else {
+            // Fall back to same-type operands.
+            (
+                self.build_expr_tree(random, ctx, scope, ty, depth + 1),
+                self.build_expr_tree(random, ctx, scope, ty, depth + 1),
+            )
+        };
 
         self.operator(random, op, ty.clone(), left, Some(right))
     }
@@ -442,7 +429,8 @@ impl Forest {
                     Type::Struct(s) => s
                         .fields
                         .iter()
-                        .filter(|&f| f.ty.as_ref() == ty).map(|f| f.name.clone())
+                        .filter(|&f| f.ty.as_ref() == ty)
+                        .map(|f| f.name.clone())
                         .collect(),
                     _ => return None,
                 };

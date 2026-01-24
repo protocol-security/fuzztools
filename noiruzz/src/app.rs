@@ -220,7 +220,9 @@ impl App {
                 random.random_range(self.ctx.min_rewrites_count..=self.ctx.max_rewrites_count);
             let mut rules_applied = Vec::with_capacity(rewrite_count);
             for _ in 0..rewrite_count {
-                if let Some(rule_name) = rewriter.apply_random(random, &mut forest, &self.ctx, &scope) {
+                if let Some(rule_name) =
+                    rewriter.apply_random(random, &mut forest, &self.ctx, &scope)
+                {
                     rules_applied.push(rule_name);
                 }
             }
@@ -471,7 +473,9 @@ impl App {
                                                             job_id: job.job_id,
                                                             t1,
                                                             t2,
-                                                            rules_applied: job.rules_applied.clone(),
+                                                            rules_applied: job
+                                                                .rules_applied
+                                                                .clone(),
                                                         })
                                                         .await;
                                                     found_bug = true;
@@ -497,7 +501,9 @@ impl App {
                                                             job_id: job.job_id,
                                                             t1,
                                                             t2,
-                                                            rules_applied: job.rules_applied.clone(),
+                                                            rules_applied: job
+                                                                .rules_applied
+                                                                .clone(),
                                                         })
                                                         .await;
                                                     found_bug = true;
@@ -541,12 +547,14 @@ impl App {
                                         }
                                     }
                                     _ => {
-                                        let _ = worker_tx.send(TestResult::NotInteresting {
-                                            t1,
-                                            t2: None,
-                                            is_proof: false,
-                                            is_verification: false,
-                                        }).await;
+                                        let _ = worker_tx
+                                            .send(TestResult::NotInteresting {
+                                                t1,
+                                                t2: None,
+                                                is_proof: false,
+                                                is_verification: false,
+                                            })
+                                            .await;
                                     }
                                 }
                             }
@@ -575,12 +583,14 @@ impl App {
                             }
                         }
                         _ => {
-                            let _ = worker_tx.send(TestResult::NotInteresting {
-                                t1,
-                                t2: None,
-                                is_proof: false,
-                                is_verification: false,
-                            }).await;
+                            let _ = worker_tx
+                                .send(TestResult::NotInteresting {
+                                    t1,
+                                    t2: None,
+                                    is_proof: false,
+                                    is_verification: false,
+                                })
+                                .await;
                         }
                     }
 
@@ -749,7 +759,10 @@ impl App {
         }
         if let Err(e) = fs::write(
             format!("{}/info.txt", dir),
-            format!("Rules applied: {}\n\nPassed: {}\nFailed: {}\n\nError:\n{}", rules_str, passed, failed, error),
+            format!(
+                "Rules applied: {}\n\nPassed: {}\nFailed: {}\n\nError:\n{}",
+                rules_str, passed, failed, error
+            ),
         ) {
             eprintln!("{RED}[!] Failed to write info.txt: {}{RESET}", e);
         }

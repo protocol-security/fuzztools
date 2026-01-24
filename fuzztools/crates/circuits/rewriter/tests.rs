@@ -1,10 +1,14 @@
-
 #[cfg(test)]
 mod tests {
     use petgraph::graph::NodeIndex;
 
-    use crate::circuits::{ast::{forest::*, operators::*}, rewriter::*};
-    use crate::builders::CircuitBuilder;
+    use crate::{
+        builders::CircuitBuilder,
+        circuits::{
+            ast::{forest::*, operators::*},
+            rewriter::*,
+        },
+    };
     use std::fs;
 
     const RED: &str = "\x1b[31m";

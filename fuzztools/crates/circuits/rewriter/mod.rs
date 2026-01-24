@@ -115,7 +115,8 @@ impl Rewriter {
                             continue;
                         }
                         for &i in rules {
-                            if matches_rule(forest, None, Some(idx), None, &self.rules[i].kind, idx) {
+                            if matches_rule(forest, None, Some(idx), None, &self.rules[i].kind, idx)
+                            {
                                 matches.entry(i).or_default().push(idx);
                             }
                         }
@@ -281,7 +282,7 @@ fn matches_rule(
     left: Option<NodeIndex>,
     right: Option<NodeIndex>,
     kind: &RuleKind,
-    idx: NodeIndex
+    idx: NodeIndex,
 ) -> bool {
     let is_binary = left.is_some() && right.is_some();
     let is_unary = left.is_some() && right.is_none();
@@ -393,8 +394,7 @@ fn matches_rule(
         (RuleKind::IdentityAnd, Some(And)) if is_binary => {
             let (l, r) = (left.unwrap(), right.unwrap());
             let ty = forest.ty(l);
-            ty.is_bool() &&
-                (is_identity(forest, l, And, &ty) || is_identity(forest, r, And, &ty))
+            ty.is_bool() && (is_identity(forest, l, And, &ty) || is_identity(forest, r, And, &ty))
         }
         (RuleKind::IdentityShl, Some(Shl)) if is_binary => {
             let (l, r) = (left.unwrap(), right.unwrap());
@@ -412,9 +412,13 @@ fn matches_rule(
         (RuleKind::IdentityOr | RuleKind::IdentityXor, None) => {
             left.is_some_and(|l| forest.ty(l).is_primitive())
         }
-        (RuleKind::IdentityAdd | RuleKind::IdentitySub | RuleKind::IdentityMul | RuleKind::IdentityDiv, None) => {
-            left.is_some_and(|l| forest.ty(l).is_numeric())
-        }
+        (
+            RuleKind::IdentityAdd |
+            RuleKind::IdentitySub |
+            RuleKind::IdentityMul |
+            RuleKind::IdentityDiv,
+            None,
+        ) => left.is_some_and(|l| forest.ty(l).is_numeric()),
         (RuleKind::IdentityShl | RuleKind::IdentityShr, None) => {
             left.is_some_and(|l| forest.ty(l).is_integer())
         }
@@ -425,11 +429,13 @@ fn matches_rule(
         // Simplification case: a op absorbing -> absorbing
         (RuleKind::AbsorbMul, Some(Mul)) if is_binary => {
             let (l, r) = (left.unwrap(), right.unwrap());
-            is_absorbing(forest, l, Mul, &forest.ty(l)) || is_absorbing(forest, r, Mul, &forest.ty(r))
+            is_absorbing(forest, l, Mul, &forest.ty(l)) ||
+                is_absorbing(forest, r, Mul, &forest.ty(r))
         }
         (RuleKind::AbsorbAnd, Some(And)) if is_binary => {
             let (l, r) = (left.unwrap(), right.unwrap());
-            is_absorbing(forest, l, And, &forest.ty(l)) || is_absorbing(forest, r, And, &forest.ty(r))
+            is_absorbing(forest, l, And, &forest.ty(l)) ||
+                is_absorbing(forest, r, And, &forest.ty(r))
         }
         (RuleKind::AbsorbOr, Some(Or)) if is_binary => {
             let (l, r) = (left.unwrap(), right.unwrap());
@@ -437,9 +443,15 @@ fn matches_rule(
         }
 
         // Injection case: absorbing -> a op absorbing
-        (RuleKind::AbsorbMul, None) => left.is_some_and(|l| is_absorbing(forest, l, Mul, &forest.ty(l))),
-        (RuleKind::AbsorbAnd, None) => left.is_some_and(|l| is_absorbing(forest, l, And, &forest.ty(l))),
-        (RuleKind::AbsorbOr, None) => left.is_some_and(|l| is_absorbing(forest, l, Or, &forest.ty(l))),
+        (RuleKind::AbsorbMul, None) => {
+            left.is_some_and(|l| is_absorbing(forest, l, Mul, &forest.ty(l)))
+        }
+        (RuleKind::AbsorbAnd, None) => {
+            left.is_some_and(|l| is_absorbing(forest, l, And, &forest.ty(l)))
+        }
+        (RuleKind::AbsorbOr, None) => {
+            left.is_some_and(|l| is_absorbing(forest, l, Or, &forest.ty(l)))
+        }
 
         // ─────────────────────────────────────────────────────────────────────────
         // SelfInverse rules: a op a = identity
@@ -502,12 +514,10 @@ fn matches_rule(
 
         // Injection: a -> op(op(a))
         (RuleKind::DoubleNeg, None) => left.is_some_and(|l| forest.ty(l).is_numeric()),
-        (RuleKind::DoubleNot, None) => {
-            left.is_some_and(|l| {
-                let ty = forest.ty(l);
-                ty.is_bool() || ty.is_signed()
-            })
-        }
+        (RuleKind::DoubleNot, None) => left.is_some_and(|l| {
+            let ty = forest.ty(l);
+            ty.is_bool() || ty.is_signed()
+        }),
 
         // (a - b) -> (a + (-b))
         (RuleKind::AddNegSub, Some(Operator::Sub)) if is_binary => {
@@ -519,12 +529,10 @@ fn matches_rule(
 
         // (a + (-b)) -> (a - b) @todo ((-b) + a)
         (RuleKind::AddNegSub, Some(Operator::Add)) if is_binary => {
-            right_op.is_some_and(|r| {
-                matches!(r, Operator::Neg)
-            })
+            right_op.is_some_and(|r| matches!(r, Operator::Neg))
         }
 
-        // (-a) -> (0 - a) 
+        // (-a) -> (0 - a)
         (RuleKind::NegZeroSub, Some(Operator::Neg)) if is_unary => true,
 
         // (0 - a) -> (-a) @todo ((-a) + 0) and ((-a) - 0) and equivalent
@@ -540,14 +548,10 @@ fn matches_rule(
         // Comparison rules
         // ─────────────────────────────────────────────────────────────────────────
         // a cmp b -> b flip(cmp) a
-        (RuleKind::FlipComparison, Some(o)) if is_binary => {
-            o.is_comparison()
-        }
+        (RuleKind::FlipComparison, Some(o)) if is_binary => o.is_comparison(),
 
         // a cmp b -> !(a !cmp b) @todo should do the reverse
-        (RuleKind::NegateComparison, Some(o)) if is_binary => {
-            o.is_comparison()
-        }
+        (RuleKind::NegateComparison, Some(o)) if is_binary => o.is_comparison(),
 
         // (a cmpeq b) -> ((a cmp b) || (a == b))
         (RuleKind::ExpandComparison, Some(LessOrEqual | GreaterOrEqual)) if is_binary => true,
@@ -590,8 +594,11 @@ fn matches_rule(
         (RuleKind::XorToAndOr, Some(Xor)) if is_binary => {
             let l = left.unwrap();
             let r = right.unwrap();
-            forest.ty(l).is_bool() && !is_one(forest, l) && !is_one(forest, r)
-                && !is_zero(forest, l) && !is_zero(forest, r)
+            forest.ty(l).is_bool() &&
+                !is_one(forest, l) &&
+                !is_one(forest, r) &&
+                !is_zero(forest, l) &&
+                !is_zero(forest, r)
         }
         // ((!a & b) | (a & !b)) -> (a ^ b)
         (RuleKind::XorToAndOr, Some(Or)) if is_binary => {
@@ -654,14 +661,16 @@ fn matches_rule(
             let ty = forest.ty(left);
 
             // `u1` can't hold `2`
-            left == right && (matches!(ty, Type::Field) || matches!(ty, Type::Integer(i) if i.bits > 1))
+            left == right &&
+                (matches!(ty, Type::Field) || matches!(ty, Type::Integer(i) if i.bits > 1))
         }
 
         // a * 2 -> a + a
         (RuleKind::DoubleMulTwo, Some(Operator::Mul)) if is_binary => {
             let left = left.unwrap();
             let right = right.unwrap();
-            let ty = forest.ty(left); // @audit this kind of checks, are redundant as Operator::Mul restrict to numeric?? i think so
+            let ty = forest.ty(left); // @audit this kind of checks, are redundant as Operator::Mul restrict to numeric?? i
+                                      // think so
 
             is_two(forest, right) && ty.is_numeric()
         }
@@ -698,7 +707,7 @@ fn matches_rule(
         (RuleKind::InjectXorXor | RuleKind::InjectAndSelf, None) => {
             let left = left.unwrap();
             let ty = forest.ty(left);
-            
+
             ty.is_integer() || ty.is_bool()
         }
 
@@ -1422,13 +1431,8 @@ fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
                     let b_from_right = f.left(rr).unwrap();
                     if a_from_left == a_from_right && b_from_left == b_from_right {
                         let ty = f.ty(a_from_left);
-                        let new = f.operator(
-                            random,
-                            Operator::Xor,
-                            ty,
-                            a_from_left,
-                            Some(b_from_left),
-                        );
+                        let new =
+                            f.operator(random, Operator::Xor, ty, a_from_left, Some(b_from_left));
                         f.redirect_edges(idx, new);
                     }
                 }
@@ -1773,7 +1777,7 @@ fn is_absorbing(f: &Forest, idx: NodeIndex, op: Operator, ty: &Type) -> bool {
 const fn is_idempotent(op: Operator, ty: &Type) -> bool {
     match op {
         Operator::And | Operator::Or => ty.is_bool() || ty.is_integer(),
-        _ => false
+        _ => false,
     }
 }
 
