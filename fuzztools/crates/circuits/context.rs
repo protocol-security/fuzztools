@@ -89,6 +89,7 @@ pub struct Context {
     // Statement weights (relative probability of generating each statement)
     // ─────────────────────────────────────────────────────────────────────────
     pub operator_weight: usize,
+    pub unary_weight: usize,
     pub index_weight: usize,
     pub tuple_index_weight: usize,
     pub field_access_weight: usize,
@@ -116,9 +117,6 @@ pub struct Context {
 
     /// Probability of raw strings
     pub raw_string_probability: f64,
-
-    /// Probability of unary vs binary operators
-    pub unary_probability: f64,
 
     /// Probability of mutable variables
     pub mutable_probability: f64,
