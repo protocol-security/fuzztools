@@ -17,7 +17,7 @@ mod tests {
         let left = f.left(idx);
         let right = f.right(idx);
         assert!(
-            matches_rule(f, op, left, right, kind),
+            matches_rule(f, op, left, right, kind, idx),
             "Rule {:?} should match for node with op={:?}, left={:?}, right={:?}",
             kind,
             op,
@@ -195,7 +195,7 @@ mod tests {
         let before = builder.format_circuit(&scope, &forest_before);
 
         // Apply rewriter
-        for _ in 0..1 {
+        for _ in 0..15 {
             rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
         }
 
@@ -1130,7 +1130,7 @@ mod tests {
         let left = forest.left(sub_expr);
         let right = forest.right(sub_expr);
         assert!(
-            !matches_rule(&forest, op, left, right, &rule),
+            !matches_rule(&forest, op, left, right, &rule, sub_expr),
             "Identity(Sub) rule should NOT match boolean operands"
         );
     }

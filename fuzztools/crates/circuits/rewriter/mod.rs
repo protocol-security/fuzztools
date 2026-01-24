@@ -83,7 +83,7 @@ impl Rewriter {
                         if condition_nodes.contains(&idx) {
                             continue;
                         }
-                        if matches_rule(forest, Some(op), left, right, &self.rules[i].kind) {
+                        if matches_rule(forest, Some(op), left, right, &self.rules[i].kind, idx) {
                             matches.entry(i).or_default().push(idx);
                         }
                     }
@@ -115,7 +115,7 @@ impl Rewriter {
                             continue;
                         }
                         for &i in rules {
-                            if matches_rule(forest, None, Some(idx), None, &self.rules[i].kind) {
+                            if matches_rule(forest, None, Some(idx), None, &self.rules[i].kind, idx) {
                                 matches.entry(i).or_default().push(idx);
                             }
                         }
@@ -281,6 +281,7 @@ fn matches_rule(
     left: Option<NodeIndex>,
     right: Option<NodeIndex>,
     kind: &RuleKind,
+    idx: NodeIndex
 ) -> bool {
     let is_binary = left.is_some() && right.is_some();
     let is_unary = left.is_some() && right.is_none();
@@ -572,8 +573,6 @@ fn matches_rule(
 
         // !a -> a ^ true (only for boolean NOT, not bitwise NOT on integers)
         (RuleKind::ComplementXor, Some(Not)) if is_unary => {
-            // Both operand and result must be boolean - bitwise NOT on integers
-            // has different semantics (!u64 is bitwise complement, not logical NOT)
             let l = left.unwrap();
             forest.ty(l).is_bool() && ret_of(forest, idx).is_bool()
         }
