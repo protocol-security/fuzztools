@@ -283,7 +283,7 @@ impl Forest {
         let castable_kind =
             castable.iter().filter(|k| self.type_kinds.contains_key(k)).choose(random).copied();
         let (left, right) =
-            if random.random_bool(ctx.mixed_types_probability) && castable_kind.is_some() {
+            if random.random_bool(ctx.mixed_types_probability) && let Some(castable_kind) = castable_kind {
                 // Build a binary expression where one or both of the operands have been casted to
                 // the `Operator` type.
                 (
@@ -291,16 +291,16 @@ impl Forest {
                         random,
                         ctx,
                         scope,
-                        &ty,
-                        &castable_kind.unwrap(),
+                        ty,
+                        &castable_kind,
                         depth + 1,
                     ),
                     self.build_casted_operand(
                         random,
                         ctx,
                         scope,
-                        &ty,
-                        &castable_kind.unwrap(),
+                        ty,
+                        &castable_kind,
                         depth + 1,
                     ),
                 )
@@ -429,7 +429,7 @@ impl Forest {
 
         let (idx, positions, tuple_ty) = candidates.choose(random).unwrap();
         let value = *positions.choose(random).unwrap();
-        self.tuple_index(random, *idx, value, &tuple_ty)
+        self.tuple_index(random, *idx, value, tuple_ty)
     }
 
     /// STRUCT.FIELD
@@ -442,7 +442,7 @@ impl Forest {
                     Type::Struct(s) => s
                         .fields
                         .iter()
-                        .filter_map(|f| (f.ty.as_ref() == ty).then(|| f.name.clone()))
+                        .filter(|&f| f.ty.as_ref() == ty).map(|f| f.name.clone())
                         .collect(),
                     _ => return None,
                 };
@@ -462,7 +462,7 @@ impl Forest {
 
         let (idx, fields, struct_ty) = candidates.choose(random).unwrap();
         let name = fields.choose(random).unwrap().clone();
-        self.field_access(random, *idx, name, &struct_ty)
+        self.field_access(random, *idx, name, struct_ty)
     }
 
     /// Build a cast expression (Field ← unsigned/bool, Integer ← int/Field/bool)
@@ -507,7 +507,7 @@ impl Forest {
             let call_idx = self.call(random, name, *lambda.ret.clone(), args, idx);
 
             let var_name = self.next_var();
-            self.variable(random, var_name, *lambda.ret.clone(), false, false, call_idx);
+            self.variable(random, var_name, *lambda.ret, false, false, call_idx);
         }
     }
 
@@ -516,7 +516,7 @@ impl Forest {
     // ────────────────────────────────────────────────────────────────────────────────
 
     pub fn gen_assignment(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        let (_, &idx) = self.mutables.iter().choose(random).clone().unwrap();
+        let (_, &idx) = self.mutables.iter().choose(random).unwrap();
         let ty = self.ty(idx);
         let value_idx = self.build_expr_tree(random, ctx, scope, &ty, ctx.max_expr_depth);
 

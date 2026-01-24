@@ -540,7 +540,7 @@ impl App {
                                             t2: None,
                                             is_proof: false,
                                             is_verification: false,
-                                        });
+                                        }).await;
                                     }
                                 }
                             }
@@ -573,7 +573,7 @@ impl App {
                                 t2: None,
                                 is_proof: false,
                                 is_verification: false,
-                            });
+                            }).await;
                         }
                     }
 
