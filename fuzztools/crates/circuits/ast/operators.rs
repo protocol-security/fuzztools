@@ -22,7 +22,7 @@ pub enum Operator {
 
 impl Operator {
     pub const fn binary_field() -> &'static [Self] {
-        &[Self::Add, Self::Sub, Self::Mul, Self::Div, Self::Equal, Self::NotEqual]
+        &[Self::Add, Self::Sub, Self::Mul, Self::Div]
     }
 
     pub const fn unary_field() -> &'static [Self] {
@@ -36,12 +36,6 @@ impl Operator {
             Self::Mul,
             Self::Div,
             Self::Mod,
-            Self::Less,
-            Self::LessOrEqual,
-            Self::Greater,
-            Self::GreaterOrEqual,
-            Self::Equal,
-            Self::NotEqual,
             Self::And,
             Self::Or,
             Self::Xor,
@@ -61,12 +55,6 @@ impl Operator {
             Self::Mul,
             Self::Div,
             Self::Mod,
-            Self::Less,
-            Self::LessOrEqual,
-            Self::Greater,
-            Self::GreaterOrEqual,
-            Self::Equal,
-            Self::NotEqual,
             Self::And,
             Self::Or,
             Self::Xor,
@@ -80,11 +68,26 @@ impl Operator {
     }
 
     pub const fn binary_boolean() -> &'static [Self] {
-        &[Self::And, Self::Or, Self::Xor, Self::Equal, Self::NotEqual]
+        &[Self::And, Self::Or, Self::Xor]
     }
 
     pub const fn unary_boolean() -> &'static [Self] {
         &[Self::Not]
+    }
+
+    pub const fn field_comparison() -> &'static [Self] {
+        &[Self::Equal, Self::NotEqual]
+    }
+
+    pub const fn comparison() -> &'static [Self] {
+        &[
+            Self::Less,
+            Self::LessOrEqual,
+            Self::Greater,
+            Self::GreaterOrEqual,
+            Self::Equal,
+            Self::NotEqual,
+        ]
     }
 
     pub const fn is_comparison(&self) -> bool {

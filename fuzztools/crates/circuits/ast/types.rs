@@ -1,5 +1,5 @@
 use crate::circuits::{
-    ast::forest::Forest,
+    ast::forest::{Forest, ForestType},
     context::Context,
     scope::Scope,
     utils::{bernoulli, random_field_element, random_string},
@@ -181,6 +181,14 @@ impl Type {
     }
 
     #[inline(always)]
+    pub const fn is_primitive(&self) -> bool {
+        matches!(
+            self.kind(),
+            TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned | TypeKind::Boolean
+        )
+    }
+
+    #[inline(always)]
     pub fn has_slice(&self) -> bool {
         match self {
             Type::Field |
@@ -347,20 +355,14 @@ impl Lambda {
         scope.ret = Some(((*self.ret).clone(), false));
         scope.type_bias = Scope::compute_type_bias(&bias);
         scope.inputs = self.params.iter().cloned().map(|(name, ty)| (name, ty, false)).collect();
+        scope.forest_type = ForestType::Lambda;
 
         let mut body = Forest::default();
         self.params.iter().for_each(|(n, t)| {
             body.input(random, n.clone(), t.clone());
         });
 
-        body.random_with_bounds(
-            random,
-            ctx,
-            &scope,
-            ctx.min_lambda_body_size,
-            ctx.max_lambda_body_size,
-            false,
-        );
+        body.random(random, ctx, &scope, true);
 
         body.set_return_expression(random, ctx, &scope);
 

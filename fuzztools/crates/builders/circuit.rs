@@ -49,7 +49,7 @@ impl CircuitBuilder {
             *ctx
         };
 
-        forest.random(random, &gen_ctx, &scope);
+        forest.random(random, &gen_ctx, &scope, true);
 
         (forest, scope)
     }

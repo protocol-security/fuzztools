@@ -1,6 +1,6 @@
 use crate::circuits::ast::{forest::Forest, nodes::Node};
 use petgraph::{algo::toposort, graph::NodeIndex, visit::EdgeRef, Direction};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 impl Forest {
     fn build_expr(&self, idx: NodeIndex, exprs: &HashMap<usize, String>) -> String {
@@ -45,38 +45,9 @@ impl Forest {
         exprs[&target.index()].clone()
     }
 
-    fn compute_used_nodes(&self) -> HashSet<NodeIndex> {
-        let mut used = HashSet::new();
-        let mut stack = vec![];
-
-        for idx in self.graph.node_indices() {
-            let is_root = matches!(
-                self.graph[idx],
-                Node::ForLoop { .. } |
-                    Node::If { .. } |
-                    Node::Assert { .. } |
-                    Node::Assignment { .. }
-            ) || self.graph.edges_directed(idx, Direction::Incoming).next().is_some();
-
-            if is_root && used.insert(idx) {
-                stack.push(idx);
-            }
-        }
-
-        while let Some(idx) = stack.pop() {
-            for edge in self.graph.edges_directed(idx, Direction::Outgoing) {
-                if used.insert(edge.target()) {
-                    stack.push(edge.target());
-                }
-            }
-        }
-        used
-    }
-
     pub fn format_with_indent(&self, indent: &str) -> String {
         let mut exprs = HashMap::new();
         let mut out = String::new();
-        let used = if self.skip_idle_vars { self.compute_used_nodes() } else { HashSet::new() };
         let next_indent = format!("{indent}    ");
 
         let fmt_block = |body: &Forest| body.format_with_indent(&next_indent);
@@ -84,10 +55,6 @@ impl Forest {
         for &idx in toposort(&self.graph, None).unwrap().iter().rev() {
             match &self.graph[idx] {
                 Node::Variable { name, mutable, .. } => {
-                    if self.skip_idle_vars && !used.contains(&idx) {
-                        exprs.insert(idx.index(), name.clone());
-                        continue;
-                    }
                     let val = &exprs[&self.left(idx).unwrap().index()];
                     out.push_str(&format!(
                         "{indent}let {}{}: {} = {val};\n",

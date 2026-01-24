@@ -1,5 +1,8 @@
 use crate::circuits::{
-    ast::{forest::Forest, types::Type},
+    ast::{
+        forest::{Forest, ForestType},
+        types::Type,
+    },
     context::Context,
     generators::types::TypeLocation,
     scope::Scope,
@@ -34,6 +37,7 @@ impl Function {
         scope.ret = Some((ret.clone(), false));
         scope.inputs = params.iter().cloned().map(|(n, t)| (n, t, false)).collect();
         scope.type_bias = Scope::compute_type_bias(&bias);
+        scope.forest_type = ForestType::Function;
 
         let mut body = Forest::default();
 
@@ -43,14 +47,7 @@ impl Function {
         }
 
         // Generate
-        body.random_with_bounds(
-            random,
-            ctx,
-            &scope,
-            ctx.min_function_body_size,
-            ctx.max_function_body_size,
-            false,
-        );
+        body.random(random, ctx, &scope, true);
 
         body.set_return_expression(random, ctx, &scope);
 

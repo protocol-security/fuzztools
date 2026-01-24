@@ -1,4 +1,7 @@
-use crate::circuits::{ast::types::*, functions::Function};
+use crate::circuits::{
+    ast::{forest::ForestType, types::*},
+    functions::Function,
+};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Clone, Default)]
@@ -22,6 +25,8 @@ pub struct Scope {
     /// Type kinds to favor during generation (for biased generation towards input/return types, so
     /// that forests are more "consistent")
     pub type_bias: HashSet<TypeKind>,
+
+    pub forest_type: ForestType,
 }
 
 impl Scope {
