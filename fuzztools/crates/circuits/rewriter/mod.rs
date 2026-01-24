@@ -58,7 +58,7 @@ impl Rewriter {
         forest: &mut Forest,
         ctx: &Context,
         scope: &Scope,
-    ) -> Option<String> {
+    ) {
         // Collect nodes that are If/Assert conditions (these can't be redirected safely)
         let condition_nodes = collect_condition_nodes(forest);
 
@@ -147,13 +147,10 @@ impl Rewriter {
                     scope,
                     &condition_nodes,
                 );
-                return Some(selected_rule.name().to_string());
             }
         }
 
         // @todo apply to nested forests too
-
-        None
     }
 
     fn apply(
