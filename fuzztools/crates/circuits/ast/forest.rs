@@ -545,16 +545,16 @@ impl Forest {
     #[inline(always)]
     pub fn has_tuples_with_type(&self, ty: &Type) -> bool {
         self.types.iter().any(|(t, nodes)| {
-            matches!(t, Type::Tuple(tup) if tup.elements.contains(ty))
-                && nodes.iter().any(|&i| self.is_reusable_node(i))
+            matches!(t, Type::Tuple(tup) if tup.elements.contains(ty)) &&
+                nodes.iter().any(|&i| self.is_reusable_node(i))
         })
     }
 
     #[inline(always)]
     pub fn has_struct_fields_of_type(&self, ty: &Type) -> bool {
         self.types.iter().any(|(t, nodes)| {
-            matches!(t, Type::Struct(s) if s.fields.iter().any(|f| f.ty.as_ref() == ty))
-                && nodes.iter().any(|&i| self.is_reusable_node(i))
+            matches!(t, Type::Struct(s) if s.fields.iter().any(|f| f.ty.as_ref() == ty)) &&
+                nodes.iter().any(|&i| self.is_reusable_node(i))
         })
     }
 

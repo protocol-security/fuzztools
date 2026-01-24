@@ -46,7 +46,7 @@ impl Default for Rewriter {
 impl Rewriter {
     /// Get rule names in the order defined in RULES (for ordered display)
     pub fn rule_names_ordered() -> Vec<String> {
-        RULES.iter().map(|r| r.kind.name()).collect()
+        RULES.iter().map(|r| r.kind.name().to_string()).collect()
     }
 
     /// Randomly select a rule, then apply it to ALL matching instances in the forest
@@ -67,18 +67,26 @@ impl Rewriter {
         // 1. Operator-specific rules
         for (&op, nodes) in &forest.operators {
             if let Some(rules) = self.op_rules.get(&op) {
-                for &n in nodes {
-                    if is_assignment_lhs(forest, n) {
+                for &idx in nodes {
+                    // Skip removed nodes (can happen during rewriting)
+                    if !forest.graph.contains_node(idx) {
                         continue;
                     }
-                    let (left, right) = (forest.left(n), forest.right(n));
+                    // Skip non-operator nodes (e.g., Assignment nodes with operators like +=)
+                    if !matches!(forest.graph[idx], Node::Operator { .. }) {
+                        continue;
+                    }
+
+                    let (left, right) = (forest.left(idx), forest.right(idx));
                     for &i in rules {
                         // Skip rules that use redirect on condition nodes
-                        if uses_redirect(&self.rules[i].kind) && condition_nodes.contains(&n) {
+                        /* if uses_redirect(&self.rules[i].kind) &&
+                         * condition_nodes.contains(&idx) { @todo */
+                        if condition_nodes.contains(&idx) {
                             continue;
                         }
                         if matches_rule(forest, Some(op), left, right, &self.rules[i].kind) {
-                            matches.entry(i).or_default().push(n);
+                            matches.entry(i).or_default().push(idx);
                         }
                     }
                 }
@@ -90,19 +98,23 @@ impl Rewriter {
         if forest.graph.node_count() < ctx.max_forest_size {
             for (&ty_kind, nodes) in &forest.type_kinds {
                 if let Some(rules) = self.type_rules.get(&ty_kind) {
-                    for &n in nodes {
-                        if op_of(forest, n).is_some() {
+                    for &idx in nodes {
+                        // Skip removed nodes (can happen during rewriting)
+                        if !forest.graph.contains_node(idx) {
                             continue;
                         }
-                        if is_assignment_lhs(forest, n) {
+                        if op_of(forest, idx).is_some() {
                             continue;
                         }
-                        if forest.graph.edges_directed(n, Direction::Incoming).next().is_none() {
+                        if is_assignment_lhs(forest, idx) {
+                            continue;
+                        }
+                        if forest.graph.edges_directed(idx, Direction::Incoming).next().is_none() {
                             continue;
                         }
                         for &i in rules {
-                            if matches_rule(forest, None, Some(n), None, &self.rules[i].kind) {
-                                matches.entry(i).or_default().push(n);
+                            if matches_rule(forest, None, Some(idx), None, &self.rules[i].kind) {
+                                matches.entry(i).or_default().push(idx);
                             }
                         }
                     }
@@ -133,41 +145,11 @@ impl Rewriter {
                     scope,
                     &condition_nodes,
                 );
-                return Some(selected_rule.name());
+                return Some(selected_rule.name().to_string());
             }
         }
 
-        // No matches in main forest, try nested forests (ForLoop and If bodies)
-        // Use the stored nested_forests list for O(1) lookup instead of traversing the graph
-        for &idx in &forest.nested_forests.clone() {
-            if !forest.graph.contains_node(idx) {
-                continue;
-            }
-
-            match &mut forest.graph[idx] {
-                Node::ForLoop { body, .. } => {
-                    if let Some(rule_name) = self.apply_random(random, body, ctx, scope) {
-                        return Some(rule_name);
-                    }
-                }
-                Node::If { then_body, else_ifs, else_body, .. } => {
-                    if let Some(rule_name) = self.apply_random(random, then_body, ctx, scope) {
-                        return Some(rule_name);
-                    }
-                    for (_cond, body) in else_ifs {
-                        if let Some(rule_name) = self.apply_random(random, body, ctx, scope) {
-                            return Some(rule_name);
-                        }
-                    }
-                    if let Some(body) = else_body {
-                        if let Some(rule_name) = self.apply_random(random, body, ctx, scope) {
-                            return Some(rule_name);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        // @todo apply to nested forests too
 
         None
     }
@@ -176,7 +158,7 @@ impl Rewriter {
         &self,
         random: &mut impl Rng,
         forest: &mut Forest,
-        n: NodeIndex,
+        idx: NodeIndex,
         kind: &RuleKind,
         ctx: &Context,
         scope: &Scope,
@@ -184,65 +166,100 @@ impl Rewriter {
     ) {
         match kind {
             // Structural
-            RuleKind::SwapOperands { .. } => forest.swap_operands(n),
-            RuleKind::Associate { .. } => do_associate(random, forest, n),
-            RuleKind::AssociateSub => do_associate_sub(random, forest, n),
-            RuleKind::AssociateDiv => do_associate_div(random, forest, n),
-            RuleKind::DivCommute => do_div_commute(random, forest, n),
-            RuleKind::Distribute { outer, inner } => do_distribute(random, forest, n, *outer, *inner),
+            RuleKind::SwapOperands => forest.swap_operands(idx),
+            RuleKind::Associate => do_associate(random, forest, idx),
+            RuleKind::AssociateSub => do_associate_sub(random, forest, idx),
+            RuleKind::AssociateDiv => do_associate_div(random, forest, idx),
+            RuleKind::DivCommute => do_div_commute(random, forest, idx),
+            RuleKind::DistributeMulAdd => do_distribute(random, forest, idx, Mul, Add),
+            RuleKind::DistributeMulSub => do_distribute(random, forest, idx, Mul, Sub),
+            RuleKind::DistributeAndOr => do_distribute(random, forest, idx, And, Or),
+            RuleKind::DistributeOrAnd => do_distribute(random, forest, idx, Or, And),
 
-            // Identity / Absorb
-            RuleKind::Identity { op, identity_right } => {
-                do_identity(random, forest, n, *op, *identity_right)
+            // Identity
+            RuleKind::IdentityAdd => {
+                do_identity(random, forest, idx, Add, &forest.ty(forest.left(idx).unwrap()))
             }
-            RuleKind::Absorb { op } => do_absorb(random, forest, n, *op),
-            RuleKind::SelfInverse { op } => do_self_inverse(random, forest, n, *op),
-            RuleKind::Idempotent { op } => do_idempotent(random, forest, n, *op),
+            RuleKind::IdentitySub => {
+                do_identity(random, forest, idx, Sub, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityMul => {
+                do_identity(random, forest, idx, Mul, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityDiv => {
+                do_identity(random, forest, idx, Div, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityXor => {
+                do_identity(random, forest, idx, Xor, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityOr => {
+                do_identity(random, forest, idx, Or, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityAnd => {
+                do_identity(random, forest, idx, And, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityShl => {
+                do_identity(random, forest, idx, Shl, &forest.ty(forest.left(idx).unwrap()))
+            }
+            RuleKind::IdentityShr => {
+                do_identity(random, forest, idx, Shr, &forest.ty(forest.left(idx).unwrap()))
+            }
+
+            // Absorb
+            RuleKind::AbsorbMul => do_absorb(random, forest, idx, Mul, ctx, scope),
+            RuleKind::AbsorbAnd => do_absorb(random, forest, idx, And, ctx, scope),
+            RuleKind::AbsorbOr => do_absorb(random, forest, idx, Or, ctx, scope),
+
+            // SelfInverse
+            RuleKind::SelfInverseSub => do_self_inverse(random, forest, idx, Sub, ctx, scope),
+            RuleKind::SelfInverseXor => do_self_inverse(random, forest, idx, Xor, ctx, scope),
+            RuleKind::SelfInverseDiv => do_self_inverse(random, forest, idx, Div, ctx, scope),
+
+            // Idempotent
+            RuleKind::IdempotentAnd => do_idempotent(random, forest, idx, And),
+            RuleKind::IdempotentOr => do_idempotent(random, forest, idx, Or),
 
             // Unary
-            RuleKind::DoubleUnary { op } => do_double_unary(random, forest, n, *op),
-            RuleKind::AddNegSub => do_add_neg_sub(random, forest, n),
-            RuleKind::NegZeroSub => do_neg_zero_sub(random, forest, n),
+            RuleKind::DoubleNeg => do_double_unary(random, forest, idx, Neg),
+            RuleKind::DoubleNot => do_double_unary(random, forest, idx, Not),
+            RuleKind::AddNegSub => do_add_neg_sub(random, forest, idx),
+            RuleKind::NegZeroSub => do_neg_zero_sub(random, forest, idx),
 
             // Comparison
-            RuleKind::FlipComparison => do_flip_comparison(forest, n),
-            RuleKind::NegateComparison => do_negate_comparison(random, forest, n, condition_nodes),
-            RuleKind::ExpandComparison => do_expand_comparison(random, forest, n),
+            RuleKind::FlipComparison => do_flip_comparison(forest, idx),
+            RuleKind::NegateComparison => {
+                do_negate_comparison(random, forest, idx, condition_nodes)
+            }
+            RuleKind::ExpandComparison => do_expand_comparison(random, forest, idx),
 
             // Boolean logic
-            RuleKind::DeMorgan => do_demorgan(random, forest, n),
-            RuleKind::ComplementXor => do_complement_xor(random, forest, n),
-            RuleKind::XorToAndOr => do_xor_to_and_or(random, forest, n),
+            RuleKind::DeMorgan => do_demorgan(random, forest, idx),
+            RuleKind::ComplementXor => do_complement_xor(random, forest, idx),
+            RuleKind::XorToAndOr => do_xor_to_and_or(random, forest, idx),
 
             // Modulo
-            RuleKind::ModOne => do_mod_one(random, forest, n),
-            RuleKind::AndToMod => do_and_to_mod(random, forest, n),
+            RuleKind::ModOne => do_mod_one(random, forest, idx),
+            RuleKind::AndToMod => do_and_to_mod(random, forest, idx),
 
             // Shift
-            RuleKind::ShiftZero => do_shift_zero(forest, n),
+            RuleKind::ShiftZero => do_shift_zero(random, forest, idx),
 
             // Obfuscation
-            RuleKind::InjectAddSub => {
-                do_inject(random, forest, n, Operator::Add, Operator::Sub, ctx, scope)
-            }
-            RuleKind::InjectSubAdd => {
-                do_inject(random, forest, n, Operator::Sub, Operator::Add, ctx, scope)
-            }
-            RuleKind::InjectMulDiv => do_inject_nonzero(random, forest, n, ctx, scope),
-            RuleKind::InjectXorXor => {
-                do_inject(random, forest, n, Operator::Xor, Operator::Xor, ctx, scope)
-            }
-            RuleKind::InjectDivDiv => do_inject_div_div(random, forest, n, ctx, scope),
-            RuleKind::InjectOrZero => do_inject_or_zero(random, forest, n),
-            RuleKind::InjectAndSelf => do_inject_and_self(random, forest, n),
+            RuleKind::InjectAddSub => do_inject(random, forest, idx, Add, Sub, ctx, scope),
+            RuleKind::InjectSubAdd => do_inject(random, forest, idx, Sub, Add, ctx, scope),
+            RuleKind::InjectMulDiv => do_inject_nonzero(random, forest, idx, ctx, scope),
+            RuleKind::InjectXorXor => do_inject(random, forest, idx, Xor, Xor, ctx, scope),
+            RuleKind::InjectDivDiv => do_inject_div_div(random, forest, idx, ctx, scope),
+            RuleKind::InjectOrZero => do_inject_or_zero(random, forest, idx),
+            RuleKind::InjectAndSelf => do_inject_and_self(random, forest, idx),
 
             // Simplification
-            RuleKind::DoubleMulTwo => do_double_mul_two(random, forest, n),
-            RuleKind::MulNegOneNeg => do_mul_neg_one_neg(random, forest, n),
+            RuleKind::DoubleMulTwo => do_double_mul_two(random, forest, idx),
+            RuleKind::MulNegOneNeg => do_mul_neg_one_neg(random, forest, idx),
         }
 
         // Remove the node if it is orphaned
-        forest.remove_if_orphan(n);
+        forest.remove_if_orphaned(idx);
     }
 }
 
@@ -251,7 +268,7 @@ impl Rewriter {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn matches_rule(
-    f: &Forest,
+    forest: &Forest,
     op: Option<Operator>,
     left: Option<NodeIndex>,
     right: Option<NodeIndex>,
@@ -259,345 +276,445 @@ fn matches_rule(
 ) -> bool {
     let is_binary = left.is_some() && right.is_some();
     let is_unary = left.is_some() && right.is_none();
-    let left_op = left.and_then(|l| op_of(f, l));
-    let right_op = right.and_then(|r| op_of(f, r));
+    let left_op = left.and_then(|l| op_of(forest, l));
+    let right_op = right.and_then(|r| op_of(forest, r));
 
     match (kind, op) {
         // ─────────────────────────────────────────────────────────────────────────
         // Structural rules
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::SwapOperands { ops }, Some(o)) => ops.contains(&o) && is_binary,
-
-        (RuleKind::Associate { ops }, Some(o)) => {
-            ops.contains(&o) && is_binary && (left_op == Some(o) || right_op == Some(o))
+        (RuleKind::SwapOperands, Some(o)) => {
+            is_binary && matches!(o, Add | Mul | And | Or | Xor | Equal | NotEqual)
         }
 
-        // ((a - b) - c) or (a - (b + c))
-        (RuleKind::AssociateSub, Some(Operator::Sub)) => {
-            is_binary && (left_op == Some(Operator::Sub) || right_op == Some(Operator::Add))
+        (RuleKind::Associate, Some(o)) => {
+            matches!(o, Add | Mul | And | Or | Xor) &&
+                is_binary &&
+                (left_op == Some(o) || right_op == Some(o))
         }
 
-        // ((a / b) * c) ↔ (a * (c / b)) - only valid for Field as integers round down
-        (RuleKind::AssociateDiv, Some(Operator::Mul)) => {
+        // ((a - b) - c) <-> (a - (b + c))
+        (RuleKind::AssociateSub, Some(Sub)) => {
+            is_binary && (left_op == Some(Sub) || right_op == Some(Add))
+        }
+
+        // ((a / b) * c) <-> (a * (c / b)) - only valid for Field as integers round down
+        (RuleKind::AssociateDiv, Some(Mul)) => {
             is_binary &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Field)) &&
-                (left_op == Some(Operator::Div) || right_op == Some(Operator::Div))
+                left.is_some_and(|l| matches!(forest.ty(l), Type::Field)) &&
+                (left_op == Some(Div) || right_op == Some(Div))
         }
 
-        // (a / b) ↔ ((1 / b) * a) - only valid for Field as integers round down
-        (RuleKind::DivCommute, Some(Operator::Div)) => {
-            is_binary && left.is_some_and(|l| matches!(f.ty(l), Type::Field))
-        }
-        // Reverse: ((1 / b) * a) → (a / b)
-        (RuleKind::DivCommute, Some(Operator::Mul)) => {
-            is_binary &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Field)) &&
-                left_op == Some(Operator::Div) &&
-                left.and_then(|l| f.left(l)).is_some_and(|ll| is_one(f, ll))
+        // (a / b) -> ((1 / b) * a) - only valid for Field as integers round down
+        (RuleKind::DivCommute, Some(Div)) => {
+            is_binary && left.is_some_and(|l| matches!(forest.ty(l), Type::Field))
         }
 
-        // (a * (b + c)) ↔ ((a * b) + (a * c))
-        (RuleKind::Distribute { outer, inner }, Some(o)) => {
+        // ((1 / b) * a) -> (a / b) - only valid for Field as integers round down
+        (RuleKind::DivCommute, Some(Mul)) => {
             is_binary &&
-                ((o == *outer && left_op == Some(*inner)) ||
-                    (o == *inner && left_op == Some(*outer) && right_op == Some(*outer)))
+                left.is_some_and(|l| matches!(forest.ty(l), Type::Field)) &&
+                left_op == Some(Div) &&
+                left.and_then(|l| forest.left(l)).is_some_and(|l| is_one(forest, l))
+        }
+
+        // (a * (b + c)) <-> ((b + c) * a) <-> ((a * b) + (a * c))
+        // Forward: Mul with Add child
+        (RuleKind::DistributeMulAdd, Some(Mul)) => {
+            is_binary && (right_op == Some(Add) || left_op == Some(Add))
+        }
+        // Reverse: Add with two Mul children
+        (RuleKind::DistributeMulAdd, Some(Add)) => {
+            is_binary && left_op == Some(Mul) && right_op == Some(Mul)
+        }
+        (RuleKind::DistributeMulSub, Some(Mul)) => {
+            is_binary && (right_op == Some(Sub) || left_op == Some(Sub))
+        }
+        (RuleKind::DistributeMulSub, Some(Sub)) => {
+            is_binary && left_op == Some(Mul) && right_op == Some(Mul)
+        }
+        (RuleKind::DistributeAndOr, Some(And)) => {
+            is_binary && (right_op == Some(Or) || left_op == Some(Or))
+        }
+        (RuleKind::DistributeAndOr, Some(Or)) => {
+            is_binary && left_op == Some(And) && right_op == Some(And)
+        }
+        (RuleKind::DistributeOrAnd, Some(Or)) => {
+            is_binary && (right_op == Some(And) || left_op == Some(And))
+        }
+        (RuleKind::DistributeOrAnd, Some(And)) => {
+            is_binary && left_op == Some(Or) && right_op == Some(Or)
         }
 
         // ─────────────────────────────────────────────────────────────────────────
-        // Identity/Absorb rules
+        // Identity rules
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::Identity { op: rule_op, identity_right }, Some(o))
-            if o == *rule_op && is_binary =>
-        {
-            // Get the operand (non-identity) type to check And correctness
-            let operand = if *identity_right { left } else { right };
-            let operand_ty = operand.map(|n| f.ty(n));
+        // Simplification case: a op identity -> a
+        (RuleKind::IdentityAdd, Some(Add)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_numeric() &&
+                (is_identity(forest, l, Add, &ty) || is_identity(forest, r, Add, &ty))
+        }
+        (RuleKind::IdentitySub, Some(Sub)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_numeric() && is_identity(forest, r, Sub, &ty)
+        }
+        (RuleKind::IdentityMul, Some(Mul)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_numeric() &&
+                (is_identity(forest, l, Mul, &ty) || is_identity(forest, r, Mul, &ty))
+        }
+        (RuleKind::IdentityDiv, Some(Div)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_numeric() && is_identity(forest, r, Div, &ty)
+        }
+        (RuleKind::IdentityXor, Some(Xor)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            is_identity(forest, l, Xor, &forest.ty(l)) || is_identity(forest, r, Xor, &forest.ty(r))
+        }
+        (RuleKind::IdentityOr, Some(Or)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            is_identity(forest, l, Or, &forest.ty(l)) || is_identity(forest, r, Or, &forest.ty(r))
+        }
+        (RuleKind::IdentityAnd, Some(And)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_bool() &&
+                (is_identity(forest, l, And, &ty) || is_identity(forest, r, And, &ty))
+        }
+        (RuleKind::IdentityShl, Some(Shl)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_integer() && is_identity(forest, r, Shl, &ty)
+        }
+        (RuleKind::IdentityShr, Some(Shr)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            let ty = forest.ty(l);
+            ty.is_integer() && is_identity(forest, r, Shr, &ty)
+        }
 
-            let check = if *identity_right { right } else { left };
-            let is_valid_identity = operand_ty
-                .clone()
-                .is_some_and(|op_ty| check.is_some_and(|c| is_identity_for_type(f, c, o, &op_ty)));
-
-            // For arithmetic operators (Add/Sub/Mul/Div) and shifts, only allow Field/Integer types
-            let is_type_compatible = match o {
-                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
-                    operand_ty.is_some_and(|ty| matches!(ty, Type::Field | Type::Integer(_)))
-                }
-                Operator::Shl | Operator::Shr => {
-                    operand_ty.is_some_and(|ty| matches!(ty, Type::Integer(_)))
-                }
-                _ => true, // Other operators (Xor, Or, And) are already handled correctly
-            };
-
-            is_valid_identity && is_type_compatible
+        // Injection case: a -> a op identity
+        (RuleKind::IdentityAnd, None) => left.is_some_and(|l| forest.ty(l).is_bool()),
+        (RuleKind::IdentityOr | RuleKind::IdentityXor, None) => {
+            left.is_some_and(|l| forest.ty(l).is_primitive())
         }
-        // Injection case: a → a op identity (only when there's no existing operator)
-        (RuleKind::Identity { op, .. }, None) => {
-            // For And injection (a -> a & 1), only apply to booleans
-            // For Or/Xor injection (a -> a | 0, a -> a ^ 0), apply to all types
-            // For Add/Sub/Mul/Div/Shl/Shr injection, only apply to Field/Integer (not Boolean)
-            // because booleans don't support arithmetic or shift operations
-            match op {
-                Operator::And => left.is_some_and(|l| matches!(f.ty(l), Type::Boolean)),
-                Operator::Or | Operator::Xor => left.is_some_and(|l| is_numeric_or_bool(f, l)),
-                Operator::Add | Operator::Sub | Operator::Mul | Operator::Div => {
-                    left.is_some_and(|l| matches!(f.ty(l), Type::Field | Type::Integer(_)))
-                }
-                Operator::Shl | Operator::Shr => {
-                    left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_)))
-                }
-                _ => false,
-            }
+        (RuleKind::IdentityAdd | RuleKind::IdentitySub | RuleKind::IdentityMul | RuleKind::IdentityDiv, None) => {
+            left.is_some_and(|l| forest.ty(l).is_numeric())
+        }
+        (RuleKind::IdentityShl | RuleKind::IdentityShr, None) => {
+            left.is_some_and(|l| forest.ty(l).is_integer())
         }
 
-        (RuleKind::Absorb { op: rule_op }, Some(o)) => {
-            if o != *rule_op || !is_binary {
-                return false;
-            }
-            // a & 0 = 0 is correct for all types (booleans and numeric)
-            // a * 0 = 0 is correct for all numeric types
-            // a | 1 = 1 is only correct for booleans (for numeric, a | 1 sets only LSB, not all
-            // bits)
-            let operand_ty = left.map(|l| f.ty(l));
-            match o {
-                Operator::And | Operator::Mul => {
-                    left.is_some_and(|l| is_absorbing(f, l, o)) ||
-                        right.is_some_and(|r| is_absorbing(f, r, o))
-                }
-                Operator::Or => {
-                    operand_ty.is_some_and(|ty| matches!(ty, Type::Boolean)) &&
-                        (left.is_some_and(|l| is_absorbing(f, l, o)) ||
-                            right.is_some_and(|r| is_absorbing(f, r, o)))
-                }
-                _ => false,
-            }
+        // ─────────────────────────────────────────────────────────────────────────
+        // Absorb rules
+        // ─────────────────────────────────────────────────────────────────────────
+        // Simplification case: a op absorbing -> absorbing
+        (RuleKind::AbsorbMul, Some(Mul)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            is_absorbing(forest, l, Mul, &forest.ty(l)) || is_absorbing(forest, r, Mul, &forest.ty(r))
         }
-        // Note: Absorb injection (0 → a * 0, etc.) is NOT handled here
-        // since it requires random expression generation which needs access to random/ctx/scope.
-        // Could be added as a separate InjectAbsorb rule in the future.
-        (RuleKind::SelfInverse { op: rule_op }, Some(o)) => {
-            if o != *rule_op || !is_binary || left != right {
-                return false;
-            }
-            // Check type compatibility for the operator
-            let ty = left.map(|l| f.ty(l));
-            match o {
-                // a - a = 0: valid for Field and integers
-                Operator::Sub => ty.is_some_and(|t| matches!(t, Type::Field | Type::Integer(_))),
-                // a ^ a = 0: valid for integers and booleans
-                Operator::Xor => ty.is_some_and(|t| matches!(t, Type::Integer(_) | Type::Boolean)),
-                // a / a = 1: only if a != 0. Only apply to known non-zero literals.
-                Operator::Div => {
-                    ty.is_some_and(|t| matches!(t, Type::Field | Type::Integer(_))) &&
-                        left.is_some_and(|l| {
-                            matches!(&f.graph[l], Node::Literal { value, .. }
-                                if !value.starts_with('0') && !value.starts_with("-0") && value != "false")
-                        })
-                }
-                _ => false,
-            }
+        (RuleKind::AbsorbAnd, Some(And)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            is_absorbing(forest, l, And, &forest.ty(l)) || is_absorbing(forest, r, And, &forest.ty(r))
         }
-        // Note: Injection (0 → a - a, etc.) is handled by InjectXorXor and similar rules
-        // since it requires random expression generation
-        (RuleKind::Idempotent { op: rule_op }, Some(o)) => {
-            if o != *rule_op || !is_binary || left != right {
-                return false;
-            }
-            // Check type compatibility: And/Or work on booleans and integers
-            left.is_some_and(|l| {
-                let ty = f.ty(l);
-                match o {
-                    Operator::And | Operator::Or => matches!(ty, Type::Boolean | Type::Integer(_)),
-                    _ => false,
-                }
-            })
+        (RuleKind::AbsorbOr, Some(Or)) if is_binary => {
+            let (l, r) = (left.unwrap(), right.unwrap());
+            is_absorbing(forest, l, Or, &forest.ty(l)) || is_absorbing(forest, r, Or, &forest.ty(r))
         }
-        // Injection: a → a & a or a → a | a (only for booleans/integers that support these ops)
-        (RuleKind::Idempotent { op }, None) => left.is_some_and(|l| {
-            let ty = f.ty(l);
-            match op {
-                Operator::And | Operator::Or => matches!(ty, Type::Boolean | Type::Integer(_)),
-                _ => false,
-            }
-        }),
+
+        // Injection case: absorbing -> a op absorbing
+        (RuleKind::AbsorbMul, None) => left.is_some_and(|l| is_absorbing(forest, l, Mul, &forest.ty(l))),
+        (RuleKind::AbsorbAnd, None) => left.is_some_and(|l| is_absorbing(forest, l, And, &forest.ty(l))),
+        (RuleKind::AbsorbOr, None) => left.is_some_and(|l| is_absorbing(forest, l, Or, &forest.ty(l))),
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // SelfInverse rules: a op a = identity
+        // ─────────────────────────────────────────────────────────────────────────
+        (RuleKind::SelfInverseSub, Some(Sub)) if is_binary && left == right => {
+            let l = left.unwrap();
+            forest.ty(l).is_numeric()
+        }
+        (RuleKind::SelfInverseXor, Some(Xor)) if is_binary && left == right => {
+            let l = left.unwrap();
+            let ty = forest.ty(l);
+            ty.is_integer() || ty.is_bool()
+        }
+        (RuleKind::SelfInverseDiv, Some(Div)) if is_binary && left == right => {
+            let l = left.unwrap();
+            forest.ty(l).is_numeric() && !is_zero(forest, l)
+        }
+
+        // Injection case: identity -> a op a
+        (RuleKind::SelfInverseSub, None) => {
+            left.is_some_and(|l| is_identity(forest, l, Sub, &forest.ty(l)))
+        }
+        (RuleKind::SelfInverseXor, None) => {
+            left.is_some_and(|l| is_identity(forest, l, Xor, &forest.ty(l)))
+        }
+        (RuleKind::SelfInverseDiv, None) => {
+            left.is_some_and(|l| is_identity(forest, l, Div, &forest.ty(l)))
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // Idempotent rules: a op a -> a
+        // ─────────────────────────────────────────────────────────────────────────
+        (RuleKind::IdempotentAnd, Some(And)) if is_binary && left == right => {
+            let l = left.unwrap();
+            let ty = forest.ty(l);
+            ty.is_integer() || ty.is_bool()
+        }
+        (RuleKind::IdempotentOr, Some(Or)) if is_binary && left == right => {
+            let l = left.unwrap();
+            let ty = forest.ty(l);
+            ty.is_integer() || ty.is_bool()
+        }
+
+        // Injection: a -> a op a
+        (RuleKind::IdempotentAnd, None) => left.is_some_and(|l| is_idempotent(And, &forest.ty(l))),
+        (RuleKind::IdempotentOr, None) => left.is_some_and(|l| is_idempotent(Or, &forest.ty(l))),
 
         // ─────────────────────────────────────────────────────────────────────────
         // Unary rules
         // ─────────────────────────────────────────────────────────────────────────
-        // Simplification: --a → a or !!a → a
-        (RuleKind::DoubleUnary { op: rule_op }, Some(o)) => {
-            o == *rule_op &&
-                is_unary &&
-                left.is_some_and(|i| op_of(f, i) == Some(o) && f.right(i).is_none())
+        // Absorbing op(op(a)) --> a
+        (RuleKind::DoubleNeg, Some(Neg)) if is_unary => {
+            let l = left.unwrap();
+            op_of(forest, l) == Some(Neg) && forest.right(l).is_none()
         }
-        // Injection: a → --a or a → !!a
-        (RuleKind::DoubleUnary { op }, None) => can_apply_unary(f, left, *op),
-
-        (RuleKind::AddNegSub, Some(Operator::Sub)) => {
-            is_binary && left.is_some_and(|l| is_signed_type(f, l))
-        }
-        (RuleKind::AddNegSub, Some(Operator::Add)) => {
-            is_binary &&
-                right_op == Some(Operator::Neg) &&
-                left.is_some_and(|l| is_signed_type(f, l))
+        (RuleKind::DoubleNot, Some(Not)) if is_unary => {
+            let l = left.unwrap();
+            op_of(forest, l) == Some(Not) && forest.right(l).is_none()
         }
 
-        (RuleKind::NegZeroSub, Some(Operator::Neg)) => {
-            is_unary && left.is_some_and(|l| is_signed_type(f, l))
+        // Injection: a -> op(op(a))
+        (RuleKind::DoubleNeg, None) => left.is_some_and(|l| forest.ty(l).is_numeric()),
+        (RuleKind::DoubleNot, None) => {
+            left.is_some_and(|l| {
+                let ty = forest.ty(l);
+                ty.is_bool() || ty.is_signed()
+            })
         }
-        (RuleKind::NegZeroSub, Some(Operator::Sub)) => {
-            is_binary &&
-                left.is_some_and(|l| is_zero(f, l)) &&
-                right.is_some_and(|r| is_signed_type(f, r))
+
+        // (a - b) -> (a + (-b))
+        (RuleKind::AddNegSub, Some(Operator::Sub)) if is_binary => {
+            let left = left.unwrap();
+            let ty = forest.ty(left);
+
+            ty.is_signed()
+        }
+
+        // (a + (-b)) -> (a - b) @todo ((-b) + a)
+        (RuleKind::AddNegSub, Some(Operator::Add)) if is_binary => {
+            right_op.is_some_and(|r| {
+                matches!(r, Operator::Neg)
+            })
+        }
+
+        // (-a) -> (0 - a) 
+        (RuleKind::NegZeroSub, Some(Operator::Neg)) if is_unary => {
+            let op = left_op.unwrap();
+            
+            matches!(op, Operator::Neg)
+        }
+
+        // (0 - a) -> (-a) @todo ((-a) + 0) and ((-a) - 0) and equivalent
+        (RuleKind::NegZeroSub, Some(Operator::Sub)) if is_binary => {
+            let left = left.unwrap();
+            let right = right.unwrap();
+
+            let ty = forest.ty(right);
+            ty.is_signed() && is_zero(forest, left)
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Comparison rules
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::FlipComparison, Some(o)) => {
-            is_binary &&
-                matches!(
-                    o,
-                    Operator::Less |
-                        Operator::Greater |
-                        Operator::LessOrEqual |
-                        Operator::GreaterOrEqual
-                )
+        // a cmp b -> b flip(cmp) a
+        (RuleKind::FlipComparison, Some(o)) if is_binary => {
+            o.is_comparison()
         }
 
-        (RuleKind::NegateComparison, Some(o)) => {
-            (o.is_comparison() && is_binary) ||
-                (o == Operator::Not && is_unary && left_op.is_some_and(|x| x.is_comparison()))
+        // a cmp b -> !(a !cmp b) @todo should do the reverse
+        (RuleKind::NegateComparison, Some(o)) if is_binary => {
+            o.is_comparison()
         }
 
-        // (a <= b) ↔ ((a < b) || (a == b))
-        (RuleKind::ExpandComparison, Some(o)) => {
-            is_binary &&
-                (matches!(o, Operator::LessOrEqual | Operator::GreaterOrEqual) ||
-                    (o == Operator::Or &&
-                        left_op.is_some_and(|x| {
-                            matches!(x, Operator::Less | Operator::Greater)
-                        }) &&
-                        right_op == Some(Operator::Equal)))
+        // (a cmpeq b) -> ((a cmp b) || (a == b))
+        (RuleKind::ExpandComparison, Some(LessOrEqual | GreaterOrEqual)) if is_binary => true,
+
+        // ((a cmp b) || (a == b)) -> (a cmpeq b)
+        (RuleKind::ExpandComparison, Some(Or)) if is_binary => {
+            (matches!(left_op, Some(Less | Greater)) && right_op == Some(Equal)) ||
+                (left_op == Some(Equal) && matches!(right_op, Some(Less | Greater)))
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Boolean rules
         // ─────────────────────────────────────────────────────────────────────────
-        (RuleKind::DeMorgan, Some(Operator::Not)) => {
-            is_unary && left_op.is_some_and(|x| matches!(x, Operator::And | Operator::Or))
-        }
-        (RuleKind::DeMorgan, Some(Operator::And | Operator::Or)) => {
-            is_binary && left_op == Some(Operator::Not) && right_op == Some(Operator::Not)
+        // !(a op b) -> (!a !op !b)
+        (RuleKind::DeMorgan, Some(Not)) if is_unary => {
+            matches!(left_op, Some(And | Or))
         }
 
-        // !a ↔ a ^ true only works for booleans (for integers, !a is bitwise NOT ≠ a ^ 1)
-        (RuleKind::ComplementXor, Some(Operator::Not)) => {
-            is_unary && left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
-        }
-        (RuleKind::ComplementXor, Some(Operator::Xor)) => {
-            is_binary &&
-                right.is_some_and(|r| is_one(f, r)) &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
+        //(!a !op !b) -> !(a op b)
+        (RuleKind::DeMorgan, Some(And | Or)) if is_binary => {
+            left_op == Some(Not) && right_op == Some(Not)
         }
 
-        // (a ^ b) ↔ ((!a & b) | (a & !b))
-        (RuleKind::XorToAndOr, Some(Operator::Xor)) => {
-            is_binary && left.is_some_and(|l| matches!(f.ty(l), Type::Boolean))
+        // !a -> a ^ true
+        (RuleKind::ComplementXor, Some(Not)) if is_unary => {
+            let l = left.unwrap();
+            forest.ty(l).is_bool()
         }
-        (RuleKind::XorToAndOr, Some(Operator::Or)) => {
-            // Match pattern: ((!a & b) | (a & !b))
-            is_binary && left_op == Some(Operator::And) && right_op == Some(Operator::And) && {
-                let ll_op = left.and_then(|l| f.left(l)).and_then(|ll| op_of(f, ll));
-                let rl_op = right.and_then(|r| f.right(r)).and_then(|rr| op_of(f, rr));
-                ll_op == Some(Operator::Not) && rl_op == Some(Operator::Not)
-            }
+
+        // a ^ true -> !a
+        (RuleKind::ComplementXor, Some(Xor)) if is_binary => {
+            let l = left.unwrap();
+            let r = right.unwrap();
+            let ty = forest.ty(l);
+            ty.is_bool() && (is_one(forest, r) || is_one(forest, l))
+        }
+
+        // (a ^ b) -> ((!a & b) | (a & !b))
+        (RuleKind::XorToAndOr, Some(Xor)) if is_binary => {
+            let l = left.unwrap();
+            forest.ty(l).is_bool()
+        }
+        // ((!a & b) | (a & !b)) -> (a ^ b)
+        (RuleKind::XorToAndOr, Some(Or)) if is_binary => {
+            left_op == Some(And) && right_op == Some(And)
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Modulo rules
         // ─────────────────────────────────────────────────────────────────────────
-        // a % 1 → 0
-        (RuleKind::ModOne, Some(Operator::Mod)) => is_binary && right.is_some_and(|r| is_one(f, r)),
-        // 0 → r % 1 (injection) - only when there's no operator (injection case)
-        (RuleKind::ModOne, None) => {
-            left.is_some_and(|l| is_zero(f, l) && matches!(f.ty(l), Type::Integer(_)))
+        // a % 1 -> 0
+        (RuleKind::ModOne, Some(Operator::Mod)) if is_binary => {
+            let right = right.unwrap();
+
+            is_one(forest, right)
         }
 
-        // a & 1 ↔ a % 2 (only valid when type can hold value 2, i.e., not u1)
-        (RuleKind::AndToMod, Some(Operator::And)) => {
-            is_binary &&
-                right.is_some_and(|r| is_one(f, r)) &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1))
+        // 0 -> a % 1
+        (RuleKind::ModOne, None) if is_unary => {
+            let left = left.unwrap();
+            let ty = forest.ty(left);
+
+            ty.is_integer()
         }
-        (RuleKind::AndToMod, Some(Operator::Mod)) => {
-            is_binary &&
-                right.is_some_and(|r| is_two(f, r)) &&
-                left.is_some_and(|l| matches!(f.ty(l), Type::Integer(i) if i.bits > 1))
+
+        // a & 1 -> a % 2
+        (RuleKind::AndToMod, Some(Operator::And)) if is_binary => {
+            let left = left.unwrap();
+            let right = right.unwrap();
+            let ty = forest.ty(left);
+
+            // `u1` can't hold `2`
+            is_one(forest, right) && matches!(ty, Type::Integer(i) if i.bits > 1)
+        }
+
+        // a % 2 -> a & 1
+        (RuleKind::AndToMod, Some(Operator::Mod)) if is_binary => {
+            let left = left.unwrap();
+            let right = right.unwrap();
+            let ty = forest.ty(left);
+
+            is_two(forest, right) && ty.is_integer()
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Shift rules
         // ─────────────────────────────────────────────────────────────────────────
-        // Simplification: a << 0 → a, a >> 0 → a
-        (RuleKind::ShiftZero, Some(Operator::Shl | Operator::Shr)) => {
-            is_binary && right.is_some_and(|r| is_zero(f, r))
+        // a << 0 -> a, a >> 0 -> a
+        (RuleKind::ShiftZero, Some(Shl | Shr)) if is_binary => {
+            let r = right.unwrap();
+            is_zero(forest, r)
         }
-        // Injection: a → a << 0 or a → a >> 0 (for integers)
-        (RuleKind::ShiftZero, None) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
 
         // ─────────────────────────────────────────────────────────────────────────
         // Simplification rules
         // ─────────────────────────────────────────────────────────────────────────
-        // a + a ↔ a * 2 (only valid when type can hold value 2, i.e., not u1)
-        (RuleKind::DoubleMulTwo, Some(Operator::Add)) => {
-            is_binary &&
-                left == right &&
-                left.is_some_and(|l| {
-                    matches!(f.ty(l), Type::Integer(i) if i.bits > 1) ||
-                        matches!(f.ty(l), Type::Field)
-                })
-        }
-        (RuleKind::DoubleMulTwo, Some(Operator::Mul)) => {
-            is_binary &&
-                right.is_some_and(|r| is_two(f, r)) &&
-                left.is_some_and(|l| {
-                    matches!(f.ty(l), Type::Integer(i) if i.bits > 1) ||
-                        matches!(f.ty(l), Type::Field)
-                })
+        // a + a -> a * 2
+        (RuleKind::DoubleMulTwo, Some(Operator::Add)) if is_binary => {
+            let left = left.unwrap();
+            let right = right.unwrap();
+            let ty = forest.ty(left);
+
+            // `u1` can't hold `2`
+            left == right && (matches!(ty, Type::Field) || matches!(ty, Type::Integer(i) if i.bits > 1))
         }
 
-        (RuleKind::MulNegOneNeg, Some(Operator::Mul)) => {
-            is_binary &&
-                right.is_some_and(|r| is_neg_one(f, r)) &&
-                left.is_some_and(|l| is_signed_type(f, l))
+        // a * 2 -> a + a
+        (RuleKind::DoubleMulTwo, Some(Operator::Mul)) if is_binary => {
+            let left = left.unwrap();
+            let right = right.unwrap();
+            let ty = forest.ty(left); // @audit this kind of checks, are redundant as Operator::Mul restrict to numeric?? i think so
+
+            is_two(forest, right) && ty.is_numeric()
         }
-        (RuleKind::MulNegOneNeg, Some(Operator::Neg)) => {
-            is_unary && left.is_some_and(|l| is_signed_type(f, l))
+
+        // (a * (-1)) -> (-a) @todo ((-1) * a)
+        (RuleKind::MulNegOneNeg, Some(Mul)) if is_binary => {
+            let l = left.unwrap();
+            let r = right.unwrap();
+            let ty = forest.ty(l);
+
+            is_neg_one(forest, r) && (ty.is_signed() || matches!(ty, Type::Field))
+        }
+
+        // (-a) -> (a * (-1)) @todo ((-1) * a)
+        (RuleKind::MulNegOneNeg, Some(Neg)) if is_unary => {
+            let l = left.unwrap();
+            let ty = forest.ty(l);
+
+            ty.is_signed() || matches!(ty, Type::Field)
         }
 
         // ─────────────────────────────────────────────────────────────────────────
         // Injection rules (obfuscation) - only when there's no existing operator
         // ─────────────────────────────────────────────────────────────────────────
+        // a -> ((a - n) + n) @todo subadd
         (RuleKind::InjectAddSub | RuleKind::InjectSubAdd | RuleKind::InjectMulDiv, None) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Field))
+            let left = left.unwrap();
+            let ty = forest.ty(left);
+
+            matches!(ty, Type::Field) || ty.is_signed()
         }
 
+        // a -> ((a ^ n) ^ n)
         (RuleKind::InjectXorXor, None) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_) | Type::Boolean))
+            let left = left.unwrap();
+            let ty = forest.ty(left);
+            
+            ty.is_integer() || ty.is_bool()
         }
 
-        // 1 → r / r (only for Field since integer division truncates and we need r != 0)
+        // 1 -> r / r
         (RuleKind::InjectDivDiv, None) => {
-            left.is_some_and(|l| is_one(f, l) && matches!(f.ty(l), Type::Field))
+            let left = left.unwrap();
+            let ty = forest.ty(left);
+
+            is_one(forest, left) && ty.is_numeric()
         }
 
-        // a → a | 0 (for integers)
-        (RuleKind::InjectOrZero, None) => left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_))),
+        // a -> a | 0
+        (RuleKind::InjectOrZero, None) => {
+            let left = left.unwrap();
+            let ty = forest.ty(left);
 
-        // a → a & a (for integers and booleans)
+            ty.is_integer()
+        }
+
+        // a -> a & a
         (RuleKind::InjectAndSelf, None) => {
-            left.is_some_and(|l| matches!(f.ty(l), Type::Integer(_) | Type::Boolean))
+            let left = left.unwrap();
+            let ty = forest.ty(left);
+
+            ty.is_integer() || ty.is_bool()
         }
 
         _ => false,
@@ -607,16 +724,34 @@ fn matches_rule(
 /// Get all operators that a rule can target (for building the index)
 fn operators_for_rule(kind: &RuleKind) -> Vec<Operator> {
     match kind {
-        RuleKind::SwapOperands { ops } | RuleKind::Associate { ops } => ops.to_vec(),
+        RuleKind::SwapOperands => vec![Add, Mul, And, Or, Xor, Equal, NotEqual],
+        RuleKind::Associate => vec![Add, Mul, And, Or, Xor],
         RuleKind::AssociateSub => vec![Sub],
         RuleKind::AssociateDiv => vec![Mul],
-        RuleKind::DivCommute => vec![Div, Mul], // Div for forward, Mul for reverse
-        RuleKind::Distribute { outer, inner } => vec![*outer, *inner],
-        RuleKind::Identity { op, .. } |
-        RuleKind::Absorb { op } |
-        RuleKind::SelfInverse { op } |
-        RuleKind::Idempotent { op } |
-        RuleKind::DoubleUnary { op } => vec![*op],
+        RuleKind::DivCommute => vec![Div, Mul],
+        RuleKind::DistributeMulAdd => vec![Mul, Add],
+        RuleKind::DistributeMulSub => vec![Mul, Sub],
+        RuleKind::DistributeAndOr => vec![And, Or],
+        RuleKind::DistributeOrAnd => vec![Or, And],
+        RuleKind::IdentityAdd => vec![Add],
+        RuleKind::IdentitySub => vec![Sub],
+        RuleKind::IdentityMul => vec![Mul],
+        RuleKind::IdentityDiv => vec![Div],
+        RuleKind::IdentityXor => vec![Xor],
+        RuleKind::IdentityOr => vec![Or],
+        RuleKind::IdentityAnd => vec![And],
+        RuleKind::IdentityShl => vec![Shl],
+        RuleKind::IdentityShr => vec![Shr],
+        RuleKind::AbsorbMul => vec![Mul],
+        RuleKind::AbsorbAnd => vec![And],
+        RuleKind::AbsorbOr => vec![Or],
+        RuleKind::SelfInverseSub => vec![Sub],
+        RuleKind::SelfInverseXor => vec![Xor],
+        RuleKind::SelfInverseDiv => vec![Div],
+        RuleKind::IdempotentAnd => vec![And],
+        RuleKind::IdempotentOr => vec![Or],
+        RuleKind::DoubleNeg => vec![Neg],
+        RuleKind::DoubleNot => vec![Not],
         RuleKind::AddNegSub | RuleKind::NegZeroSub => vec![Add, Sub, Neg],
         RuleKind::FlipComparison => vec![Less, Greater, LessOrEqual, GreaterOrEqual],
         RuleKind::NegateComparison => {
@@ -654,6 +789,14 @@ fn types_for_inject_rule(kind: &RuleKind) -> Vec<TypeKind> {
             vec![TypeKind::Signed, TypeKind::Unsigned]
         }
         RuleKind::ModOne => vec![TypeKind::Signed, TypeKind::Unsigned],
+        // Absorb injection: 0 -> a * 0, 0 -> a & 0, true -> a | true
+        RuleKind::AbsorbMul => vec![TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned],
+        RuleKind::AbsorbAnd => vec![TypeKind::Boolean, TypeKind::Signed, TypeKind::Unsigned],
+        RuleKind::AbsorbOr => vec![TypeKind::Boolean],
+        // SelfInverse injection: 0 -> a - a, 0 -> a ^ a, 1 -> a / a
+        RuleKind::SelfInverseSub => vec![TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned],
+        RuleKind::SelfInverseXor => vec![TypeKind::Boolean, TypeKind::Signed, TypeKind::Unsigned],
+        RuleKind::SelfInverseDiv => vec![TypeKind::Field],
         _ => vec![],
     }
 }
@@ -680,272 +823,337 @@ fn collect_condition_nodes(forest: &Forest) -> HashSet<NodeIndex> {
     conditions
 }
 
-/// Check if a rule uses `redirect_edges` internally (which breaks `If/Assert` conditions)
-const fn uses_redirect(kind: &RuleKind) -> bool {
-    matches!(
-        kind,
-        RuleKind::NegateComparison |
-            RuleKind::ExpandComparison |
-            RuleKind::DeMorgan |
-            RuleKind::XorToAndOr |
-            RuleKind::InjectAddSub |
-            RuleKind::InjectSubAdd |
-            RuleKind::InjectMulDiv |
-            RuleKind::InjectXorXor |
-            RuleKind::InjectDivDiv |
-            RuleKind::InjectOrZero |
-            RuleKind::InjectAndSelf |
-            RuleKind::ModOne
-    )
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Rule implementations
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn do_associate(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    let op = match op_of(f, n) {
+fn do_associate(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    let op = match op_of(f, idx) {
         Some(op) => op,
         None => return,
     };
-    let ret = ret_of(f, n);
-    let (left, right) = (f.left(n), f.right(n));
+    let ret = ret_of(f, idx);
+    let (left, right) = (f.left(idx), f.right(idx));
 
     // (a op b) op c -> a op (b op c)
     if let Some(l) = left.filter(|&l| op_of(f, l) == Some(op)) {
         let (a, b, c) = (f.left(l).unwrap(), f.right(l).unwrap(), right.unwrap());
         let new_right = f.operator(random, op, ret, b, Some(c));
-        f.replace_operand(n, 0, a);
-        f.replace_operand(n, 1, new_right);
+        f.set_child(idx, 0, a);
+        f.set_child(idx, 1, new_right);
+
         return;
     }
+
     // a op (b op c) -> (a op b) op c
     if let Some(r) = right.filter(|&r| op_of(f, r) == Some(op)) {
         let (a, b, c) = (left.unwrap(), f.left(r).unwrap(), f.right(r).unwrap());
         let new_left = f.operator(random, op, ret, a, Some(b));
-        f.replace_operand(n, 0, new_left);
-        f.replace_operand(n, 1, c);
+        f.set_child(idx, 0, new_left);
+        f.set_child(idx, 1, c);
     }
 }
 
-/// ((a - b) - c) ↔ (a - (b + c))
-fn do_associate_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    if op_of(f, n) != Some(Operator::Sub) {
+/// ((a - b) - c) <-> (a - (b + c))
+fn do_associate_sub(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    if op_of(f, idx) != Some(Operator::Sub) {
         return;
     }
-    let ret = ret_of(f, n);
-    let (left, right) = (f.left(n), f.right(n));
+    let ret = ret_of(f, idx);
+    let (left, right) = (f.left(idx), f.right(idx));
 
     // (a - b) - c -> a - (b + c)
     if let Some(l) = left.filter(|&l| op_of(f, l) == Some(Operator::Sub)) {
         let (a, b, c) = (f.left(l).unwrap(), f.right(l).unwrap(), right.unwrap());
         let new_right = f.operator(random, Operator::Add, ret, b, Some(c));
-        f.replace_operand(n, 0, a);
-        f.replace_operand(n, 1, new_right);
+        f.set_child(idx, 0, a);
+        f.set_child(idx, 1, new_right);
         return;
     }
     // a - (b + c) -> (a - b) - c
     if let Some(r) = right.filter(|&r| op_of(f, r) == Some(Operator::Add)) {
         let (a, b, c) = (left.unwrap(), f.left(r).unwrap(), f.right(r).unwrap());
         let new_left = f.operator(random, Operator::Sub, ret, a, Some(b));
-        f.replace_operand(n, 0, new_left);
-        f.replace_operand(n, 1, c);
+        f.set_child(idx, 0, new_left);
+        f.set_child(idx, 1, c);
     }
 }
 
-/// ((a / b) * c) ↔ (a * (c / b))
-fn do_associate_div(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    if op_of(f, n) != Some(Operator::Mul) {
+/// ((a / b) * c) <-> (a * (c / b))
+fn do_associate_div(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    if op_of(f, idx) != Some(Operator::Mul) {
         return;
     }
-    let ret = ret_of(f, n);
-    let (left, right) = (f.left(n), f.right(n));
+    let ret = ret_of(f, idx);
+    let (left, right) = (f.left(idx), f.right(idx));
 
     // (a / b) * c -> a * (c / b)
     if let Some(l) = left.filter(|&l| op_of(f, l) == Some(Operator::Div)) {
         let (a, b, c) = (f.left(l).unwrap(), f.right(l).unwrap(), right.unwrap());
         let new_right = f.operator(random, Operator::Div, ret, c, Some(b));
-        f.replace_operand(n, 0, a);
-        f.replace_operand(n, 1, new_right);
+        f.set_child(idx, 0, a);
+        f.set_child(idx, 1, new_right);
         return;
     }
     // a * (c / b) -> (a / b) * c
     if let Some(r) = right.filter(|&r| op_of(f, r) == Some(Operator::Div)) {
         let (a, c, b) = (left.unwrap(), f.left(r).unwrap(), f.right(r).unwrap());
         let new_left = f.operator(random, Operator::Div, ret, a, Some(b));
-        f.replace_operand(n, 0, new_left);
-        f.replace_operand(n, 1, c);
+        f.set_child(idx, 0, new_left);
+        f.set_child(idx, 1, c);
     }
 }
 
-/// (a / b) → ((1 / b) * a)
-fn do_div_commute(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    if op_of(f, n) != Some(Operator::Div) {
+/// (a / b) -> ((1 / b) * a)
+fn do_div_commute(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    if op_of(f, idx) != Some(Operator::Div) {
         return;
     }
-    let (a, b) = match (f.left(n), f.right(n)) {
+    let (a, b) = match (f.left(idx), f.right(idx)) {
         (Some(a), Some(b)) => (a, b),
         _ => return,
     };
 
-    let ty = ret_of(f, n);
+    let ty = ret_of(f, idx);
     let one = make_one(random, f, &ty);
     let one_div_b = f.operator(random, Operator::Div, ty.clone(), one, Some(b));
-    set_op(f, n, Operator::Mul);
-    f.replace_operand(n, 1, a);
-    f.replace_operand(n, 0, one_div_b);
+    set_op(f, idx, Operator::Mul);
+    f.set_child(idx, 1, a);
+    f.set_child(idx, 0, one_div_b);
 }
 
-fn do_distribute(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, outer: Operator, inner: Operator) {
-    if op_of(f, n) != Some(outer) {
+fn do_distribute(
+    random: &mut impl Rng,
+    f: &mut Forest,
+    idx: NodeIndex,
+    outer: Operator,
+    inner: Operator,
+) {
+    if op_of(f, idx) != Some(outer) {
         return;
     }
-    let left = match f.left(n).filter(|&l| op_of(f, l) == Some(inner)) {
+    let left = match f.left(idx).filter(|&l| op_of(f, l) == Some(inner)) {
         Some(l) => l,
         None => return,
     };
 
-    let ret = ret_of(f, n);
-    let (a, b, c) = (f.left(left).unwrap(), f.right(left).unwrap(), f.right(n).unwrap());
+    let ret = ret_of(f, idx);
+    let (a, b, c) = (f.left(left).unwrap(), f.right(left).unwrap(), f.right(idx).unwrap());
     let new_left = f.operator(random, outer, ret.clone(), a, Some(c));
     let new_right = f.operator(random, outer, ret, b, Some(c));
-    set_op(f, n, inner);
-    f.replace_operand(n, 0, new_left);
-    f.replace_operand(n, 1, new_right);
+    set_op(f, idx, inner);
+    f.set_child(idx, 0, new_left);
+    f.set_child(idx, 1, new_right);
 }
 
-fn do_identity(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator, identity_right: bool) {
-    // Simplification: a op identity → a
-    if op_of(f, n) == Some(op) {
-        let (keep, check) =
-            if identity_right { (f.left(n), f.right(n)) } else { (f.right(n), f.left(n)) };
-        if check.is_some_and(|c| is_identity(f, c, op)) {
-            if let Some(k) = keep {
-                redirect(f, n, k);
-            }
+fn do_identity(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex, op: Operator, _ty: &Type) {
+    // Simplification: a op identity -> a
+    if op_of(f, idx) == Some(op) {
+        let left = f.left(idx).unwrap();
+        let right = f.right(idx).unwrap();
+
+        let is_left_identity = is_identity(f, left, op, &f.ty(left));
+        let keep = if is_left_identity { right } else { left };
+
+        // Redirect edges from the operator node to the non-identity operand
+        f.redirect_edges(idx, keep);
+    } else {
+        // Injection: x -> x op identity (only when there's no operator)
+        // Capture incoming edges BEFORE creating new nodes to avoid cycles
+        let incoming = f.incoming_edges(idx);
+
+        let ty = f.ty(idx);
+        let id = make_identity(random, f, &ty, op);
+        let new = f.operator(random, op, ty, idx, Some(id));
+
+        for (parent, slot) in incoming {
+            f.set_child(parent, slot, new);
         }
-        // If we have the operator but identity check failed, do nothing (don't inject)
+    }
+}
+
+fn do_absorb(
+    random: &mut impl Rng,
+    f: &mut Forest,
+    idx: NodeIndex,
+    op: Operator,
+    ctx: &Context,
+    scope: &Scope,
+) {
+    // Simplification: a * 0 -> 0, a & 0 -> 0, a | true -> true
+    // Only applies when we have the operator and one operand is absorbing
+    if op_of(f, idx) == Some(op) {
+        let left = f.left(idx);
+        let right = f.right(idx);
+        if left.is_some_and(|l| is_absorbing(f, l, op, &f.ty(l))) ||
+            right.is_some_and(|r| is_absorbing(f, r, op, &f.ty(r)))
+        {
+            let ty = f.ty(idx);
+            let absorb = make_absorbing(random, f, &ty, op);
+            f.redirect_edges(idx, absorb);
+        }
         return;
     }
-    // Injection: x → x op identity (only when there's no operator)
-    let ty = f.ty(n);
-    let edges = f.incoming_edges(n);
-    let id = make_identity(random, f, &ty, op);
-    let (lhs, rhs) = if identity_right { (n, id) } else { (id, n) };
-    let new = f.operator(random, op, ty, lhs, Some(rhs));
-    f.redirect_edges(n, new, &edges);
-}
 
-fn do_absorb(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
-    // Simplification: a * 0 → 0, a & 0 → 0, a | true → true
-    // Only applies when we have the operator and one operand is absorbing
-    if op_of(f, n) == Some(op) {
-        let left = f.left(n);
-        let right = f.right(n);
-        if left.is_some_and(|l| is_absorbing(f, l, op)) ||
-            right.is_some_and(|r| is_absorbing(f, r, op))
-        {
-            let ty = f.ty(n);
-            let absorb = make_absorbing(random, f, &ty, op);
-            redirect(f, n, absorb);
-        }
+    // Injection: 0 -> a * 0 (for Mul), 0 -> a & 0 (for And), true -> a | true (for Or)
+    // Only when idx is the absorbing element for the operator
+    let ty = f.ty(idx);
+    if !is_absorbing(f, idx, op, &ty) {
+        return;
     }
-    // Injection case (0 → a * 0) is NOT handled here - it requires random expression generation
-    // which needs access to random/ctx/scope. Could be added as a separate InjectAbsorb rule.
+
+    // Capture incoming edges BEFORE creating new nodes to avoid cycles
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
+    let value = ty.random_value(random, ctx, scope, true);
+    let a = f.literal(random, value, ty.clone());
+    let new = f.operator(random, op, ty, a, Some(idx));
+
+    for (parent, slot) in incoming {
+        f.set_child(parent, slot, new);
+    }
 }
 
-fn do_self_inverse(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
-    // Simplification: a op a → identity (0 for Sub/Xor, 1 for Div)
-    if op_of(f, n) == Some(op) && f.left(n) == f.right(n) {
-        let ty = f.ty(n);
+fn do_self_inverse(
+    random: &mut impl Rng,
+    f: &mut Forest,
+    idx: NodeIndex,
+    op: Operator,
+    ctx: &Context,
+    scope: &Scope,
+) {
+    // Simplification: a op a -> identity (0 for Sub/Xor, 1 for Div)
+    if op_of(f, idx) == Some(op) && f.left(idx) == f.right(idx) {
+        let ty = f.ty(idx);
         let lit = match op {
             Operator::Sub | Operator::Xor => make_zero(random, f, &ty),
             Operator::Div => make_one(random, f, &ty),
             _ => return,
         };
-        redirect(f, n, lit);
+        f.redirect_edges(idx, lit);
+        return;
     }
-    // Injection case is NOT handled here - it requires random expression generation
-    // which needs access to random/ctx/scope, so injection is done via separate InjectXorXor etc.
+
+    // Injection: identity -> a op a (0 -> a - a or a ^ a, 1 -> a / a)
+    let ty = f.ty(idx);
+    let is_identity = match op {
+        Operator::Sub | Operator::Xor => is_zero(f, idx),
+        Operator::Div => is_one(f, idx),
+        _ => return,
+    };
+
+    if !is_identity {
+        return;
+    }
+
+    let mut value = ty.random_value(random, ctx, scope, true);
+    // For Div, ensure non-zero value
+    if op == Operator::Div &&
+        (value.starts_with('0') || value.starts_with("-0") || value == "false")
+    {
+        value = match &ty {
+            Type::Boolean => "true".into(),
+            Type::Field => "1Field".into(),
+            Type::Integer(i) => format!("1{}{}", if i.signed { "i" } else { "u" }, i.bits),
+            _ => format!("1{ty}"),
+        };
+    }
+
+    let a = f.literal(random, value, ty.clone());
+    let new = f.operator(random, op, ty, a, Some(a));
+    f.redirect_edges(idx, new);
 }
 
-fn do_idempotent(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
-    // Simplification: a op a → a (for And/Or)
-    if op_of(f, n) == Some(op) {
-        if f.left(n) == f.right(n) {
-            if let Some(operand) = f.left(n) {
-                redirect(f, n, operand);
+fn do_idempotent(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex, op: Operator) {
+    // Simplification: a op a -> a (for And/Or)
+    if op_of(f, idx) == Some(op) {
+        if f.left(idx) == f.right(idx) {
+            if let Some(operand) = f.left(idx) {
+                f.redirect_edges(idx, operand);
             }
         }
         // If we have the operator but idempotent check failed, do nothing (don't inject)
         return;
     }
-    // Injection: a → a op a (only for booleans, only when there's no operator)
-    if matches!(f.ty(n), Type::Boolean) {
-        let edges = f.incoming_edges(n);
-        let new = f.operator(random, op, Type::Boolean, n, Some(n));
-        f.redirect_edges(n, new, &edges);
+    // Injection: a -> a op a (for booleans and integers)
+    // Capture incoming edges BEFORE creating new nodes to avoid cycles
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
+    if matches!(ty, Type::Boolean | Type::Integer(_)) {
+        let new = f.operator(random, op, ty, idx, Some(idx));
+
+        for (parent, slot) in incoming {
+            f.set_child(parent, slot, new);
+        }
     }
 }
 
-fn do_double_unary(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, op: Operator) {
-    // Simplification: op(op(x)) → x (e.g., --a → a, !!a → a)
-    if op_of(f, n) == Some(op) && f.right(n).is_none() {
-        if let Some(inner) = f.left(n).filter(|&i| op_of(f, i) == Some(op) && f.right(i).is_none())
+fn do_double_unary(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex, op: Operator) {
+    // Simplification: op(op(x)) -> x (e.g., --a -> a, !!a -> a)
+    if op_of(f, idx) == Some(op) && f.right(idx).is_none() {
+        if let Some(inner) =
+            f.left(idx).filter(|&i| op_of(f, i) == Some(op) && f.right(i).is_none())
         {
             if let Some(x) = f.left(inner) {
-                redirect(f, n, x);
+                f.redirect_edges(idx, x);
             }
         }
         // If we have the operator but double unary check failed, do nothing (don't inject)
         return;
     }
-    // Injection: x → op(op(x)) (only when there's no operator)
-    let ty = f.ty(n);
-    let edges = f.incoming_edges(n);
-    let inner = f.operator(random, op, ty.clone(), n, None);
+    // Injection: x -> op(op(x)) (only when there's no operator)
+    // Capture incoming edges BEFORE creating new nodes to avoid cycles
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
+    let inner = f.operator(random, op, ty.clone(), idx, None);
     let outer = f.operator(random, op, ty, inner, None);
-    f.redirect_edges(n, outer, &edges);
+
+    for (parent, slot) in incoming {
+        f.set_child(parent, slot, outer);
+    }
 }
 
-fn do_add_neg_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
+fn do_add_neg_sub(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
         Some(Operator::Sub) => {
-            let right = f.right(n).unwrap();
+            let right = f.right(idx).unwrap();
             let neg = f.operator(random, Operator::Neg, f.ty(right), right, None);
-            set_op(f, n, Operator::Add);
-            f.replace_operand(n, 1, neg);
+            set_op(f, idx, Operator::Add);
+            f.set_child(idx, 1, neg);
         }
-        Some(Operator::Add) if f.right(n).is_some_and(|r| op_of(f, r) == Some(Operator::Neg)) => {
-            let b = f.left(f.right(n).unwrap()).unwrap();
-            set_op(f, n, Operator::Sub);
-            f.replace_operand(n, 1, b);
+        Some(Operator::Add) if f.right(idx).is_some_and(|r| op_of(f, r) == Some(Operator::Neg)) => {
+            let b = f.left(f.right(idx).unwrap()).unwrap();
+            set_op(f, idx, Operator::Sub);
+            f.set_child(idx, 1, b);
         }
         _ => {}
     }
 }
 
-fn do_neg_zero_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
+fn do_neg_zero_sub(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
         Some(Operator::Neg) => {
-            // -x → 0 - x
-            let operand = f.left(n).unwrap();
-            let ty = ret_of(f, n);
+            // -x -> 0 - x
+            let operand = f.left(idx).unwrap();
+            let ty = ret_of(f, idx);
             let zero = make_zero(random, f, &ty);
-            set_op(f, n, Operator::Sub);
-            f.add_operand(n, 1, operand);
-            f.replace_operand(n, 0, zero);
+            set_op(f, idx, Operator::Sub);
+            f.add_operand(idx, 1, operand);
+            f.set_child(idx, 0, zero);
         }
-        Some(Operator::Sub) if f.left(n).is_some_and(|l| is_zero(f, l)) => {
-            // 0 - x → -x
-            let right = f.right(n).unwrap();
-            set_op(f, n, Operator::Neg);
-            f.add_operand(n, 0, right);
-            f.remove_operand(n, 1);
+        Some(Operator::Sub) if f.left(idx).is_some_and(|l| is_zero(f, l)) => {
+            // 0 - x -> -x
+            let right = f.right(idx).unwrap();
+            set_op(f, idx, Operator::Neg);
+            f.add_operand(idx, 0, right);
+            f.remove_operand(idx, 1);
             // Remove old pos 0 (the duplicate edge)
             if let Some(edge) = f
                 .graph
-                .edges_directed(n, Direction::Outgoing)
+                .edges_directed(idx, Direction::Outgoing)
                 .find(|e| *e.weight() == 0 && e.target() != right)
             {
                 let id = edge.id();
@@ -956,156 +1164,167 @@ fn do_neg_zero_sub(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     }
 }
 
-fn do_flip_comparison(f: &mut Forest, n: NodeIndex) {
-    let flipped = match op_of(f, n) {
+fn do_flip_comparison(f: &mut Forest, idx: NodeIndex) {
+    let flipped = match op_of(f, idx) {
         Some(Operator::Less) => Operator::Greater,
         Some(Operator::Greater) => Operator::Less,
         Some(Operator::LessOrEqual) => Operator::GreaterOrEqual,
         Some(Operator::GreaterOrEqual) => Operator::LessOrEqual,
         _ => return,
     };
-    set_op(f, n, flipped);
-    f.swap_operands(n);
+    set_op(f, idx, flipped);
+    f.swap_operands(idx);
 }
 
-fn do_negate_comparison(random: &mut impl Rng, f: &mut Forest, n: NodeIndex, condition_nodes: &HashSet<NodeIndex>) {
+fn do_negate_comparison(
+    random: &mut impl Rng,
+    f: &mut Forest,
+    idx: NodeIndex,
+    condition_nodes: &HashSet<NodeIndex>,
+) {
     // not(a cmp b) -> a neg_cmp b
-    if op_of(f, n) == Some(Operator::Not) {
-        if let Some(inner) = f.left(n) {
+    if op_of(f, idx) == Some(Operator::Not) {
+        if let Some(inner) = f.left(idx) {
             // Don't modify the inner comparison if it's used as a condition
             if condition_nodes.contains(&inner) {
                 return;
             }
             if let Some(negated) = op_of(f, inner).and_then(negate_cmp) {
                 set_op(f, inner, negated);
-                redirect(f, n, inner);
+                f.redirect_edges(idx, inner);
                 return;
             }
         }
     }
     // a cmp b -> not(a neg_cmp b)
-    if let Some(negated) = op_of(f, n).and_then(negate_cmp) {
-        let edges = f.incoming_edges(n);
-        set_op(f, n, negated);
-        let not_node = f.operator(random, Operator::Not, Type::Boolean, n, None);
-        f.redirect_edges(n, not_node, &edges);
+    if let Some(negated) = op_of(f, idx).and_then(negate_cmp) {
+        // Capture incoming edges BEFORE creating not_node
+        let incoming = f.incoming_edges(idx);
+        set_op(f, idx, negated);
+        let not_node = f.operator(random, Operator::Not, Type::Boolean, idx, None);
+        // Redirect original parents to point to not_node (idx won't be orphaned since not_node
+        // points to it)
+        for (parent, slot) in incoming {
+            f.set_child(parent, slot, not_node);
+        }
     }
 }
 
-/// (a <= b) ↔ ((a < b) || (a == b))
-fn do_expand_comparison(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
+/// (a <= b) <-> ((a < b) || (a == b))
+fn do_expand_comparison(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
         Some(Operator::LessOrEqual) => {
             // a <= b -> (a < b) || (a == b)
-            let (a, b) = (f.left(n).unwrap(), f.right(n).unwrap());
-            let edges = f.incoming_edges(n);
+            let (a, b) = (f.left(idx).unwrap(), f.right(idx).unwrap());
+
             let less = f.operator(random, Operator::Less, Type::Boolean, a, Some(b));
             let eq = f.operator(random, Operator::Equal, Type::Boolean, a, Some(b));
             let new = f.operator(random, Operator::Or, Type::Boolean, less, Some(eq));
-            f.redirect_edges(n, new, &edges);
+            f.redirect_edges(idx, new);
         }
         Some(Operator::GreaterOrEqual) => {
             // a >= b -> (a > b) || (a == b)
-            let (a, b) = (f.left(n).unwrap(), f.right(n).unwrap());
-            let edges = f.incoming_edges(n);
+            let (a, b) = (f.left(idx).unwrap(), f.right(idx).unwrap());
+
             let greater = f.operator(random, Operator::Greater, Type::Boolean, a, Some(b));
             let eq = f.operator(random, Operator::Equal, Type::Boolean, a, Some(b));
             let new = f.operator(random, Operator::Or, Type::Boolean, greater, Some(eq));
-            f.redirect_edges(n, new, &edges);
+            f.redirect_edges(idx, new);
         }
         Some(Operator::Or) => {
             // (a < b) || (a == b) -> a <= b
-            let (left, right) = (f.left(n).unwrap(), f.right(n).unwrap());
+            let (left, right) = (f.left(idx).unwrap(), f.right(idx).unwrap());
             let left_op = op_of(f, left);
             if left_op == Some(Operator::Less) && op_of(f, right) == Some(Operator::Equal) {
                 let a = f.left(left).unwrap();
                 let b = f.right(left).unwrap();
-                let edges = f.incoming_edges(n);
+
                 let new = f.operator(random, Operator::LessOrEqual, Type::Boolean, a, Some(b));
-                f.redirect_edges(n, new, &edges);
+                f.redirect_edges(idx, new);
             } else if left_op == Some(Operator::Greater) && op_of(f, right) == Some(Operator::Equal)
             {
                 let a = f.left(left).unwrap();
                 let b = f.right(left).unwrap();
-                let edges = f.incoming_edges(n);
+
                 let new = f.operator(random, Operator::GreaterOrEqual, Type::Boolean, a, Some(b));
-                f.redirect_edges(n, new, &edges);
+                f.redirect_edges(idx, new);
             }
         }
         _ => {}
     }
 }
 
-fn do_demorgan(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    let op = op_of(f, n);
+fn do_demorgan(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    let op = op_of(f, idx);
 
     // not(a and/or b) -> not(a) or/and not(b)
     if op == Some(Operator::Not) {
-        if let Some(inner) = f.left(n) {
+        if let Some(inner) = f.left(idx) {
             let dual = match op_of(f, inner) {
                 Some(Operator::And) => Operator::Or,
                 Some(Operator::Or) => Operator::And,
                 _ => return,
             };
-            let edges = f.incoming_edges(n);
+
             let (a, b) = (f.left(inner).unwrap(), f.right(inner).unwrap());
             let not_a = f.operator(random, Operator::Not, Type::Boolean, a, None);
             let not_b = f.operator(random, Operator::Not, Type::Boolean, b, None);
             let new = f.operator(random, dual, Type::Boolean, not_a, Some(not_b));
-            f.redirect_edges(n, new, &edges);
+            f.redirect_edges(idx, new);
             return;
         }
     }
 
     // not(a) and/or not(b) -> not(a or/and b)
     if matches!(op, Some(Operator::And | Operator::Or)) {
-        let (left, right) = (f.left(n), f.right(n));
+        let (left, right) = (f.left(idx), f.right(idx));
         if left.is_some_and(|l| op_of(f, l) == Some(Operator::Not)) &&
             right.is_some_and(|r| op_of(f, r) == Some(Operator::Not))
         {
-            let edges = f.incoming_edges(n);
             let dual = if op == Some(Operator::And) { Operator::Or } else { Operator::And };
             let (a, b) = (f.left(left.unwrap()).unwrap(), f.left(right.unwrap()).unwrap());
             let inner = f.operator(random, dual, Type::Boolean, a, Some(b));
             let new = f.operator(random, Operator::Not, Type::Boolean, inner, None);
-            f.redirect_edges(n, new, &edges);
+            f.redirect_edges(idx, new);
         }
     }
 }
 
-fn do_complement_xor(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
+fn do_complement_xor(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
+        // !a -> a ^ true
         Some(Operator::Not) => {
-            let ty = ret_of(f, n);
+            let ty = ret_of(f, idx);
             let one = make_one(random, f, &ty);
-            set_op(f, n, Operator::Xor);
-            f.add_operand(n, 1, one);
+            set_op(f, idx, Operator::Xor);
+            f.add_operand(idx, 1, one);
         }
-        Some(Operator::Xor) if f.right(n).is_some_and(|r| is_one(f, r)) => {
-            set_op(f, n, Operator::Not);
-            f.remove_operand(n, 1);
+        // a ^ true -> !a
+        Some(Operator::Xor) if f.right(idx).is_some_and(|r| is_one(f, r)) => {
+            set_op(f, idx, Operator::Not);
+            f.remove_operand(idx, 1);
         }
         _ => {}
     }
 }
 
-/// (a ^ b) ↔ ((!a & b) | (a & !b))
-fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
+/// (a ^ b) <-> ((!a & b) | (a & !b))
+fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
         Some(Operator::Xor) => {
             // a ^ b -> (!a & b) | (a & !b)
-            let (a, b) = (f.left(n).unwrap(), f.right(n).unwrap());
-            let edges = f.incoming_edges(n);
+            let (a, b) = (f.left(idx).unwrap(), f.right(idx).unwrap());
+
             let not_a = f.operator(random, Operator::Not, Type::Boolean, a, None);
             let not_b = f.operator(random, Operator::Not, Type::Boolean, b, None);
             let left_and = f.operator(random, Operator::And, Type::Boolean, not_a, Some(b));
             let right_and = f.operator(random, Operator::And, Type::Boolean, a, Some(not_b));
             let new = f.operator(random, Operator::Or, Type::Boolean, left_and, Some(right_and));
-            f.redirect_edges(n, new, &edges);
+            f.redirect_edges(idx, new);
         }
         Some(Operator::Or) => {
             // (!a & b) | (a & !b) -> a ^ b
-            let (left, right) = (f.left(n).unwrap(), f.right(n).unwrap());
+            let (left, right) = (f.left(idx).unwrap(), f.right(idx).unwrap());
             if op_of(f, left) == Some(Operator::And) && op_of(f, right) == Some(Operator::And) {
                 let ll = f.left(left).unwrap();
                 let lr = f.right(left).unwrap();
@@ -1118,14 +1337,14 @@ fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
                     let b_from_left = lr;
                     let b_from_right = f.left(rr).unwrap();
                     if a_from_left == a_from_right && b_from_left == b_from_right {
-                        let edges = f.incoming_edges(n);
-                        let new = f.operator(random, 
+                        let new = f.operator(
+                            random,
                             Operator::Xor,
                             Type::Boolean,
                             a_from_left,
                             Some(b_from_left),
                         );
-                        f.redirect_edges(n, new, &edges);
+                        f.redirect_edges(idx, new);
                     }
                 }
             }
@@ -1134,53 +1353,70 @@ fn do_xor_to_and_or(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
     }
 }
 
-/// a % 1 ↔ 0
-fn do_mod_one(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    if op_of(f, n) == Some(Operator::Mod) && f.right(n).is_some_and(|r| is_one(f, r)) {
+/// a % 1 <-> 0
+fn do_mod_one(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    if op_of(f, idx) == Some(Operator::Mod) && f.right(idx).is_some_and(|r| is_one(f, r)) {
         // a % 1 -> 0
-        let ty = f.ty(n);
+        let ty = f.ty(idx);
         let zero = make_zero(random, f, &ty);
-        redirect(f, n, zero);
-    } else if is_zero(f, n) {
-        // 0 -> r % 1 (inject)
-        let ty = f.ty(n);
-        if matches!(ty, Type::Integer(_)) {
-            let edges = f.incoming_edges(n);
-            let one = make_one(random, f, &ty);
-            let new = f.operator(random, Operator::Mod, ty, n, Some(one));
-            f.redirect_edges(n, new, &edges);
+        f.redirect_edges(idx, zero);
+    } else if is_zero(f, idx) {
+        // 0 -> r % 1 (inject) - matches_rule already ensures type is Integer
+        // Capture incoming edges BEFORE creating new nodes to avoid cycles
+        let incoming = f.incoming_edges(idx);
+
+        let ty = f.ty(idx);
+        let one = make_one(random, f, &ty);
+        let new = f.operator(random, Operator::Mod, ty, idx, Some(one));
+
+        for (parent, slot) in incoming {
+            f.set_child(parent, slot, new);
         }
     }
 }
 
-/// a & 1 ↔ a % 2
-fn do_and_to_mod(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
-        Some(Operator::And) if f.right(n).is_some_and(|r| is_one(f, r)) => {
+/// a & 1 <-> a % 2
+fn do_and_to_mod(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
+        Some(Operator::And) if f.right(idx).is_some_and(|r| is_one(f, r)) => {
             // a & 1 -> a % 2
-            let ty = ret_of(f, n);
+            let ty = ret_of(f, idx);
             let two = make_two(random, f, &ty);
-            set_op(f, n, Operator::Mod);
-            f.replace_operand(n, 1, two);
+            set_op(f, idx, Operator::Mod);
+            f.set_child(idx, 1, two);
         }
-        Some(Operator::Mod) if f.right(n).is_some_and(|r| is_two(f, r)) => {
+        Some(Operator::Mod) if f.right(idx).is_some_and(|r| is_two(f, r)) => {
             // a % 2 -> a & 1
-            let ty = ret_of(f, n);
+            let ty = ret_of(f, idx);
             let one = make_one(random, f, &ty);
-            set_op(f, n, Operator::And);
-            f.replace_operand(n, 1, one);
+            set_op(f, idx, Operator::And);
+            f.set_child(idx, 1, one);
         }
         _ => {}
     }
 }
 
-/// (a << 0) → a, (a >> 0) → a
-fn do_shift_zero(f: &mut Forest, n: NodeIndex) {
-    if matches!(op_of(f, n), Some(Operator::Shl | Operator::Shr)) {
-        if f.right(n).is_some_and(|r| is_zero(f, r)) {
-            if let Some(left) = f.left(n) {
-                redirect(f, n, left);
+/// (a << 0) -> a, (a >> 0) -> a, or a -> a << 0 (injection)
+fn do_shift_zero(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    if matches!(op_of(f, idx), Some(Operator::Shl | Operator::Shr)) {
+        // Simplification: a << 0 -> a, a >> 0 -> a
+        if f.right(idx).is_some_and(|r| is_zero(f, r)) {
+            if let Some(left) = f.left(idx) {
+                f.redirect_edges(idx, left);
             }
+        }
+    } else {
+        // Injection: a -> a << 0 (randomly choose Shl or Shr)
+        // Capture incoming edges BEFORE creating new nodes to avoid cycles
+        let incoming = f.incoming_edges(idx);
+
+        let ty = f.ty(idx);
+        let zero = make_zero(random, f, &ty);
+        let op = if random.random_bool(0.5) { Operator::Shl } else { Operator::Shr };
+        let new = f.operator(random, op, ty, idx, Some(zero));
+
+        for (parent, slot) in incoming {
+            f.set_child(parent, slot, new);
         }
     }
 }
@@ -1188,120 +1424,144 @@ fn do_shift_zero(f: &mut Forest, n: NodeIndex) {
 fn do_inject(
     random: &mut impl Rng,
     f: &mut Forest,
-    n: NodeIndex,
+    idx: NodeIndex,
     op1: Operator,
     op2: Operator,
     ctx: &Context,
     scope: &Scope,
 ) {
-    let ty = f.ty(n);
-    let edges = f.incoming_edges(n);
+    // Capture incoming edges BEFORE creating new nodes to avoid redirecting edges from the new
+    // nodes themselves (which would create cycles)
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
     let value = ty.random_value(random, ctx, scope, true);
     let r = f.literal(random, value, ty.clone());
-    let first = f.operator(random, op1, ty.clone(), n, Some(r));
+    let first = f.operator(random, op1, ty.clone(), idx, Some(r));
     let second = f.operator(random, op2, ty, first, Some(r));
-    f.redirect_edges(n, second, &edges);
+
+    // Redirect only the original parents to the new node
+    for (parent, slot) in incoming {
+        f.set_child(parent, slot, second);
+    }
 }
 
 fn do_inject_nonzero(
     random: &mut impl Rng,
     f: &mut Forest,
-    n: NodeIndex,
+    idx: NodeIndex,
     ctx: &Context,
     scope: &Scope,
 ) {
-    let ty = f.ty(n);
-    let value = ty.random_value(random, ctx, scope, true);
-    // Skip if value is zero (can't divide by zero)
+    // Capture incoming edges BEFORE creating new nodes to avoid redirecting edges from the new
+    // nodes themselves (which would create cycles)
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
+    let mut value = ty.random_value(random, ctx, scope, true);
+    // Use 1 if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
-        return;
+        value = match &ty {
+            Type::Boolean => "true".into(),
+            Type::Field => "1Field".into(),
+            Type::Integer(i) => format!("1{}{}", if i.signed { "i" } else { "u" }, i.bits),
+            _ => format!("1{ty}"),
+        };
     }
-    let edges = f.incoming_edges(n);
+
     let r = f.literal(random, value, ty.clone());
-    let first = f.operator(random, Operator::Mul, ty.clone(), n, Some(r));
+    let first = f.operator(random, Operator::Mul, ty.clone(), idx, Some(r));
     let second = f.operator(random, Operator::Div, ty, first, Some(r));
-    f.redirect_edges(n, second, &edges);
+
+    // Redirect only the original parents to the new node
+    for (parent, slot) in incoming {
+        f.set_child(parent, slot, second);
+    }
 }
 
-/// 1 → r / r
+/// 1 -> r / r
 fn do_inject_div_div(
     random: &mut impl Rng,
     f: &mut Forest,
-    n: NodeIndex,
+    idx: NodeIndex,
     ctx: &Context,
     scope: &Scope,
 ) {
-    if !is_one(f, n) {
+    if !is_one(f, idx) {
         return;
     }
-    let ty = f.ty(n);
-    let value = ty.random_value(random, ctx, scope, true);
-    // Skip if value is zero (can't divide by zero)
+    let ty = f.ty(idx);
+    let mut value = ty.random_value(random, ctx, scope, true);
+    // Use 1 if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
-        return;
+        value = match &ty {
+            Type::Boolean => "true".into(),
+            Type::Field => "1Field".into(),
+            Type::Integer(i) => format!("1{}{}", if i.signed { "i" } else { "u" }, i.bits),
+            _ => format!("1{ty}"),
+        };
     }
-    let edges = f.incoming_edges(n);
+
     let r = f.literal(random, value, ty.clone());
     let new = f.operator(random, Operator::Div, ty, r, Some(r));
-    f.redirect_edges(n, new, &edges);
+    f.redirect_edges(idx, new);
 }
 
-/// a → a | 0
-fn do_inject_or_zero(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    let ty = f.ty(n);
-    if !matches!(ty, Type::Integer(_)) {
-        return;
-    }
-    let edges = f.incoming_edges(n);
+/// a -> a | 0
+fn do_inject_or_zero(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    // Capture incoming edges BEFORE creating new nodes to avoid cycles
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
     let zero = make_zero(random, f, &ty);
-    let new = f.operator(random, Operator::Or, ty, n, Some(zero));
-    f.redirect_edges(n, new, &edges);
+    let new = f.operator(random, Operator::Or, ty, idx, Some(zero));
+
+    for (parent, slot) in incoming {
+        f.set_child(parent, slot, new);
+    }
 }
 
-/// a → a & a
-fn do_inject_and_self(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    let ty = f.ty(n);
-    if !matches!(ty, Type::Integer(_)) {
-        return;
+/// a -> a & a
+fn do_inject_and_self(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    // Capture incoming edges BEFORE creating new nodes to avoid cycles
+    let incoming = f.incoming_edges(idx);
+
+    let ty = f.ty(idx);
+    let new = f.operator(random, Operator::And, ty, idx, Some(idx));
+
+    for (parent, slot) in incoming {
+        f.set_child(parent, slot, new);
     }
-    let edges = f.incoming_edges(n);
-    let new = f.operator(random, Operator::And, ty, n, Some(n));
-    f.redirect_edges(n, new, &edges);
 }
 
-fn do_double_mul_two(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    // Safety check: don't apply for u1 types - can't hold value 2
-    let ty = f.ty(n);
-    if matches!(&ty, Type::Integer(i) if i.bits == 1) {
-        return;
-    }
-
-    match op_of(f, n) {
-        Some(Operator::Add) if f.left(n) == f.right(n) => {
+fn do_double_mul_two(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    let ty = f.ty(idx);
+    match op_of(f, idx) {
+        Some(Operator::Add) if f.left(idx) == f.right(idx) => {
             let two = make_two(random, f, &ty);
-            set_op(f, n, Operator::Mul);
-            f.replace_operand(n, 1, two);
+            set_op(f, idx, Operator::Mul);
+            f.set_child(idx, 1, two);
         }
-        Some(Operator::Mul) if f.right(n).is_some_and(|r| is_two(f, r)) => {
-            let left = f.left(n).unwrap();
-            set_op(f, n, Operator::Add);
-            f.replace_operand(n, 1, left);
+        Some(Operator::Mul) if f.right(idx).is_some_and(|r| is_two(f, r)) => {
+            let left = f.left(idx).unwrap();
+            set_op(f, idx, Operator::Add);
+            f.set_child(idx, 1, left);
         }
         _ => {}
     }
 }
 
-fn do_mul_neg_one_neg(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
-    match op_of(f, n) {
-        Some(Operator::Mul) if f.right(n).is_some_and(|r| is_neg_one(f, r)) => {
-            set_op(f, n, Operator::Neg);
-            f.remove_operand(n, 1);
+fn do_mul_neg_one_neg(random: &mut impl Rng, f: &mut Forest, idx: NodeIndex) {
+    match op_of(f, idx) {
+        Some(Operator::Mul) if f.right(idx).is_some_and(|r| is_neg_one(f, r)) => {
+            set_op(f, idx, Operator::Neg);
+            f.remove_operand(idx, 1);
         }
         Some(Operator::Neg) => {
-            let ty = ret_of(f, n);
+            let ty = ret_of(f, idx);
             let neg_one = make_neg_one(random, f, &ty);
-            set_op(f, n, Operator::Mul);
-            f.add_operand(n, 1, neg_one);
+            set_op(f, idx, Operator::Mul);
+            f.add_operand(idx, 1, neg_one);
         }
         _ => {}
     }
@@ -1312,32 +1572,26 @@ fn do_mul_neg_one_neg(random: &mut impl Rng, f: &mut Forest, n: NodeIndex) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[inline(always)]
-fn op_of(f: &Forest, n: NodeIndex) -> Option<Operator> {
-    match &f.graph[n] {
+fn op_of(f: &Forest, idx: NodeIndex) -> Option<Operator> {
+    match &f.graph[idx] {
         Node::Operator { op, .. } => Some(*op),
         _ => None,
     }
 }
 
 #[inline(always)]
-fn ret_of(f: &Forest, n: NodeIndex) -> Type {
-    match &f.graph[n] {
+fn ret_of(f: &Forest, idx: NodeIndex) -> Type {
+    match &f.graph[idx] {
         Node::Operator { ret, .. } => ret.clone(),
-        _ => f.ty(n),
+        _ => f.ty(idx),
     }
 }
 
 #[inline(always)]
-fn set_op(f: &mut Forest, n: NodeIndex, new_op: Operator) {
-    if let Node::Operator { op, .. } = &mut f.graph[n] {
+fn set_op(f: &mut Forest, idx: NodeIndex, new_op: Operator) {
+    if let Node::Operator { op, .. } = &mut f.graph[idx] {
         *op = new_op;
     }
-}
-
-#[inline(always)]
-fn redirect(f: &mut Forest, from: NodeIndex, to: NodeIndex) {
-    let edges = f.incoming_edges(from);
-    f.redirect_edges(from, to, &edges);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1346,8 +1600,8 @@ fn redirect(f: &mut Forest, from: NodeIndex, to: NodeIndex) {
 
 /// Check if node is a literal with numeric value (handles bool/field/int)
 #[inline(always)]
-fn is_numeric_literal(f: &Forest, n: NodeIndex, num: i8) -> bool {
-    match &f.graph[n] {
+fn is_numeric_literal(f: &Forest, idx: NodeIndex, num: i8) -> bool {
+    match &f.graph[idx] {
         Node::Literal { value, ty } => match (num, ty) {
             (0, Type::Boolean) => value == "false",
             (1, Type::Boolean) => value == "true",
@@ -1368,23 +1622,23 @@ fn is_numeric_literal(f: &Forest, n: NodeIndex, num: i8) -> bool {
 }
 
 #[inline(always)]
-fn is_zero(f: &Forest, n: NodeIndex) -> bool {
-    is_numeric_literal(f, n, 0)
+fn is_zero(f: &Forest, idx: NodeIndex) -> bool {
+    is_numeric_literal(f, idx, 0)
 }
 
 #[inline(always)]
-fn is_one(f: &Forest, n: NodeIndex) -> bool {
-    is_numeric_literal(f, n, 1)
+fn is_one(f: &Forest, idx: NodeIndex) -> bool {
+    is_numeric_literal(f, idx, 1)
 }
 
 #[inline(always)]
-fn is_neg_one(f: &Forest, n: NodeIndex) -> bool {
-    is_numeric_literal(f, n, -1)
+fn is_neg_one(f: &Forest, idx: NodeIndex) -> bool {
+    is_numeric_literal(f, idx, -1)
 }
 
 #[inline(always)]
-fn is_two(f: &Forest, n: NodeIndex) -> bool {
-    is_numeric_literal(f, n, 2)
+fn is_two(f: &Forest, idx: NodeIndex) -> bool {
+    is_numeric_literal(f, idx, 2)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1394,9 +1648,9 @@ fn is_two(f: &Forest, n: NodeIndex) -> bool {
 /// Check if node is the left-hand side of an assignment (position 0 of Assignment node)
 /// Such nodes must NOT be transformed as they must remain valid lvalues
 #[inline(always)]
-fn is_assignment_lhs(f: &Forest, n: NodeIndex) -> bool {
+fn is_assignment_lhs(f: &Forest, idx: NodeIndex) -> bool {
     f.graph
-        .edges_directed(n, Direction::Incoming)
+        .edges_directed(idx, Direction::Incoming)
         .any(|e| *e.weight() == 0 && matches!(f.graph[e.source()], Node::Assignment { .. }))
 }
 
@@ -1404,18 +1658,8 @@ fn is_assignment_lhs(f: &Forest, n: NodeIndex) -> bool {
 // Type predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[inline(always)]
-fn is_signed_type(f: &Forest, n: NodeIndex) -> bool {
-    matches!(f.ty(n), Type::Field | Type::Integer(Integer { signed: true, .. }))
-}
-
-#[inline(always)]
-fn is_numeric_or_bool(f: &Forest, n: NodeIndex) -> bool {
-    matches!(f.ty(n), Type::Field | Type::Integer(_) | Type::Boolean)
-}
-
 fn can_apply_unary(f: &Forest, node: Option<NodeIndex>, op: Operator) -> bool {
-    node.is_some_and(|n| match f.ty(n) {
+    node.is_some_and(|idx| match f.ty(idx) {
         Type::Field => op == Operator::Neg,
         Type::Integer(Integer { signed, .. }) => {
             op == Operator::Not || (op == Operator::Neg && signed)
@@ -1429,46 +1673,42 @@ fn can_apply_unary(f: &Forest, node: Option<NodeIndex>, op: Operator) -> bool {
 // Operator properties
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Check if `n` is an identity element for `op` when used with operand type `operand_ty`.
+/// Check if `idx` is an identity element for `op` when used with operand type `operand_ty`.
 /// For And, 1 is only identity for booleans (true & a = a), not integers (1 & 3 = 1 ≠ 3).
 #[inline(always)]
-fn is_identity_for_type(f: &Forest, n: NodeIndex, op: Operator, operand_ty: &Type) -> bool {
+fn is_identity(f: &Forest, idx: NodeIndex, op: Operator, ty: &Type) -> bool {
     match op {
         Operator::Add |
         Operator::Sub |
         Operator::Xor |
         Operator::Or |
         Operator::Shl |
-        Operator::Shr => is_zero(f, n),
-        Operator::Mul | Operator::Div => is_one(f, n),
+        Operator::Shr => is_zero(f, idx),
+        Operator::Mul | Operator::Div => is_one(f, idx),
         // For And, 1 (true) is only identity for booleans
-        Operator::And => matches!(operand_ty, Type::Boolean) && is_one(f, n),
+        Operator::And => matches!(ty, Type::Boolean) && is_one(f, idx),
         _ => false,
     }
 }
 
-/// Check if `n` is an identity element for `op` (legacy version, does NOT check type for And).
-/// Callers must ensure type correctness separately when using this for And.
+/// Check if `idx` is an absorbing element for `op` when used with operand type `operand_ty`.
+/// For Or, 1 (true) is only absorbing for booleans (true | a = true), not integers.
 #[inline(always)]
-fn is_identity(f: &Forest, n: NodeIndex, op: Operator) -> bool {
+fn is_absorbing(f: &Forest, idx: NodeIndex, op: Operator, ty: &Type) -> bool {
     match op {
-        Operator::Add |
-        Operator::Sub |
-        Operator::Xor |
-        Operator::Or |
-        Operator::Shl |
-        Operator::Shr => is_zero(f, n),
-        Operator::Mul | Operator::Div | Operator::And => is_one(f, n),
+        Operator::Mul | Operator::And => is_zero(f, idx),
+        // For Or, 1 (true) is only absorbing for booleans
+        Operator::Or => matches!(ty, Type::Boolean) && is_one(f, idx),
         _ => false,
     }
 }
 
+/// Check if `ty` have `op` as an idempotent operation
 #[inline(always)]
-fn is_absorbing(f: &Forest, n: NodeIndex, op: Operator) -> bool {
+fn is_idempotent(op: Operator, ty: &Type) -> bool {
     match op {
-        Operator::Mul | Operator::And => is_zero(f, n),
-        Operator::Or => is_one(f, n),
-        _ => false,
+        Operator::And | Operator::Or => ty.is_bool() || ty.is_integer(),
+        _ => false
     }
 }
 
@@ -1498,7 +1738,7 @@ fn make_literal(random: &mut impl Rng, f: &mut Forest, ty: &Type, num: i8) -> No
         (-1, Type::Integer(i)) => format!("-1i{}", i.bits),
         (2, Type::Field) => "2Field".into(),
         (2, Type::Integer(i)) => format!("2{}{}", if i.signed { "i" } else { "u" }, i.bits),
-        (n, _) => format!("{n}{ty}"),
+        (idx, _) => format!("{idx}{ty}"),
     };
     f.literal(random, val, ty.clone())
 }
@@ -1552,10 +1792,10 @@ mod tests {
     const RESET: &str = "\x1b[0m";
 
     /// Helper to check if a rule matches for a given node
-    fn assert_matches(f: &Forest, n: NodeIndex, kind: &RuleKind) {
-        let op = op_of(f, n);
-        let left = f.left(n);
-        let right = f.right(n);
+    fn assert_matches(f: &Forest, idx: NodeIndex, kind: &RuleKind) {
+        let op = op_of(f, idx);
+        let left = f.left(idx);
+        let right = f.right(idx);
         assert!(
             matches_rule(f, op, left, right, kind),
             "Rule {:?} should match for node with op={:?}, left={:?}, right={:?}",
@@ -1568,19 +1808,12 @@ mod tests {
 
     /// Find common prefix length between two strings
     fn common_prefix_len(a: &str, b: &str) -> usize {
-        a.chars()
-            .zip(b.chars())
-            .take_while(|(ca, cb)| ca == cb)
-            .count()
+        a.chars().zip(b.chars()).take_while(|(ca, cb)| ca == cb).count()
     }
 
     /// Find common suffix length between two strings
     fn common_suffix_len(a: &str, b: &str) -> usize {
-        a.chars()
-            .rev()
-            .zip(b.chars().rev())
-            .take_while(|(ca, cb)| ca == cb)
-            .count()
+        a.chars().rev().zip(b.chars().rev()).take_while(|(ca, cb)| ca == cb).count()
     }
 
     /// Highlight the different parts of a line compared to another line
@@ -1616,37 +1849,104 @@ mod tests {
         format!("{prefix}{color}{diff}{RESET}{suffix}")
     }
 
-    fn print_diff(before: &str, after: &str) {
-        let before_lines: Vec<&str> = before.lines().collect();
-        let after_lines: Vec<&str> = after.lines().collect();
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum DiffOp {
+        Equal,
+        Delete,
+        Insert,
+    }
 
-        println!("\n{}", "=".repeat(80));
-        println!("CIRCUIT COMPARISON");
-        println!("{}\n", "=".repeat(80));
+    /// Compute line-based diff using LCS algorithm
+    fn compute_diff<'a>(
+        before_lines: &[&'a str],
+        after_lines: &[&'a str],
+    ) -> Vec<(DiffOp, usize, usize)> {
+        let idx = before_lines.len();
+        let m = after_lines.len();
 
-        let max_lines = before_lines.len().max(after_lines.len());
-
-        for i in 0..max_lines {
-            let before_line = before_lines.get(i).copied().unwrap_or("");
-            let after_line = after_lines.get(i).copied().unwrap_or("");
-
-            if before_line == after_line {
-                // Lines are identical, print without modification
-                println!("  {before_line}");
-            } else {
-                // Lines differ - highlight only the different parts
-                if !before_line.is_empty() {
-                    let highlighted = highlight_diff(before_line, after_line, RED);
-                    println!("- {highlighted}");
-                }
-                if !after_line.is_empty() {
-                    let highlighted = highlight_diff(after_line, before_line, GREEN);
-                    println!("+ {highlighted}");
+        // Build LCS table
+        let mut lcs = vec![vec![0; m + 1]; idx + 1];
+        for i in 1..=idx {
+            for j in 1..=m {
+                if before_lines[i - 1] == after_lines[j - 1] {
+                    lcs[i][j] = lcs[i - 1][j - 1] + 1;
+                } else {
+                    lcs[i][j] = lcs[i - 1][j].max(lcs[i][j - 1]);
                 }
             }
         }
 
-        println!("\n{}", "=".repeat(80));
+        // Backtrack to build diff operations
+        let mut result = Vec::new();
+        let mut i = idx;
+        let mut j = m;
+
+        while i > 0 || j > 0 {
+            if i > 0 && j > 0 && before_lines[i - 1] == after_lines[j - 1] {
+                result.push((DiffOp::Equal, i - 1, j - 1));
+                i -= 1;
+                j -= 1;
+            } else if j > 0 && (i == 0 || lcs[i][j - 1] >= lcs[i - 1][j]) {
+                result.push((DiffOp::Insert, 0, j - 1));
+                j -= 1;
+            } else if i > 0 {
+                result.push((DiffOp::Delete, i - 1, 0));
+                i -= 1;
+            }
+        }
+
+        result.reverse();
+        result
+    }
+
+    fn print_diff(before: &str, after: &str) {
+        let before_lines: Vec<&str> = before.lines().collect();
+        let after_lines: Vec<&str> = after.lines().collect();
+
+        println!("{}", "=".repeat(80));
+        println!("CIRCUIT COMPARISON");
+        println!("{}", "=".repeat(80));
+
+        let diff_ops = compute_diff(&before_lines, &after_lines);
+
+        let mut i = 0;
+        while i < diff_ops.len() {
+            let (op, before_idx, after_idx) = diff_ops[i];
+
+            match op {
+                DiffOp::Equal => {
+                    println!("  {}", before_lines[before_idx]);
+                    i += 1;
+                }
+                DiffOp::Delete => {
+                    // Check if next operation is an Insert (potential modification)
+                    if i + 1 < diff_ops.len() && diff_ops[i + 1].0 == DiffOp::Insert {
+                        let (_, _, next_after_idx) = diff_ops[i + 1];
+                        let before_line = before_lines[before_idx];
+                        let after_line = after_lines[next_after_idx];
+
+                        // Highlight the differences
+                        let highlighted_before = highlight_diff(before_line, after_line, RED);
+                        let highlighted_after = highlight_diff(after_line, before_line, GREEN);
+
+                        println!("{}-{} {}", RED, RESET, highlighted_before);
+                        println!("{}+{} {}", GREEN, RESET, highlighted_after);
+                        i += 2; // Skip both delete and insert
+                    } else {
+                        // Pure deletion - show entire line in red
+                        println!("{}-{} {}{}{}", RED, RESET, RED, before_lines[before_idx], RESET);
+                        i += 1;
+                    }
+                }
+                DiffOp::Insert => {
+                    // Pure insertion - show entire line in green
+                    println!("{}+{} {}{}{}", GREEN, RESET, GREEN, after_lines[after_idx], RESET);
+                    i += 1;
+                }
+            }
+        }
+
+        println!("{}", "=".repeat(80));
     }
 
     #[test]
@@ -1668,14 +1968,14 @@ mod tests {
             forest.input(&mut random, name.clone(), ty.clone());
         }
 
-        forest.random(&mut random, &ctx, &scope);
+        forest.random(&mut random, &ctx, &scope, true);
 
         // Clone forest before rewriting to compare
         let forest_before = forest.clone();
         let before = builder.format_circuit(&scope, &forest_before);
 
         // Apply rewriter
-        for _ in 0..15 {
+        for _ in 0..1 {
             rewriter.apply_random(&mut random, &mut forest, &ctx, &scope);
         }
 
@@ -1686,10 +1986,10 @@ mod tests {
 
     #[test]
     fn test_associate() {
-        // Test Associate rule: (a + b) + c ↔ a + (b + c)
+        // Test Associate rule: (a + b) + c <-> a + (b + c)
         let mut forest = Forest::default();
         let mut random = rand::rng();
-        let rule = RuleKind::Associate { ops: &[Operator::Add] };
+        let rule = RuleKind::Associate;
 
         // Create inputs: a, b, c
         let a = forest.input(&mut random, "a".into(), Type::Field);
@@ -1735,7 +2035,7 @@ mod tests {
 
     #[test]
     fn test_associate_sub() {
-        // Test AssociateSub rule: (a - b) - c ↔ a - (b + c)
+        // Test AssociateSub rule: (a - b) - c <-> a - (b + c)
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::AssociateSub;
@@ -1782,10 +2082,10 @@ mod tests {
 
     #[test]
     fn test_swap_operands() {
-        // Test SwapOperands rule: (a + b) ↔ (b + a)
+        // Test SwapOperands rule: (a + b) <-> (b + a)
         let mut forest = Forest::default();
         let mut random = rand::rng();
-        let rule = RuleKind::SwapOperands { ops: &[Operator::Add] };
+        let rule = RuleKind::SwapOperands;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let b = forest.input(&mut random, "b".into(), Type::Field);
@@ -1816,7 +2116,7 @@ mod tests {
 
     #[test]
     fn test_associate_div() {
-        // Test AssociateDiv rule: ((a / b) * c) ↔ (a * (c / b))
+        // Test AssociateDiv rule: ((a / b) * c) <-> (a * (c / b))
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::AssociateDiv;
@@ -1860,10 +2160,10 @@ mod tests {
 
     #[test]
     fn test_distribute() {
-        // Test Distribute rule: ((a + b) * c) ↔ ((a * c) + (b * c))
+        // Test Distribute rule: ((a + b) * c) <-> ((a * c) + (b * c))
         let mut forest = Forest::default();
         let mut random = rand::rng();
-        let rule = RuleKind::Distribute { outer: Operator::Mul, inner: Operator::Add };
+        let rule = RuleKind::DistributeMulAdd;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let b = forest.input(&mut random, "b".into(), Type::Field);
@@ -1900,10 +2200,10 @@ mod tests {
 
     #[test]
     fn test_identity_add() {
-        // Test Identity rule for Add: (a + 0) ↔ a
+        // Test Identity rule for Add: (a + 0) <-> a
         let mut forest = Forest::default();
         let mut random = rand::rng();
-        let rule = RuleKind::Identity { op: Operator::Add, identity_right: true };
+        let rule = RuleKind::IdentityAdd;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let zero = forest.literal(&mut random, "0Field".into(), Type::Field);
@@ -1921,7 +2221,7 @@ mod tests {
 
         // Apply identity: a + 0 -> a (redirects var to point to a)
         assert_matches(&forest, root, &rule);
-        do_identity(&mut random, &mut forest, root, Operator::Add, true);
+        do_identity(&mut random, &mut forest, root, Operator::Add, &Type::Field);
         println!("After identity: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         // The variable should now point to a
@@ -1930,10 +2230,10 @@ mod tests {
 
     #[test]
     fn test_identity_mul() {
-        // Test Identity rule for Mul: (a * 1) ↔ a
+        // Test Identity rule for Mul: (a * 1) <-> a
         let mut forest = Forest::default();
         let mut random = rand::rng();
-        let rule = RuleKind::Identity { op: Operator::Mul, identity_right: true };
+        let rule = RuleKind::IdentityMul;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let one = forest.literal(&mut random, "1Field".into(), Type::Field);
@@ -1944,7 +2244,7 @@ mod tests {
 
         // Apply identity: a * 1 -> a
         assert_matches(&forest, root, &rule);
-        do_identity(&mut random, &mut forest, root, Operator::Mul, true);
+        do_identity(&mut random, &mut forest, root, Operator::Mul, &Type::Field);
         println!("After identity: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -1953,9 +2253,14 @@ mod tests {
     #[test]
     fn test_self_inverse_sub() {
         // Test SelfInverse rule for Sub: (a - a) -> 0
-        let mut forest = Forest::default();
+        let ctx: Context =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
-        let rule = RuleKind::SelfInverse { op: Operator::Sub };
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        let mut forest = Forest::default();
+        let rule = RuleKind::SelfInverseSub;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
 
@@ -1965,7 +2270,7 @@ mod tests {
 
         // Apply: a - a -> 0
         assert_matches(&forest, root, &rule);
-        do_self_inverse(&mut random, &mut forest, root, Operator::Sub);
+        do_self_inverse(&mut random, &mut forest, root, Operator::Sub, &ctx, &scope);
 
         // var should now point to a zero literal
         let new_target = forest.left(var).unwrap();
@@ -1976,11 +2281,20 @@ mod tests {
     #[test]
     fn test_self_inverse_xor() {
         // Test SelfInverse rule for Xor: (a ^ a) -> 0
-        let mut forest = Forest::default();
+        let ctx: Context =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
-        let rule = RuleKind::SelfInverse { op: Operator::Xor };
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
 
-        let a = forest.input(&mut random, "a".into(), Type::Integer(Integer { bits: 32, signed: false }));
+        let mut forest = Forest::default();
+        let rule = RuleKind::SelfInverseXor;
+
+        let a = forest.input(
+            &mut random,
+            "a".into(),
+            Type::Integer(Integer { bits: 32, signed: false }),
+        );
 
         let root = forest.operator(
             &mut random,
@@ -2000,7 +2314,7 @@ mod tests {
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         assert_matches(&forest, root, &rule);
-        do_self_inverse(&mut random, &mut forest, root, Operator::Xor);
+        do_self_inverse(&mut random, &mut forest, root, Operator::Xor, &ctx, &scope);
 
         let new_target = forest.left(var).unwrap();
         println!("After self_inverse: {}", forest.get_expr_for_node(new_target));
@@ -2009,7 +2323,7 @@ mod tests {
 
     #[test]
     fn test_idempotent_and() {
-        // Test Idempotent rule for And: (a & a) ↔ a
+        // Test Idempotent rule for And: (a & a) <-> a
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2028,7 +2342,7 @@ mod tests {
 
     #[test]
     fn test_idempotent_or() {
-        // Test Idempotent rule for Or: (a | a) ↔ a
+        // Test Idempotent rule for Or: (a | a) <-> a
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2047,7 +2361,7 @@ mod tests {
 
     #[test]
     fn test_double_unary_neg() {
-        // Test DoubleUnary rule for Neg: --a ↔ a
+        // Test DoubleUnary rule for Neg: --a <-> a
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2068,7 +2382,7 @@ mod tests {
 
     #[test]
     fn test_double_unary_not() {
-        // Test DoubleUnary rule for Not: !!a ↔ a
+        // Test DoubleUnary rule for Not: !!a <-> a
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2088,7 +2402,7 @@ mod tests {
 
     #[test]
     fn test_add_neg_sub() {
-        // Test AddNegSub rule: (a - b) ↔ (a + (-b))
+        // Test AddNegSub rule: (a - b) <-> (a + (-b))
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2120,7 +2434,7 @@ mod tests {
 
     #[test]
     fn test_neg_zero_sub() {
-        // Test NegZeroSub rule: (-a) ↔ (0 - a)
+        // Test NegZeroSub rule: (-a) <-> (0 - a)
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2149,7 +2463,7 @@ mod tests {
 
     #[test]
     fn test_flip_comparison() {
-        // Test FlipComparison rule: (a < b) ↔ (b > a)
+        // Test FlipComparison rule: (a < b) <-> (b > a)
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2178,7 +2492,7 @@ mod tests {
 
     #[test]
     fn test_negate_comparison() {
-        // Test NegateComparison rule: (a < b) ↔ !(a >= b)
+        // Test NegateComparison rule: (a < b) <-> !(a >= b)
         let mut forest = Forest::default();
         let mut random = rand::rng();
 
@@ -2209,7 +2523,7 @@ mod tests {
 
     #[test]
     fn test_expand_comparison() {
-        // Test ExpandComparison rule: (a <= b) ↔ ((a < b) | (a == b))
+        // Test ExpandComparison rule: (a <= b) <-> ((a < b) | (a == b))
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::ExpandComparison;
@@ -2246,7 +2560,7 @@ mod tests {
 
     #[test]
     fn test_demorgan_and() {
-        // Test DeMorgan rule: !(a & b) ↔ (!a | !b)
+        // Test DeMorgan rule: !(a & b) <-> (!a | !b)
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::DeMorgan;
@@ -2288,7 +2602,7 @@ mod tests {
 
     #[test]
     fn test_complement_xor() {
-        // Test ComplementXor rule: !a ↔ (a ^ true)
+        // Test ComplementXor rule: !a <-> (a ^ true)
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::ComplementXor;
@@ -2320,7 +2634,7 @@ mod tests {
 
     #[test]
     fn test_xor_to_and_or() {
-        // Test XorToAndOr rule: (a ^ b) ↔ ((!a & b) | (a & !b))
+        // Test XorToAndOr rule: (a ^ b) <-> ((!a & b) | (a & !b))
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::XorToAndOr;
@@ -2361,8 +2675,16 @@ mod tests {
         let mut random = rand::rng();
         let rule = RuleKind::ModOne;
 
-        let a = forest.input(&mut random, "a".into(), Type::Integer(Integer { bits: 32, signed: false }));
-        let one = forest.literal(&mut random, "1u32".into(), Type::Integer(Integer { bits: 32, signed: false }));
+        let a = forest.input(
+            &mut random,
+            "a".into(),
+            Type::Integer(Integer { bits: 32, signed: false }),
+        );
+        let one = forest.literal(
+            &mut random,
+            "1u32".into(),
+            Type::Integer(Integer { bits: 32, signed: false }),
+        );
 
         let root = forest.operator(
             &mut random,
@@ -2392,7 +2714,7 @@ mod tests {
 
     #[test]
     fn test_and_to_mod() {
-        // Test AndToMod rule: (a & 1) ↔ (a % 2)
+        // Test AndToMod rule: (a & 1) <-> (a % 2)
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::AndToMod;
@@ -2440,7 +2762,7 @@ mod tests {
 
         // Apply: a << 0 -> a
         assert_matches(&forest, root, &rule);
-        do_shift_zero(&mut forest, root);
+        do_shift_zero(&mut random, &mut forest, root);
         println!("After shift_zero: {}", forest.get_expr_for_node(forest.left(var).unwrap()));
 
         assert_eq!(forest.left(var), Some(a));
@@ -2448,7 +2770,7 @@ mod tests {
 
     #[test]
     fn test_double_mul_two() {
-        // Test DoubleMulTwo rule: (a + a) ↔ (a * 2)
+        // Test DoubleMulTwo rule: (a + a) <-> (a * 2)
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::DoubleMulTwo;
@@ -2479,7 +2801,7 @@ mod tests {
 
     #[test]
     fn test_mul_neg_one_neg() {
-        // Test MulNegOneNeg rule: (a * -1) ↔ (-a)
+        // Test MulNegOneNeg rule: (a * -1) <-> (-a)
         let mut forest = Forest::default();
         let mut random = rand::rng();
         let rule = RuleKind::MulNegOneNeg;
@@ -2512,9 +2834,14 @@ mod tests {
     #[test]
     fn test_absorb_mul() {
         // Test Absorb rule for Mul: (a * 0) -> 0
-        let mut forest = Forest::default();
+        let ctx: Context =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
-        let rule = RuleKind::Absorb { op: Operator::Mul };
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        let mut forest = Forest::default();
+        let rule = RuleKind::AbsorbMul;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let zero = forest.literal(&mut random, "0Field".into(), Type::Field);
@@ -2525,7 +2852,7 @@ mod tests {
 
         // Apply: a * 0 -> 0
         assert_matches(&forest, root, &rule);
-        do_absorb(&mut random, &mut forest, root, Operator::Mul);
+        do_absorb(&mut random, &mut forest, root, Operator::Mul, &ctx, &scope);
 
         let result = forest.left(var).unwrap();
         println!("After absorb: {}", forest.get_expr_for_node(result));
@@ -2535,9 +2862,14 @@ mod tests {
     #[test]
     fn test_absorb_and() {
         // Test Absorb rule for And: (a & 0) -> 0 (for booleans: a & false -> false)
-        let mut forest = Forest::default();
+        let ctx: Context =
+            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
-        let rule = RuleKind::Absorb { op: Operator::And };
+        let builder = CircuitBuilder::default();
+        let scope = builder.create_scope(&mut random, &ctx);
+
+        let mut forest = Forest::default();
+        let rule = RuleKind::AbsorbAnd;
 
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
         let false_lit = forest.literal(&mut random, "false".into(), Type::Boolean);
@@ -2548,7 +2880,7 @@ mod tests {
 
         // Apply: a & false -> false
         assert_matches(&forest, root, &rule);
-        do_absorb(&mut random, &mut forest, root, Operator::And);
+        do_absorb(&mut random, &mut forest, root, Operator::And, &ctx, &scope);
 
         let result = forest.left(var).unwrap();
         println!("After absorb: {}", forest.get_expr_for_node(result));
@@ -2561,7 +2893,7 @@ mod tests {
         // This prevents invalid transformations like (bool_expr - false)
         let mut forest = Forest::default();
         let mut random = rand::rng();
-        let rule = RuleKind::Identity { op: Operator::Sub, identity_right: true };
+        let rule = RuleKind::IdentitySub;
 
         // Create a boolean XOR expression
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
@@ -2570,7 +2902,8 @@ mod tests {
 
         // Create Sub expression with boolean operands: xor_expr - false
         let false_lit = forest.literal(&mut random, "false".into(), Type::Boolean);
-        let sub_expr = forest.operator(&mut random, Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
+        let sub_expr =
+            forest.operator(&mut random, Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
 
         // The Identity rule should NOT match this because Sub is not valid for booleans
         let op = op_of(&forest, sub_expr);

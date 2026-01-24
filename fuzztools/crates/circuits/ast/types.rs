@@ -117,6 +117,24 @@ impl Type {
     }
 
     #[inline(always)]
+    pub const fn is_primitive(&self) -> bool {
+        matches!(
+            self.kind(),
+            TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned | TypeKind::Boolean
+        )
+    }
+
+    #[inline(always)]
+    pub const fn is_numeric(&self) -> bool {
+        matches!(self.kind(), TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned)
+    }
+
+    #[inline(always)]
+    pub const fn is_integer(&self) -> bool {
+        self.is_unsigned() || self.is_signed()
+    }
+
+    #[inline(always)]
     pub const fn is_signed(&self) -> bool {
         matches!(self.kind(), TypeKind::Signed)
     }
@@ -124,6 +142,11 @@ impl Type {
     #[inline(always)]
     pub const fn is_unsigned(&self) -> bool {
         matches!(self.kind(), TypeKind::Unsigned)
+    }
+
+    #[inline(always)]
+    pub const fn is_bool(&self) -> bool {
+        matches!(self.kind(), TypeKind::Boolean)
     }
 
     #[inline(always)]
@@ -178,14 +201,6 @@ impl Type {
             Type::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
             Type::Slice(_) | Type::Lambda(_) | Type::Empty => false,
         }
-    }
-
-    #[inline(always)]
-    pub const fn is_primitive(&self) -> bool {
-        matches!(
-            self.kind(),
-            TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned | TypeKind::Boolean
-        )
     }
 
     #[inline(always)]
