@@ -89,10 +89,17 @@ enum TestResult {
         t2: Duration,
     },
 
-    NotInteresting { t1: Duration, t2: Option<Duration>, is_proof: bool, is_verification: bool},
+    NotInteresting {
+        t1: Duration,
+        t2: Option<Duration>,
+        is_proof: bool,
+        is_verification: bool,
+    },
 
     /// Known error (overflow, underflow, etc.) - not a bug
-    KnownError { t1: Duration },
+    KnownError {
+        t1: Duration,
+    },
 }
 
 pub(crate) struct App {
@@ -435,7 +442,7 @@ impl App {
                                                                     t1,
                                                                     t2: Some(t2),
                                                                     is_proof: false,
-                                                                    is_verification: true
+                                                                    is_verification: true,
                                                                 })
                                                                 .await; // @todo shuld be a bug?
                                                         }
@@ -497,7 +504,7 @@ impl App {
                                                             t1,
                                                             t2: Some(t2),
                                                             is_proof: true,
-                                                            is_verification: false
+                                                            is_verification: false,
                                                         })
                                                         .await;
                                                 }
@@ -528,7 +535,12 @@ impl App {
                                         }
                                     }
                                     _ => {
-                                        let _ = worker_tx.send(TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false });
+                                        let _ = worker_tx.send(TestResult::NotInteresting {
+                                            t1,
+                                            t2: None,
+                                            is_proof: false,
+                                            is_verification: false,
+                                        });
                                     }
                                 }
                             }
@@ -556,7 +568,12 @@ impl App {
                             }
                         }
                         _ => {
-                            let _ = worker_tx.send(TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false });
+                            let _ = worker_tx.send(TestResult::NotInteresting {
+                                t1,
+                                t2: None,
+                                is_proof: false,
+                                is_verification: false,
+                            });
                         }
                     }
 
@@ -698,17 +715,26 @@ impl App {
         error: &str,
     ) {
         let dir = format!("{}/compile_mismatch_{}", self.crash_dir, job_id);
-        let _ = fs::create_dir_all(&dir);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
+            return;
+        }
 
         let (passed, failed) =
             if original_compiled { ("original", "rewritten") } else { ("rewritten", "original") };
 
-        let _ = fs::write(format!("{}/original.nr", dir), original);
-        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
-        let _ = fs::write(
+        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
+            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
+            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(
             format!("{}/info.txt", dir),
             format!("Passed: {}\nFailed: {}\n\nError:\n{}", passed, failed, error),
-        );
+        ) {
+            eprintln!("{RED}[!] Failed to write info.txt: {}{RESET}", e);
+        }
     }
 
     fn save_soundness_bug(
@@ -721,18 +747,29 @@ impl App {
         rewritten_output: &str,
     ) {
         let dir = format!("{}/possible_soundness_bug_{}", self.crash_dir, job_id);
-        let _ = fs::create_dir_all(&dir);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
+            return;
+        }
 
-        let _ = fs::write(format!("{}/original.nr", dir), original);
-        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
-        let _ = fs::write(format!("{}/Prover.toml", dir), prover_toml);
-        let _ = fs::write(
+        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
+            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
+            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/Prover.toml", dir), prover_toml) {
+            eprintln!("{RED}[!] Failed to write Prover.toml: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(
             format!("{}/divergence.txt", dir),
             format!(
                 "Original output:\n{}\n\nRewritten output:\n{}",
                 original_output, rewritten_output
             ),
-        );
+        ) {
+            eprintln!("{RED}[!] Failed to write divergence.txt: {}{RESET}", e);
+        }
     }
 
     fn save_proof_mismatch(
@@ -745,18 +782,29 @@ impl App {
         rewritten_result: &str,
     ) {
         let dir = format!("{}/proof_mismatch_{}", self.crash_dir, job_id);
-        let _ = fs::create_dir_all(&dir);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
+            return;
+        }
 
-        let _ = fs::write(format!("{}/original.nr", dir), original);
-        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
-        let _ = fs::write(format!("{}/Prover.toml", dir), prover_toml);
-        let _ = fs::write(
+        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
+            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
+            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/Prover.toml", dir), prover_toml) {
+            eprintln!("{RED}[!] Failed to write Prover.toml: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(
             format!("{}/proof_divergence.txt", dir),
             format!(
                 "Original proof result:\n{}\n\nRewritten proof result:\n{}",
                 original_result, rewritten_result
             ),
-        );
+        ) {
+            eprintln!("{RED}[!] Failed to write proof_divergence.txt: {}{RESET}", e);
+        }
     }
 
     fn save_verification_mismatch(
@@ -769,18 +817,29 @@ impl App {
         rewritten_result: &str,
     ) {
         let dir = format!("{}/verification_mismatch_{}", self.crash_dir, job_id);
-        let _ = fs::create_dir_all(&dir);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
+            return;
+        }
 
-        let _ = fs::write(format!("{}/original.nr", dir), original);
-        let _ = fs::write(format!("{}/rewritten.nr", dir), rewritten);
-        let _ = fs::write(format!("{}/Prover.toml", dir), prover_toml);
-        let _ = fs::write(
+        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
+            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
+            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(format!("{}/Prover.toml", dir), prover_toml) {
+            eprintln!("{RED}[!] Failed to write Prover.toml: {}{RESET}", e);
+        }
+        if let Err(e) = fs::write(
             format!("{}/verification_divergence.txt", dir),
             format!(
                 "Original verification result:\n{}\n\nRewritten verification result:\n{}",
                 original_result, rewritten_result
             ),
-        );
+        ) {
+            eprintln!("{RED}[!] Failed to write verification_divergence.txt: {}{RESET}", e);
+        }
     }
 
     fn parse_output(output: &str) -> (bool, String) {
