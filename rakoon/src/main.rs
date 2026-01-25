@@ -1,6 +1,8 @@
 mod app;
 mod constants;
 
+use std::{thread, time::Duration};
+
 use anyhow::Result;
 use app::App;
 use clap::Parser;
@@ -41,6 +43,9 @@ struct Cli {
 
     #[arg(long, help = "Number of txs per batch", default_value_t = 100)]
     batch_size: usize,
+
+    #[arg(long, help = "Start delay (nvm, used in private env)", default_value_t = 0)]
+    start_delay: u64
 }
 
 #[tokio::main]
@@ -67,6 +72,8 @@ async fn main() -> Result<()> {
         cli.workers,
         cli.batch_size
     );
+
+    thread::sleep(Duration::from_secs(cli.start_delay));
 
     // Run the application
     let mut app = App::new(
