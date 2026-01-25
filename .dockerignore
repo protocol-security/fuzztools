@@ -1,0 +1,11 @@
+target/
+crashes/
+*.dot
+*.svg
+.git/
+.gitignore
+.vscode/
+.idea/
+.cursor/
+circuzz/
+*.md
