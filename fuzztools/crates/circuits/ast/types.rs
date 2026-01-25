@@ -131,7 +131,7 @@ impl Type {
 
     #[inline(always)]
     pub const fn is_integer(&self) -> bool {
-        self.is_unsigned() || self.is_signed()
+        matches!(self.kind(), TypeKind::Unsigned | TypeKind::Signed)
     }
 
     #[inline(always)]
@@ -155,26 +155,16 @@ impl Type {
     }
 
     #[inline(always)]
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        with_suffix: bool,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         match self {
-            Type::Field => format!(
-                "{}{}",
-                random_field_element(random, ctx, "bn254"),
-                if with_suffix { "Field" } else { "" }
-            ),
-            Type::Integer(i) => i.random_value(random, ctx, with_suffix),
+            Type::Field => random_field_element(random, ctx, "bn254", true),
+            Type::Integer(i) => i.random_value(random, ctx),
             Type::Boolean => random.random_bool(0.5).to_string(),
             Type::String(s) => s.random_value(random, ctx),
-            Type::Array(a) => a.random_value(random, ctx, scope, with_suffix),
-            Type::Slice(s) => s.random_value(random, ctx, scope, with_suffix),
-            Type::Tuple(t) => t.random_value(random, ctx, scope, with_suffix),
-            Type::Struct(s) => s.random_value(random, ctx, scope, with_suffix),
+            Type::Array(a) => a.random_value(random, ctx, scope),
+            Type::Slice(s) => s.random_value(random, ctx, scope),
+            Type::Tuple(t) => t.random_value(random, ctx, scope),
+            Type::Struct(s) => s.random_value(random, ctx, scope),
             Type::Lambda(l) => l.random_value(random, ctx, scope),
             Type::Empty => "()".to_string(),
         }
@@ -238,7 +228,7 @@ impl Type {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Integer {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, with_suffix: bool) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let ty = format!("{}{}", if self.signed { "i" } else { "u" }, self.bits);
 
         // This is a helper macro, dont mind it
@@ -271,7 +261,7 @@ impl Integer {
             pick!(0, max, [0, 1, max]).to_string()
         };
 
-        format!("{}{}", value, if with_suffix { ty } else { String::new() })
+        format!("{}{}", value, ty)
     }
 }
 
@@ -294,65 +284,38 @@ impl StringType {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Array {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        with_suffix: bool,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope, with_suffix)).collect();
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
 
         format!("[{}]", elems.join(", "))
     }
 }
 
 impl Slice {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        with_suffix: bool,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope, with_suffix)).collect();
+            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
 
         format!("&[{}]", elems.join(", "))
     }
 }
 
 impl Tuple {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        with_suffix: bool,
-    ) -> String {
-        let elems: Vec<_> = self
-            .elements
-            .iter()
-            .map(|elem_ty| elem_ty.random_value(random, ctx, scope, with_suffix))
-            .collect();
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+        let elems: Vec<_> =
+            self.elements.iter().map(|elem_ty| elem_ty.random_value(random, ctx, scope)).collect();
 
         format!("({})", elems.join(", "))
     }
 }
 
 impl Struct {
-    pub fn random_value(
-        &self,
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        with_suffix: bool,
-    ) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         let fields: Vec<_> = self
             .fields
             .iter()
-            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope, with_suffix)))
+            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope)))
             .collect();
 
         format!("{} {{ {} }}", self.name, fields.join(", "))

@@ -36,16 +36,29 @@ pub fn bernoulli(random: &mut impl Rng, prob: f64) -> bool {
     random.random_bool(prob.clamp(0.0, 1.0))
 }
 
-pub fn random_field_element(random: &mut impl Rng, ctx: &Context, curve: &str) -> U256 {
+pub fn random_field_element(
+    random: &mut impl Rng,
+    ctx: &Context,
+    curve: &str,
+    with_type: bool,
+) -> String {
     let prime = curve_prime(curve);
 
-    if bernoulli(random, ctx.boundary_value_probability) {
+    let element = if bernoulli(random, ctx.boundary_value_probability) {
         *[U256::ZERO, U256::ONE, prime - U256::ONE].choose(random).unwrap()
     } else if bernoulli(random, ctx.small_value_probability) {
         U256::from(random.random_range(0..=ctx.max_small_value))
     } else {
         U256::random(random) % prime
+    };
+
+    let mut value = element.to_string();
+
+    if with_type {
+        value.push_str("Field")
     }
+
+    value
 }
 
 pub const CHARACTERS: [&str; 58] = [

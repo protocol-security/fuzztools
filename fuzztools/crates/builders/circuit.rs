@@ -8,6 +8,7 @@ use crate::circuits::{
     context::Context,
     generators::types::TypeLocation,
     scope::Scope,
+    utils::random_field_element,
     Circuit,
 };
 use rand::Rng;
@@ -107,7 +108,16 @@ impl CircuitBuilder {
         scope
             .inputs
             .iter()
-            .map(|(name, ty, _)| format!("{name} = {}", ty.random_value(random, ctx, scope, false)))
+            .map(|(name, ty, _)| {
+                format!(
+                    "{name} = {}",
+                    if matches!(ty, Type::Field) {
+                        random_field_element(random, ctx, "bn254", true)
+                    } else {
+                        ty.random_value(random, ctx, scope)
+                    }
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -124,7 +134,7 @@ impl CircuitBuilder {
         // Create globals (can be used in functions or main)
         for i in 0..random.random_range(ctx.min_globals_count..=ctx.max_globals_count) {
             let ty = Type::random(random, ctx, &scope, TypeLocation::Default);
-            let value = ty.random_value(random, ctx, &scope, true);
+            let value = ty.random_value(random, ctx, &scope);
             scope.globals.push((format!("global{i}"), ty, value));
         }
 

@@ -45,7 +45,7 @@ struct Cli {
     batch_size: usize,
 
     #[arg(long, help = "Start delay (nvm, used in private env)", default_value_t = 0)]
-    start_delay: u64
+    start_delay: u64,
 }
 
 #[tokio::main]

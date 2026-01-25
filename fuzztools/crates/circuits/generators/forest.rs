@@ -211,7 +211,7 @@ impl Forest {
         }
 
         // Generate a new literal
-        let value = ty.random_value(random, ctx, scope, true);
+        let value = ty.random_value(random, ctx, scope);
         self.literal(random, value, ty.clone())
     }
 
@@ -618,7 +618,7 @@ impl Forest {
         let Some(&condition) =
             self.type_kinds.get(&TypeKind::Boolean).and_then(|c| c.choose(random))
         else {
-            return
+            return;
         };
         let message = random
             .random_bool(ctx.assert_message_probability)

@@ -433,7 +433,7 @@ impl Forest {
                 .filter(|&&i| matches!(self.graph[i], Node::Variable { .. } | Node::Input { .. }))
                 .choose(random)
                 .map(|&i| self.get_expr_for_node(i))
-                .unwrap_or_else(|| ret.random_value(random, ctx, scope, true));
+                .unwrap_or_else(|| ret.random_value(random, ctx, scope));
 
             self.return_expr = Some(value);
         }

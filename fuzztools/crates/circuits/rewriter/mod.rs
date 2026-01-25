@@ -1076,7 +1076,7 @@ fn do_absorb(
     let incoming = f.incoming_edges(idx);
 
     let ty = f.ty(idx);
-    let value = ty.random_value(random, ctx, scope, true);
+    let value = ty.random_value(random, ctx, scope);
     let a = f.literal(random, value, ty.clone());
     let new = f.operator(random, op, ty, a, Some(idx));
 
@@ -1117,7 +1117,7 @@ fn do_self_inverse(
         return;
     }
 
-    let mut value = ty.random_value(random, ctx, scope, true);
+    let mut value = ty.random_value(random, ctx, scope);
     // For Div, ensure non-zero value
     if op == Operator::Div &&
         (value.starts_with('0') || value.starts_with("-0") || value == "false")
@@ -1512,7 +1512,7 @@ fn do_inject(
     let incoming = f.incoming_edges(idx);
 
     let ty = f.ty(idx);
-    let value = ty.random_value(random, ctx, scope, true);
+    let value = ty.random_value(random, ctx, scope);
     let r = f.literal(random, value, ty.clone());
     let first = f.operator(random, op1, ty.clone(), idx, Some(r));
     let second = f.operator(random, op2, ty, first, Some(r));
@@ -1535,7 +1535,7 @@ fn do_inject_nonzero(
     let incoming = f.incoming_edges(idx);
 
     let ty = f.ty(idx);
-    let mut value = ty.random_value(random, ctx, scope, true);
+    let mut value = ty.random_value(random, ctx, scope);
     // Use 1 if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
         value = match &ty {
@@ -1568,7 +1568,7 @@ fn do_inject_div_div(
         return;
     }
     let ty = f.ty(idx);
-    let mut value = ty.random_value(random, ctx, scope, true);
+    let mut value = ty.random_value(random, ctx, scope);
     // Use 1 if value is zero (can't divide by zero)
     if value.starts_with('0') || value.starts_with("-0") || value == "false" {
         value = match &ty {
