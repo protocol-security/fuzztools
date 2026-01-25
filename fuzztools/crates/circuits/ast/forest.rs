@@ -239,9 +239,9 @@ impl Forest {
     // Graph queries
     // ────────────────────────────────────────────────────────────────────────────────
 
-    /// Get the child of the node at `idx` connected via edge with weight `w`.
+    /// Get the parent of the node at `idx` connected via edge with weight `w`.
     #[inline(always)]
-    pub fn child(&self, idx: NodeIndex, w: usize) -> Option<NodeIndex> {
+    pub fn parent(&self, idx: NodeIndex, w: usize) -> Option<NodeIndex> {
         self.graph
             .edges_directed(idx, Direction::Outgoing)
             .find(|e| *e.weight() == w)
@@ -250,19 +250,19 @@ impl Forest {
 
     #[inline(always)]
     pub fn left(&self, idx: NodeIndex) -> Option<NodeIndex> {
-        self.child(idx, 0)
+        self.parent(idx, 0)
     }
 
     #[inline(always)]
     pub fn right(&self, idx: NodeIndex) -> Option<NodeIndex> {
-        self.child(idx, 1)
+        self.parent(idx, 1)
     }
 
     /// Collect incoming edges to a node
     #[inline(always)]
     pub fn incoming_edges(&self, node: NodeIndex) -> Vec<(NodeIndex, usize)> {
         self.graph
-            .edges_directed(node, Direction::Incoming)
+            .edges_directed(node, Direction::Outgoing)
             .map(|e| (e.source(), *e.weight()))
             .collect()
     }
@@ -289,19 +289,21 @@ impl Forest {
     }
 
     #[inline(always)]
+    /// Adds an operand connected to `idx` with weight `w`.
     pub fn add_operand(&mut self, idx: NodeIndex, w: usize, operand: NodeIndex) {
         self.graph.add_edge(idx, operand, w);
     }
 
-    pub fn remove_operand(&mut self, n: NodeIndex, pos: usize) {
-        if let Some(edge_id) = self
+    /// Removes the operand connected to `idx` with weight `w`.
+    pub fn remove_operand(&mut self, idx: NodeIndex, w: usize) {
+        if let Some(edge) = self
             .graph
-            .edges_directed(n, Direction::Outgoing)
-            .find(|e| *e.weight() == pos)
+            .edges_directed(idx, Direction::Outgoing)
+            .find(|e| *e.weight() == w)
             .map(|e| e.id())
         {
-            let target = self.graph.edge_endpoints(edge_id).unwrap().1;
-            self.graph.remove_edge(edge_id);
+            let target = self.graph.edge_endpoints(edge).unwrap().1;
+            self.graph.remove_edge(edge);
             self.remove_if_orphaned(target);
         }
     }
@@ -326,22 +328,13 @@ impl Forest {
     pub fn redirect_edges(&mut self, old: NodeIndex, new: NodeIndex) {
         let edges: Vec<_> = self
             .graph
-            .edges_directed(old, Direction::Incoming)
-            .map(|e| (e.source(), *e.weight()))
+            .edges_directed(old, Direction::Outgoing)
+            .map(|e| (e.id(), e.target(), *e.weight()))
             .collect();
 
-        for (source, weight) in edges {
-            let ids: Vec<_> = self
-                .graph
-                .edges_directed(old, Direction::Incoming)
-                .filter(|e| e.source() == source && *e.weight() == weight)
-                .map(|e| e.id())
-                .collect();
-
-            for id in ids {
-                self.graph.remove_edge(id);
-            }
-            self.graph.add_edge(source, new, weight);
+        for (edge, target, weight) in edges {
+            self.graph.remove_edge(edge);
+            self.graph.add_edge(new, target, weight);
         }
     }
 
@@ -349,7 +342,7 @@ impl Forest {
     /// Before: parent --[w]--> child.
     /// After:  parent --[w]--> new --[0]--> child.
     pub fn insert_between(&mut self, parent: NodeIndex, w: usize, target: NodeIndex) {
-        if let Some(child) = self.child(parent, w) {
+        if let Some(child) = self.parent(parent, w) {
             if let Some(edge_id) = self
                 .graph
                 .edges_directed(parent, Direction::Outgoing)
@@ -369,7 +362,7 @@ impl Forest {
             let old_op = *op;
             *op = new_op;
 
-            // Update the hashmap to keep track of the correct state of the `Node::Operator`
+            // Update the hashmap to keep track of the correct state `Operator`s
             if let Some(v) = self.operators.get_mut(&old_op) {
                 v.retain(|&x| x != idx);
             }
@@ -378,9 +371,9 @@ impl Forest {
         }
     }
 
-    /// Remove node at position `idx` if it has no incoming edges.
+    /// Remove node at position `idx` if it has no operands.
     pub fn remove_if_orphaned(&mut self, idx: NodeIndex) {
-        if self.graph.edges_directed(idx, Direction::Incoming).next().is_some() {
+        if self.graph.edges_directed(idx, Direction::Outgoing).next().is_some() {
             return;
         }
 
@@ -393,6 +386,12 @@ impl Forest {
         let ty_kind = ty.kind();
         let node = &self.graph[idx];
         let node_kind = node.kind();
+        let name = match node {
+            Node::Variable { name, mutable: true, .. } => {
+                Some(name)
+            }
+            _ => None
+        };
         let op = match node {
             Node::Operator { op, .. } => Some(*op),
             _ => None,
@@ -408,11 +407,16 @@ impl Forest {
         if let Some(v) = self.node_kinds.get_mut(&node_kind) {
             v.retain(|&x| x != idx);
         }
+        if let Some(name) = name {
+            self.mutables.remove(name);
+        }
         if let Some(op) = op {
             if let Some(v) = self.operators.get_mut(&op) {
                 v.retain(|&x| x != idx);
             }
         }
+
+        // @todo we do not remove callables as there is no way for a lambda call to be orphaned
 
         self.graph.remove_node(idx);
     }
@@ -679,7 +683,7 @@ mod tests {
         );
 
         // Add variable node
-        let _ = forest.variable(
+        let var = forest.variable(
             &mut random,
             "result".to_string(),
             Type::Integer(Integer { bits: 32, signed: true }),
@@ -687,6 +691,8 @@ mod tests {
             false,
             op,
         );
+
+        forest.redirect_edges(op, var);
 
         // Save forest as DOT file
         forest.save_as_dot(&std::env::current_dir().unwrap().join("test_forest.dot"));

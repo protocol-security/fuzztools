@@ -145,12 +145,8 @@ impl std::fmt::Display for Node {
             Self::Assignment { op: Some(op), .. } => write!(f, "{}=", op),
             Self::Assignment { op: None, .. } => write!(f, "="),
             Self::ForLoop { .. } => write!(f, "for"),
-            Self::If { .. } => {
-                write!(f, "if")
-            }
-            Self::Assert { .. } => {
-                write!(f, "assert")
-            }
+            Self::If { .. } => write!(f, "if"),
+            Self::Assert { .. } => write!(f, "assert"),
         }
     }
 }
