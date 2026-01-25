@@ -4,12 +4,12 @@ This crate implements a structure-aware fuzzing framework that we will be reusin
 
 ### Modules
 
-- [`blockchain`](#blockchain) - Implements the consensus and execution spec types and constants.
-- [`builders`](#builders) - Handles the logic of creating **VALID** instances of *to-be-fuzzed* types.
-- [`circuits`](#circuits) - Implements the Noir IR as well as stuff to create random circuits.
-- [`mutations`](#mutations) - Implements the `Mutable` trait for various types.
-- [`rpc`](#rpc) - Implements a blazingly fast `RpcClient` to send batched JSON-RPC requests.
-- [`transactions`](#transactions) - Implements the `Transaction` and `SignedTransaction` types.
+- [`blockchain`](./fuzztools/crates/blockchain/) - Implements the consensus and execution spec types and constants.
+- [`builders`](./fuzztools/crates/builders/) - Handles the logic of creating **VALID** instances of *to-be-fuzzed* types.
+- [`circuits`](./fuzztools/crates/circuits/) - Implements the Noir IR as well as stuff to create random circuits.
+- [`mutations`](./fuzztools/crates/mutations/) - Implements the `Mutable` trait for various types.
+- [`rpc`](./fuzztools/crates/rpc/) - Implements a blazingly fast `RpcClient` to send batched JSON-RPC requests.
+- [`transactions`](./fuzztools/crates/transactions/) - Implements the `Transaction` and `SignedTransaction` types.
 
 ## Mutable
 
