@@ -96,7 +96,7 @@ impl Forest {
     #[inline(always)]
     pub fn literal(&mut self, random: &mut impl Rng, value: String, ty: Type) -> NodeIndex {
         let idx = self.graph.add_node(Node::Literal { value, ty: ty.clone() });
-        self.register(random, idx, NodeKind::Input, &ty, None);
+        self.register(random, idx, NodeKind::Literal, &ty, None);
 
         idx
     }
