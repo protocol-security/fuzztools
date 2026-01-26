@@ -323,6 +323,7 @@ impl Struct {
 }
 
 impl Lambda {
+    // @todo rethink
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
         // Compute bias from param types and return type
         let mut bias = self.params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();

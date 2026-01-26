@@ -221,8 +221,8 @@ mod tests {
         let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a + b) + c (left-associated)
-        let a_plus_b = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(b));
-        let root = forest.operator(&mut random, Operator::Add, Type::Field, a_plus_b, Some(c));
+        let a_plus_b = forest.operator(Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Add, Type::Field, a_plus_b, Some(c));
 
         // Verify initial structure: left child is (a + b), right child is c
         assert_eq!(forest.left(root), Some(a_plus_b));
@@ -270,8 +270,8 @@ mod tests {
         let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a - b) - c
-        let a_minus_b = forest.operator(&mut random, Operator::Sub, Type::Field, a, Some(b));
-        let root = forest.operator(&mut random, Operator::Sub, Type::Field, a_minus_b, Some(c));
+        let a_minus_b = forest.operator(Operator::Sub, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Sub, Type::Field, a_minus_b, Some(c));
 
         // Verify initial structure: (a - b) - c
         assert_eq!(forest.left(root), Some(a_minus_b));
@@ -314,7 +314,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Add, Type::Field, a, Some(b));
 
         // Initial: a + b
         assert_eq!(forest.left(root), Some(a));
@@ -350,8 +350,8 @@ mod tests {
         let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a / b) * c
-        let a_div_b = forest.operator(&mut random, Operator::Div, Type::Field, a, Some(b));
-        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a_div_b, Some(c));
+        let a_div_b = forest.operator(Operator::Div, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Mul, Type::Field, a_div_b, Some(c));
 
         // Verify initial: (a / b) * c
         assert_eq!(forest.left(root), Some(a_div_b));
@@ -394,8 +394,8 @@ mod tests {
         let c = forest.input(&mut random, "c".into(), Type::Field);
 
         // Build (a + b) * c
-        let a_plus_b = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(b));
-        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a_plus_b, Some(c));
+        let a_plus_b = forest.operator(Operator::Add, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Mul, Type::Field, a_plus_b, Some(c));
 
         // Verify initial: (a + b) * c
         assert_eq!(op_of(&forest, root), Some(Operator::Mul));
@@ -430,10 +430,10 @@ mod tests {
         let rule = RuleKind::IdentityAdd;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
-        let zero = forest.literal(&mut random, "0Field".into(), Type::Field);
+        let zero = forest.literal("0Field".into(), Type::Field);
 
         // Build a + 0
-        let root = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(zero));
+        let root = forest.operator(Operator::Add, Type::Field, a, Some(zero));
 
         // Add an incoming edge so redirect works
         let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
@@ -460,9 +460,9 @@ mod tests {
         let rule = RuleKind::IdentityMul;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
-        let one = forest.literal(&mut random, "1Field".into(), Type::Field);
+        let one = forest.literal("1Field".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a, Some(one));
+        let root = forest.operator(Operator::Mul, Type::Field, a, Some(one));
         let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -488,7 +488,7 @@ mod tests {
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Sub, Type::Field, a, Some(a));
+        let root = forest.operator(Operator::Sub, Type::Field, a, Some(a));
         let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -521,7 +521,6 @@ mod tests {
         );
 
         let root = forest.operator(
-            &mut random,
             Operator::Xor,
             Type::Integer(Integer { bits: 32, signed: false }),
             a,
@@ -553,7 +552,7 @@ mod tests {
 
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
-        let root = forest.operator(&mut random, Operator::And, Type::Boolean, a, Some(a));
+        let root = forest.operator(Operator::And, Type::Boolean, a, Some(a));
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -572,7 +571,7 @@ mod tests {
 
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
-        let root = forest.operator(&mut random, Operator::Or, Type::Boolean, a, Some(a));
+        let root = forest.operator(Operator::Or, Type::Boolean, a, Some(a));
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -592,8 +591,8 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Field);
 
         // Build --a
-        let neg_a = forest.operator(&mut random, Operator::Neg, Type::Field, a, None);
-        let neg_neg_a = forest.operator(&mut random, Operator::Neg, Type::Field, neg_a, None);
+        let neg_a = forest.operator(Operator::Neg, Type::Field, a, None);
+        let neg_neg_a = forest.operator(Operator::Neg, Type::Field, neg_a, None);
         let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, neg_neg_a);
         println!("Initial: {}", forest.get_expr_for_node(neg_neg_a));
 
@@ -612,8 +611,8 @@ mod tests {
 
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
-        let not_a = forest.operator(&mut random, Operator::Not, Type::Boolean, a, None);
-        let not_not_a = forest.operator(&mut random, Operator::Not, Type::Boolean, not_a, None);
+        let not_a = forest.operator(Operator::Not, Type::Boolean, a, None);
+        let not_not_a = forest.operator(Operator::Not, Type::Boolean, not_a, None);
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, not_not_a);
         println!("Initial: {}", forest.get_expr_for_node(not_not_a));
 
@@ -634,7 +633,7 @@ mod tests {
         let b = forest.input(&mut random, "b".into(), Type::Field);
 
         // Build a - b
-        let root = forest.operator(&mut random, Operator::Sub, Type::Field, a, Some(b));
+        let root = forest.operator(Operator::Sub, Type::Field, a, Some(b));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a - b -> a + (-b)
@@ -665,7 +664,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Field);
 
         // Build -a
-        let root = forest.operator(&mut random, Operator::Neg, Type::Field, a, None);
+        let root = forest.operator(Operator::Neg, Type::Field, a, None);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: -a -> 0 - a
@@ -694,7 +693,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Less, Type::Boolean, a, Some(b));
+        let root = forest.operator(Operator::Less, Type::Boolean, a, Some(b));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a < b -> b > a
@@ -723,7 +722,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Less, Type::Boolean, a, Some(b));
+        let root = forest.operator(Operator::Less, Type::Boolean, a, Some(b));
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -755,7 +754,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Field);
         let b = forest.input(&mut random, "b".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::LessOrEqual, Type::Boolean, a, Some(b));
+        let root = forest.operator(Operator::LessOrEqual, Type::Boolean, a, Some(b));
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -793,8 +792,8 @@ mod tests {
         let b = forest.input(&mut random, "b".into(), Type::Boolean);
 
         // Build !(a & b)
-        let a_and_b = forest.operator(&mut random, Operator::And, Type::Boolean, a, Some(b));
-        let not_and = forest.operator(&mut random, Operator::Not, Type::Boolean, a_and_b, None);
+        let a_and_b = forest.operator(Operator::And, Type::Boolean, a, Some(b));
+        let not_and = forest.operator(Operator::Not, Type::Boolean, a_and_b, None);
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, not_and);
         println!("Initial: {}", forest.get_expr_for_node(not_and));
 
@@ -834,7 +833,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
 
         // Build !a
-        let not_a = forest.operator(&mut random, Operator::Not, Type::Boolean, a, None);
+        let not_a = forest.operator(Operator::Not, Type::Boolean, a, None);
         println!("Initial: {}", forest.get_expr_for_node(not_a));
 
         // Apply: !a -> a ^ true
@@ -866,7 +865,7 @@ mod tests {
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
         let b = forest.input(&mut random, "b".into(), Type::Boolean);
 
-        let xor = forest.operator(&mut random, Operator::Xor, Type::Boolean, a, Some(b));
+        let xor = forest.operator(Operator::Xor, Type::Boolean, a, Some(b));
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, xor);
         println!("Initial: {}", forest.get_expr_for_node(xor));
 
@@ -905,13 +904,11 @@ mod tests {
             Type::Integer(Integer { bits: 32, signed: false }),
         );
         let one = forest.literal(
-            &mut random,
             "1u32".into(),
             Type::Integer(Integer { bits: 32, signed: false }),
         );
 
         let root = forest.operator(
-            &mut random,
             Operator::Mod,
             Type::Integer(Integer { bits: 32, signed: false }),
             a,
@@ -945,9 +942,9 @@ mod tests {
         let ty = Type::Integer(Integer { bits: 32, signed: false });
 
         let a = forest.input(&mut random, "a".into(), ty.clone());
-        let one = forest.literal(&mut random, "1u32".into(), ty.clone());
+        let one = forest.literal("1u32".into(), ty.clone());
 
-        let root = forest.operator(&mut random, Operator::And, ty.clone(), a, Some(one));
+        let root = forest.operator(Operator::And, ty.clone(), a, Some(one));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a & 1 -> a % 2
@@ -978,9 +975,9 @@ mod tests {
         let ty = Type::Integer(Integer { bits: 32, signed: false });
 
         let a = forest.input(&mut random, "a".into(), ty.clone());
-        let zero = forest.literal(&mut random, "0u32".into(), ty.clone());
+        let zero = forest.literal("0u32".into(), ty.clone());
 
-        let root = forest.operator(&mut random, Operator::Shl, ty.clone(), a, Some(zero));
+        let root = forest.operator(Operator::Shl, ty.clone(), a, Some(zero));
         let var = forest.variable(&mut random, "v".into(), ty.clone(), false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -1001,7 +998,7 @@ mod tests {
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Add, Type::Field, a, Some(a));
+        let root = forest.operator(Operator::Add, Type::Field, a, Some(a));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a + a -> a * 2
@@ -1031,9 +1028,9 @@ mod tests {
         let rule = RuleKind::MulNegOneNeg;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
-        let neg_one = forest.literal(&mut random, "-1Field".into(), Type::Field);
+        let neg_one = forest.literal("-1Field".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a, Some(neg_one));
+        let root = forest.operator(Operator::Mul, Type::Field, a, Some(neg_one));
         println!("Initial: {}", forest.get_expr_for_node(root));
 
         // Apply: a * -1 -> -a
@@ -1068,9 +1065,9 @@ mod tests {
         let rule = RuleKind::AbsorbMul;
 
         let a = forest.input(&mut random, "a".into(), Type::Field);
-        let zero = forest.literal(&mut random, "0Field".into(), Type::Field);
+        let zero = forest.literal("0Field".into(), Type::Field);
 
-        let root = forest.operator(&mut random, Operator::Mul, Type::Field, a, Some(zero));
+        let root = forest.operator(Operator::Mul, Type::Field, a, Some(zero));
         let var = forest.variable(&mut random, "v".into(), Type::Field, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -1096,9 +1093,9 @@ mod tests {
         let rule = RuleKind::AbsorbAnd;
 
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
-        let false_lit = forest.literal(&mut random, "false".into(), Type::Boolean);
+        let false_lit = forest.literal("false".into(), Type::Boolean);
 
-        let root = forest.operator(&mut random, Operator::And, Type::Boolean, a, Some(false_lit));
+        let root = forest.operator(Operator::And, Type::Boolean, a, Some(false_lit));
         let var = forest.variable(&mut random, "v".into(), Type::Boolean, false, false, root);
         println!("Initial: {}", forest.get_expr_for_node(root));
 
@@ -1121,13 +1118,13 @@ mod tests {
 
         // Create a boolean XOR expression
         let a = forest.input(&mut random, "a".into(), Type::Boolean);
-        let b = forest.literal(&mut random, "true".into(), Type::Boolean);
-        let xor_expr = forest.operator(&mut random, Operator::Xor, Type::Boolean, a, Some(b));
+        let b = forest.literal("true".into(), Type::Boolean);
+        let xor_expr = forest.operator(Operator::Xor, Type::Boolean, a, Some(b));
 
         // Create Sub expression with boolean operands: xor_expr - false
-        let false_lit = forest.literal(&mut random, "false".into(), Type::Boolean);
+        let false_lit = forest.literal("false".into(), Type::Boolean);
         let sub_expr =
-            forest.operator(&mut random, Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
+            forest.operator(Operator::Sub, Type::Boolean, xor_expr, Some(false_lit));
 
         // The Identity rule should NOT match this because Sub is not valid for booleans
         let op = op_of(&forest, sub_expr);

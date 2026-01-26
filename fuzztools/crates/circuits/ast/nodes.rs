@@ -10,7 +10,6 @@ pub enum NodeKind {
     Input,
     Literal,
     Variable,
-    Mutable,
     Operator,
     Index,
     TupleIndex,

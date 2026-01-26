@@ -212,7 +212,7 @@ impl Forest {
 
         // Generate a new literal
         let value = ty.random_value(random, ctx, scope);
-        self.literal(random, value, ty.clone())
+        self.literal(value, ty.clone())
     }
 
     /// Get nodes of a type that can be reused (only `Node::Variable` and `Node::Input`)
@@ -246,7 +246,7 @@ impl Forest {
 
         let op = *ops.choose(random).unwrap();
         let inner = self.build_expr_tree(random, ctx, scope, ty, depth + 1);
-        self.operator(random, op, ty.clone(), inner, None)
+        self.operator(op, ty.clone(), inner, None)
     }
 
     /// EXPR OP EXPR
@@ -287,10 +287,17 @@ impl Forest {
         {
             // Build a binary expression where one or both of the operands have been casted to
             // the `Operator` type.
-            (
-                self.build_casted_operand(random, ctx, scope, ty, &castable_kind, depth + 1),
-                self.build_casted_operand(random, ctx, scope, ty, &castable_kind, depth + 1),
-            )
+            let left = self.build_casted_operand(random, ctx, scope, ty, &castable_kind, depth + 1);
+
+            // Sometimes, if there is only one available type, after depletion it leaves the array
+            // empty, so fallback to non-castable expression in that case
+            let right = if self.type_kinds.get(&castable_kind).is_some_and(|v| !v.is_empty()) {
+                self.build_casted_operand(random, ctx, scope, ty, &castable_kind, depth + 1)
+            } else {
+                self.build_expr_tree(random, ctx, scope, ty, depth + 1)
+            };
+
+            (left, right)
         } else {
             // Fall back to same-type operands.
             (
@@ -299,7 +306,7 @@ impl Forest {
             )
         };
 
-        self.operator(random, op, ty.clone(), left, Some(right))
+        self.operator(op, ty.clone(), left, Some(right))
     }
 
     /// EXPR COMP EXPR
@@ -333,7 +340,7 @@ impl Forest {
         let left = self.build_expr_tree(random, ctx, scope, &ty, depth + 1);
         let right = self.build_expr_tree(random, ctx, scope, &ty, depth + 1);
 
-        self.operator(random, op, Type::Boolean, left, Some(right))
+        self.operator(op, Type::Boolean, left, Some(right))
     }
 
     /// CAST(EXPR)
@@ -351,7 +358,7 @@ impl Forest {
         let source_ty = self.ty(*idx);
         let expr = self.build_expr_tree(random, ctx, scope, &source_ty, depth + 1);
 
-        self.cast(random, expr, ty.clone())
+        self.cast(expr, ty.clone())
     }
 
     /// EXPR[IDX]
@@ -382,7 +389,7 @@ impl Forest {
         let (idx, size) = *candidates.choose(random).unwrap();
         let value = random.random_range(0..size);
 
-        self.index(random, idx, value, ty)
+        self.index(idx, value, ty)
     }
 
     /// TUPLE.POS
@@ -416,7 +423,7 @@ impl Forest {
 
         let (idx, positions, tuple_ty) = candidates.choose(random).unwrap();
         let value = *positions.choose(random).unwrap();
-        self.tuple_index(random, *idx, value, tuple_ty)
+        self.tuple_index(*idx, value, tuple_ty)
     }
 
     /// STRUCT.FIELD
@@ -450,7 +457,7 @@ impl Forest {
 
         let (idx, fields, struct_ty) = candidates.choose(random).unwrap();
         let name = fields.choose(random).unwrap().clone();
-        self.field_access(random, *idx, name, struct_ty)
+        self.field_access(*idx, name, struct_ty)
     }
 
     /// Build a cast expression (Field ← unsigned/bool, Integer ← int/Field/bool)
@@ -474,7 +481,7 @@ impl Forest {
         };
 
         let source_idx = self.build_expr_tree(random, ctx, scope, &source_ty, depth + 1);
-        self.cast(random, source_idx, ty.clone())
+        self.cast(source_idx, ty.clone())
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
@@ -492,7 +499,7 @@ impl Forest {
             .collect();
 
         if args.len() == lambda.params.len() {
-            let call_idx = self.call(random, name, *lambda.ret.clone(), args, idx);
+            let call_idx = self.call(name, *lambda.ret.clone(), args, idx);
 
             let var_name = self.next_var();
             self.variable(random, var_name, *lambda.ret, false, false, call_idx);
@@ -504,7 +511,7 @@ impl Forest {
     // ────────────────────────────────────────────────────────────────────────────────
 
     pub fn gen_assignment(&mut self, random: &mut impl Rng, ctx: &Context, scope: &Scope) {
-        let (_, &idx) = self.mutables.iter().choose(random).unwrap();
+        let (&idx, _) = self.mutables.iter().choose(random).unwrap();
         let ty = self.ty(idx);
         let value_idx = self.build_expr_tree(random, ctx, scope, &ty, ctx.max_expr_depth);
 
@@ -519,7 +526,7 @@ impl Forest {
             return;
         }
 
-        self.assignment(random, idx, value_idx, op, &ty);
+        self.assignment(idx, value_idx, op, &ty);
     }
 
     #[inline(always)]
@@ -548,7 +555,7 @@ impl Forest {
                 let input_idx = body.input(random, name.clone(), ty.clone());
 
                 if *mutable {
-                    body.mutables.insert(name.clone(), input_idx);
+                    body.mutables.insert(input_idx, name.clone());
                 }
             }
         }
