@@ -201,6 +201,7 @@ mod tests {
 
     fn compile_project(dir: &std::path::Path) -> Result<(), String> {
         let output = Command::new("nargo")
+            .env("RUST_BACKTRACE", "full")
             .args(["check", "--silence-warnings"])
             .current_dir(dir)
             .output()
@@ -215,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_generate_and_compile_circuit() {
-        let ctx =
+        let ctx: Context =
             serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
         let builder = CircuitBuilder::default();
