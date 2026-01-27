@@ -9,172 +9,168 @@ pub(crate) enum RuleKind {
     // ═══════════════════════════════════════════════════════════════════════════════
     // Structural transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// Swap operands for commutative operators: (a op b) ↔ (b op a)
-    /// Covers: Add, Mul, And, Or, Xor, Equal, NotEqual
+    /// (a op b) <-> (b op a)
     SwapOperands,
 
-    /// Re-associate operators: ((a op b) op c) ↔ (a op (b op c))
-    /// Covers: Add, Mul, And, Or, Xor
+    /// ((a op b) op c) <-> (a op (b op c))
     Associate,
 
-    /// Subtraction associativity: ((a - b) - c) ↔ (a - (b + c))
+    /// ((a - b) - c) <-> (a - (b + c))
     AssociateSub,
 
-    /// Division associativity: ((a / b) * c) ↔ (a * (c / b))
-    /// NOTE: Only valid for Field types (integer division has different semantics)
+    /// ((a / b) * c) <-> (a * (c / b))
     AssociateDiv,
 
-    /// Division commutativity: (a / b) → ((1 / b) * a)
-    /// NOTE: Only valid for Field types (integer division truncates 1/b to 0)
+    /// (a / b) <-> ((1 / b) * a)
     DivCommute,
 
-    /// Distribute: (a + b) * c ↔ (a * c) + (b * c)
+    /// (a + b) * c <-> (a * c) + (b * c)
     DistributeMulAdd,
-    /// Distribute: (a - b) * c ↔ (a * c) - (b * c)
+    /// Distribute: (a - b) * c <-> (a * c) - (b * c)
     DistributeMulSub,
-    /// Distribute: (a | b) & c ↔ (a & c) | (b & c)
+    /// Distribute: (a | b) & c <-> (a & c) | (b & c)
     DistributeAndOr,
-    /// Distribute: (a & b) | c ↔ (a | c) & (b | c)
+    /// Distribute: (a & b) | c <-> (a | c) & (b | c)
     DistributeOrAnd,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Identity and absorbing element rules
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// (a + 0) ↔ a
+    /// (a + 0) <-> a
     IdentityAdd,
-    /// (a - 0) ↔ a
+    /// (a - 0) <-> a
     IdentitySub,
-    /// (a * 1) ↔ a
+    /// (a * 1) <-> a
     IdentityMul,
-    /// (a / 1) ↔ a
+    /// (a / 1) <-> a
     IdentityDiv,
-    /// (a ^ 0) ↔ a
+    /// (a ^ 0) <-> a
     IdentityXor,
-    /// (a | 0) ↔ a
+    /// (a | 0) <-> a
     IdentityOr,
-    /// (a & 1) ↔ a (only valid for booleans)
+    /// (a & 1) <-> a (only valid for booleans)
     IdentityAnd,
-    /// (a << 0) ↔ a
+    /// (a << 0) <-> a
     IdentityShl,
-    /// (a >> 0) ↔ a
+    /// (a >> 0) <-> a
     IdentityShr,
 
-    /// (a * 0) → 0
+    /// (a * 0) <-> 0
     AbsorbMul,
-    /// (a & 0) → 0
+    /// (a & 0) <-> 0
     AbsorbAnd,
-    /// (a | true) → true (only valid for booleans)
+    /// (a | true) <-> true (only valid for booleans)
     AbsorbOr,
 
-    /// (a - a) → 0
+    /// (a - a) <-> 0
     SelfInverseSub,
-    /// (a ^ a) → 0
+    /// (a ^ a) <-> 0
     SelfInverseXor,
-    /// (a / a) → 1 (only for non-zero a)
+    /// (a / a) <-> 1 (only for non-zero a)
     SelfInverseDiv,
 
-    /// (a & a) ↔ a
+    /// (a & a) <-> a
     IdempotentAnd,
-    /// (a | a) ↔ a
+    /// (a | a) <-> a
     IdempotentOr,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Unary and negation transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// --a ↔ a
+    /// --a <-> a
     DoubleNeg,
-    /// !!a ↔ a
+    /// !!a <-> a
     DoubleNot,
 
-    /// (a - b) ↔ (a + (-b))
+    /// (a - b) <-> (a + (-b))
     AddNegSub,
 
-    /// (-a) ↔ (0 - a)
+    /// (-a) <-> (0 - a)
     NegZeroSub,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Comparison transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// Flip comparison by swapping operands: (a < b) ↔ (b > a)
+    /// Flip comparison by swapping operands: (a < b) <-> (b > a)
     /// Covers: relation-geq-to-leq, relation-leq-to-geq
     FlipComparison,
 
-    /// Negate comparison: (a < b) ↔ !(a >= b)
+    /// Negate comparison: (a < b) <-> !(a >= b)
     /// Covers: relation-leq-to-not-gth, relation-geq-to-not-lth, relation-neq-to-not-equ, etc.
     NegateComparison,
 
-    /// Expand comparison with equality: (a <= b) ↔ ((a < b) || (a == b))
+    /// Expand comparison with equality: (a <= b) <-> ((a < b) || (a == b))
     /// Covers: relation-leq-to-lth-and-equ, relation-geq-to-gth-and-equ
     ExpandComparison,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Boolean logic transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// De Morgan's laws: !(a && b) ↔ (!a || !b), !(a || b) ↔ (!a && !b)
+    /// De Morgan's laws: !(a && b) <-> (!a || !b), !(a || b) <-> (!a && !b)
     /// Covers: de-morgan-land-con/des, de-morgan-lor-con/des
     DeMorgan,
 
-    /// Complement via XOR: !a ↔ (a ^ true)
+    /// Complement via XOR: !a <-> (a ^ true)
     /// NOTE: Only valid for booleans (for integers, !a is bitwise NOT ≠ a ^ 1)
     ComplementXor,
 
-    /// XOR to AND/OR expansion: (a ^ b) ↔ ((!a & b) | (a & !b))
+    /// XOR to AND/OR expansion: (a ^ b) <-> ((!a & b) | (a & !b))
     /// Covers: lxor-to-or-and, or-and-to-lxor
     XorToAndOr,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Modulo transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// Modulo by one: (a % 1) ↔ 0
+    /// Modulo by one: (a % 1) <-> 0
     /// Covers: rem-of-one-des, rem-of-one-con
     ModOne,
 
-    /// Bitwise AND to modulo: (a & 1) ↔ (a % 2)
+    /// Bitwise AND to modulo: (a & 1) <-> (a % 2)
     /// Covers: and-to-rem, rem-to-and
     AndToMod,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Shift transformations
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// Shift by zero identity: (a << 0) → a, (a >> 0) → a
+    /// Shift by zero identity: (a << 0) <-> a, (a >> 0) <-> a
     ShiftZero,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Obfuscation (inject balanced operations)
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// Inject add/sub pair: a → ((a + r) - r) or a → ((a - r) + r)
+    /// Inject add/sub pair: a <-> ((a + r) - r) or a <-> ((a - r) + r)
     /// Covers: add-sub-random-value
     /// NOTE: Only for Field types (integer overflow breaks equivalence)
     InjectAddSub,
     InjectSubAdd,
 
-    /// Inject mul/div pair: a → ((a * r) / r)
+    /// Inject mul/div pair: a <-> ((a * r) / r)
     /// NOTE: Only for Field types (integer overflow breaks equivalence)
     InjectMulDiv,
 
-    /// Inject xor pair: a → ((a ^ r) ^ r)
-    /// Covers: inv-xor-rev (0 → r ^ r)
+    /// Inject xor pair: a <-> ((a ^ r) ^ r)
+    /// Covers: inv-xor-rev (0 <-> r ^ r)
     InjectXorXor,
 
-    /// Inject div pair: 1 → (r / r)
+    /// Inject div pair: 1 <-> (r / r)
     /// Covers: one-div
     InjectDivDiv,
 
-    /// Inject OR identity: a → (a | 0)
+    /// Inject OR identity: a <-> (a | 0)
     /// Covers: zero-or
     InjectOrZero,
 
-    /// Inject AND identity: a → (a & a) for integers
+    /// Inject AND identity: a <-> (a & a) for integers
     /// Covers: idem-and injection
     InjectAndSelf,
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // Simplification / strength reduction
     // ═══════════════════════════════════════════════════════════════════════════════
-    /// Double to multiply by two: (a + a) ↔ (a * 2)
+    /// Double to multiply by two: (a + a) <-> (a * 2)
     DoubleMulTwo,
 
-    /// Multiply by -1 to negation: (a * -1) ↔ (-a)
+    /// Multiply by -1 to negation: (a * -1) <-> (-a)
     MulNegOneNeg,
 }
 

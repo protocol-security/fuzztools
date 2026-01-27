@@ -5,10 +5,7 @@ use super::{
 };
 use crate::circuits::{context::Context, scope::Scope};
 use petgraph::{
-    graph::NodeIndex,
-    stable_graph::StableDiGraph,
-    visit::{EdgeRef, IntoEdgeReferences},
-    Direction,
+    Direction, prelude::EdgeIndex, graph::NodeIndex, stable_graph::StableDiGraph, visit::{EdgeRef, IntoEdgeReferences}
 };
 use rand::{seq::IteratorRandom, Rng};
 use std::{collections::HashMap, fmt::Write, path::Path};
@@ -312,12 +309,23 @@ impl Forest {
     }
 
     pub fn redirect_edges(&mut self, old: NodeIndex, new: NodeIndex) {
-        let edges: Vec<_> =
+        let outgoing: Vec<_> =
             self.graph.edges(old).map(|e| (e.id(), e.target(), *e.weight())).collect();
 
-        for (edge, target, weight) in edges {
+        for (edge, target, weight) in outgoing {
             self.graph.remove_edge(edge);
             self.graph.add_edge(new, target, weight);
+        }
+
+        let incoming: Vec<_> = self
+            .graph
+            .edges_directed(old, Direction::Incoming)
+            .map(|e| (e.id(), e.source(), *e.weight()))
+            .collect();
+
+        for (edge, source, weight) in incoming {
+            self.graph.remove_edge(edge);
+            self.graph.add_edge(source, new, weight);
         }
     }
 
@@ -335,13 +343,47 @@ impl Forest {
 
     /// Remove node if it has no outgoing edges (orphaned leaf).
     pub fn remove_if_orphaned(&mut self, idx: NodeIndex) {
-        if self.graph.edges(idx).next().is_some() {
+        if self.graph.edges_directed(idx, Direction::Incoming).next().is_some() {
             return;
         }
         if self.conditions.contains(&idx) {
             return;
         }
+        let ty = self.ty(idx);
+        self.remove_from_lookups(idx, &ty);
         self.graph.remove_node(idx); // @todo
+    }
+
+    pub fn left_edge(&self, idx: NodeIndex) -> EdgeIndex{
+        self.graph.edges(idx).find(|e| *e.weight() == 0).map(|e| e.id()).unwrap()
+    }
+
+    pub fn right_edge(&self, idx: NodeIndex) -> EdgeIndex{
+        self.graph.edges(idx).find(|e| *e.weight() == 1).map(|e| e.id()).unwrap()
+    }
+
+    pub fn set_child(&mut self, parent: NodeIndex, slot: usize, new_child: NodeIndex) {
+        // Remove existing edge at this slot if any
+        if let Some(edge) = self
+            .graph
+            .edges(parent) // outgoing edges from parent
+            .find(|e| *e.weight() == slot)
+            .map(|e| e.id())
+        {
+            self.graph.remove_edge(edge);
+        }
+
+        // Add new edge
+        let ty = self.ty(new_child);
+        self.add_edge(parent, new_child, slot, &ty);
+    }
+
+    #[inline(always)]
+    pub fn incoming_edges(&self, idx: NodeIndex) -> Vec<(NodeIndex, usize)> {
+        self.graph
+            .edges_directed(idx, Direction::Incoming)
+            .map(|e| (e.source(), *e.weight()))
+            .collect()
     }
 
     // ────────────────────────────────────────────────────────────────────────────────
@@ -492,7 +534,8 @@ impl Forest {
                 for field in &s.fields {
                     self.register_callable(
                         random,
-                        format!("{}.{}", accessor, field.name), // @todo ask them how to do this cause it reverts
+                        format!("{}.{}", accessor, field.name), /* @todo ask them how to do this
+                                                                 * cause it reverts */
                         &field.ty,
                         idx,
                     );
