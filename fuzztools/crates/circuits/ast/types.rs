@@ -1,8 +1,6 @@
 use crate::circuits::{
-    ast::forest::{Forest, ForestType},
     context::Context,
-    scope::Scope,
-    utils::{bernoulli, random_field_element, random_string},
+    utils::{bernoulli, random_field_element},
 };
 use rand::{seq::IndexedRandom, Rng};
 
@@ -13,85 +11,45 @@ use rand::{seq::IndexedRandom, Rng};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     Field,
-    Unsigned,
     Signed,
-    Boolean,
-    String,
+    Unsigned,
+    Bool,
     Array,
     Slice,
     Tuple,
-    Struct,
-    Lambda,
-    Empty,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Field,
     Integer(Integer),
-    Boolean,
-    String(StringType),
+    Bool,
     Array(Array),
     Slice(Slice),
     Tuple(Tuple),
-    Struct(Struct),
-    Lambda(Lambda),
-    Empty,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Integer {
-    pub bits: u32,
-    pub signed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StringType {
-    pub size: usize,
-    pub is_raw: bool,
+    pub(crate) bits: u32,
+    pub(crate) signed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Array {
-    pub ty: Box<Type>,
-    pub size: usize,
+    pub(crate) ty: Box<Type>,
+    pub(crate) size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Slice {
-    pub ty: Box<Type>,
-    pub size: usize,
+    pub(crate) ty: Box<Type>,
+    pub(crate) size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tuple {
-    pub elements: Vec<Type>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Struct {
-    pub name: String,
-    pub fields: Vec<StructField>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StructField {
-    pub name: String,
-    pub ty: Box<Type>,
-    pub visibility: Visibility,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Visibility {
-    Public,
-    PublicCrate,
-    Private,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Lambda {
-    pub params: Vec<(String, Type)>,
-    pub ret: Box<Type>,
+    pub(crate) elements: Vec<Type>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -105,130 +63,75 @@ impl Type {
             Type::Field => TypeKind::Field,
             Type::Integer(i) if i.signed => TypeKind::Signed,
             Type::Integer(_) => TypeKind::Unsigned,
-            Type::Boolean => TypeKind::Boolean,
-            Type::String(_) => TypeKind::String,
+            Type::Bool => TypeKind::Bool,
             Type::Array(_) => TypeKind::Array,
             Type::Slice(_) => TypeKind::Slice,
             Type::Tuple(_) => TypeKind::Tuple,
-            Type::Struct(_) => TypeKind::Struct,
-            Type::Lambda(_) => TypeKind::Lambda,
-            Type::Empty => TypeKind::Empty,
         }
     }
 
     #[inline(always)]
-    pub const fn is_primitive(&self) -> bool {
-        matches!(
-            self.kind(),
-            TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned | TypeKind::Boolean
-        )
-    }
-
-    #[inline(always)]
-    pub const fn is_numeric(&self) -> bool {
-        matches!(self.kind(), TypeKind::Field | TypeKind::Signed | TypeKind::Unsigned)
-    }
-
-    #[inline(always)]
-    pub const fn is_integer(&self) -> bool {
-        matches!(self.kind(), TypeKind::Unsigned | TypeKind::Signed)
-    }
-
-    #[inline(always)]
-    pub const fn is_signed(&self) -> bool {
-        matches!(self.kind(), TypeKind::Signed)
-    }
-
-    #[inline(always)]
-    pub const fn is_unsigned(&self) -> bool {
-        matches!(self.kind(), TypeKind::Unsigned)
-    }
-
-    #[inline(always)]
-    pub const fn is_bool(&self) -> bool {
-        matches!(self.kind(), TypeKind::Boolean)
-    }
-
-    #[inline(always)]
-    pub const fn can_be_mutable(&self) -> bool {
-        !matches!(self, Type::Lambda(_))
-    }
-
-    #[inline(always)]
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         match self {
             Type::Field => random_field_element(random, ctx, "bn254", true),
             Type::Integer(i) => i.random_value(random, ctx),
-            Type::Boolean => random.random_bool(0.5).to_string(),
-            Type::String(s) => s.random_value(random, ctx),
-            Type::Array(a) => a.random_value(random, ctx, scope),
-            Type::Slice(s) => s.random_value(random, ctx, scope),
-            Type::Tuple(t) => t.random_value(random, ctx, scope),
-            Type::Struct(s) => s.random_value(random, ctx, scope),
-            Type::Lambda(l) => l.random_value(random, ctx, scope),
-            Type::Empty => "()".to_string(),
+            Type::Bool => random.random_bool(0.5).to_string(),
+            Type::Array(a) => a.random_value(random, ctx),
+            Type::Slice(s) => s.random_value(random, ctx),
+            Type::Tuple(t) => t.random_value(random, ctx),
         }
     }
 
-    /// According to the Noir IR spec, the following types are valid public inputs:
-    /// - Primitive types: `Field`, `Integer`, `Boolean`
-    /// - Strings with a non-zero size
-    /// - Arrays with a non-zero size and a valid sub-type
-    /// - Tuples with a size greater than 1 (as otherwise they collapse to a single type) and valid
-    ///   sub-types
-    /// - Structs where all fields are valid public inputs
+    /// - Primitive types: `Field`, `Integer`, `Bool`.
+    /// - Non-empty arrays.
+    /// - Tuples with a size greater than 1.
     ///
-    /// The rest are all invalid as public inputs.
+    /// Slices are invalid.
     #[inline(always)]
-    pub fn is_valid_public_input(&self) -> bool {
+    pub(crate) fn is_valid_public_input(&self) -> bool {
         match self {
-            Type::Field | Type::Integer(_) | Type::Boolean => true,
-            Type::String(s) => s.size > 0,
+            Type::Field | Type::Integer(_) | Type::Bool => true,
             Type::Array(a) => a.size > 0 && a.ty.is_valid_public_input(),
             Type::Tuple(t) => {
                 t.elements.len() > 1 && t.elements.iter().all(|e| e.is_valid_public_input())
             }
-            Type::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
-            Type::Slice(_) | Type::Lambda(_) | Type::Empty => false,
+            Type::Slice(_) => false,
         }
     }
 
     #[inline(always)]
-    pub fn has_slice(&self) -> bool {
-        match self {
-            Type::Field |
-            Type::Integer(_) |
-            Type::Boolean |
-            Type::String(_) |
-            Type::Lambda(_) |
-            Type::Empty => false,
-            Type::Slice(_) => true,
-            Type::Array(a) => a.ty.has_slice(),
-            Type::Tuple(t) => t.elements.iter().any(|e| e.has_slice()),
-            Type::Struct(s) => s.fields.iter().any(|f| f.ty.has_slice()),
-        }
+    pub(crate) const fn is_primitive(&self) -> bool {
+        matches!(self, Type::Field | Type::Integer(_) | Type::Bool)
     }
 
-    /// Returns true if this type contains any zero-sized arrays or slices.
-    /// Zero-sized arrays/slices in on-the-fly literals cause type inference failures in Noir.
     #[inline(always)]
-    pub fn has_zero_sized(&self) -> bool {
-        match self {
-            Type::Array(a) => a.size == 0 || a.ty.has_zero_sized(),
-            Type::Slice(s) => s.size == 0 || s.ty.has_zero_sized(),
-            Type::Tuple(t) => t.elements.iter().any(|e| e.has_zero_sized()),
-            Type::Struct(s) => s.fields.iter().any(|f| f.ty.has_zero_sized()),
-            _ => false,
-        }
+    pub(crate) const fn is_numeric(&self) -> bool {
+        matches!(self, Type::Field | Type::Integer(_))
+    }
+
+    #[inline(always)]
+    pub(crate) const fn is_integer(&self) -> bool {
+        matches!(self, Type::Integer(_))
+    }
+
+    #[inline(always)]
+    pub(crate) const fn is_signed(&self) -> bool {
+        matches!(self, Type::Integer(i) if i.signed)
+    }
+
+    #[inline(always)]
+    pub(crate) const fn is_unsigned(&self) -> bool {
+        matches!(self, Type::Integer(i) if !i.signed)
+    }
+
+    #[inline(always)]
+    pub(crate) const fn is_bool(&self) -> bool {
+        matches!(self, Type::Bool)
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Primitive types
-// ────────────────────────────────────────────────────────────────────────────────
-
 impl Integer {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+    fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let ty = format!("{}{}", if self.signed { "i" } else { "u" }, self.bits);
 
         // This is a helper macro, dont mind it
@@ -265,95 +168,28 @@ impl Integer {
     }
 }
 
-impl StringType {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
-        let value = random_string(random, self.size, self.is_raw);
-
-        if self.is_raw {
-            let hash_count = random.random_range(0..=ctx.max_hashes_count);
-            let hashes = "#".repeat(hash_count);
-            format!("r{hashes}\"{value}\"{hashes}")
-        } else {
-            format!("\"{value}\"")
-        }
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Complex types
-// ────────────────────────────────────────────────────────────────────────────────
-
 impl Array {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
+    fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+        let elems: Vec<_> = (0..self.size).map(|_| self.ty.random_value(random, ctx)).collect();
 
         format!("[{}]", elems.join(", "))
     }
 }
 
 impl Slice {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        let elems: Vec<_> =
-            (0..self.size).map(|_| self.ty.random_value(random, ctx, scope)).collect();
+    fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+        let elems: Vec<_> = (0..self.size).map(|_| self.ty.random_value(random, ctx)).collect();
 
         format!("&[{}]", elems.join(", "))
     }
 }
 
 impl Tuple {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
+    fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let elems: Vec<_> =
-            self.elements.iter().map(|elem_ty| elem_ty.random_value(random, ctx, scope)).collect();
+            self.elements.iter().map(|elem_ty| elem_ty.random_value(random, ctx)).collect();
 
         format!("({})", elems.join(", "))
-    }
-}
-
-impl Struct {
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        let fields: Vec<_> = self
-            .fields
-            .iter()
-            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx, scope)))
-            .collect();
-
-        format!("{} {{ {} }}", self.name, fields.join(", "))
-    }
-}
-
-impl Lambda {
-    // @todo rethink
-    pub fn random_value(&self, random: &mut impl Rng, ctx: &Context, scope: &Scope) -> String {
-        // Compute bias from param types and return type
-        let mut bias = self.params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
-        bias.push((*self.ret).clone());
-
-        let mut scope = scope.clone();
-        scope.lambda_depth += 1;
-        scope.ret = Some(((*self.ret).clone(), false));
-        scope.type_bias = Scope::compute_type_bias(&bias);
-        scope.inputs = self.params.iter().cloned().map(|(name, ty)| (name, ty, false)).collect();
-        scope.forest_type = ForestType::Lambda;
-
-        let mut body = Forest::default();
-        self.params.iter().for_each(|(n, t)| {
-            body.input(random, n.clone(), t.clone());
-        });
-
-        body.random(random, ctx, &scope, true);
-
-        body.set_return_expression(random, ctx, &scope);
-
-        let indent = "    ".repeat(scope.lambda_depth);
-        let params =
-            self.params.iter().map(|(n, t)| format!("{n}: {t}")).collect::<Vec<_>>().join(", ");
-
-        format!(
-            "|{params}| -> {} {{\n{}{indent}}}",
-            self.ret,
-            body.format_with_indent(&format!("{indent}    "))
-        )
     }
 }
 
@@ -365,35 +201,14 @@ impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Field => f.write_str("Field"),
-            Self::Boolean => f.write_str("bool"),
-            Self::Empty => f.write_str("()"),
+            Self::Bool => f.write_str("bool"),
             Self::Integer(i) => write!(f, "{}{}", if i.signed { "i" } else { "u" }, i.bits),
-            Self::String(s) => write!(f, "str<{}>", s.size),
             Self::Array(a) => write!(f, "[{}; {}]", a.ty, a.size),
             Self::Slice(s) => write!(f, "[{}]", s.ty),
-            Self::Struct(s) => f.write_str(&s.name),
             Self::Tuple(t) => {
                 let elems = t.elements.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
                 write!(f, "({elems})")
             }
-            Self::Lambda(l) => {
-                let args =
-                    l.params.iter().map(|(_, t)| t.to_string()).collect::<Vec<_>>().join(", ");
-                write!(f, "fn({args}) -> {}", l.ret)
-            }
         }
-    }
-}
-
-impl std::fmt::Display for Struct {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "struct {} {{", self.name)?;
-
-        for field in &self.fields {
-            writeln!(f, "    {}: {},", field.name, field.ty)?;
-        }
-
-        writeln!(f, "}}")?;
-        Ok(())
     }
 }

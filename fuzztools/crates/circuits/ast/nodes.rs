@@ -1,133 +1,88 @@
-use crate::circuits::ast::{forest::Forest, operators::Operator, types::Type};
-use petgraph::graph::NodeIndex;
+use super::{operators::Operator, types::Type};
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Node definitions
+// Node definition
 // ────────────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NodeKind {
-    Input,
-    Literal,
-    Variable,
-    Operator,
-    Index,
-    TupleIndex,
-    FieldAccess,
-    Call,
-    Cast,
-    Assignment,
-    ForLoop,
-    If,
-    Assert,
-}
 
 #[derive(Debug, Clone)]
-pub enum Node {
-    /// Input node in case of main/functions/lambdas
+pub(crate) enum Node {
+    /// Input node.
     Input { name: String, ty: Type },
 
     /// A literal value of the given type, `23`, `false`, `"hello"`, etc...
     Literal { value: String, ty: Type },
 
     /// A variable node, `a`, `b`, `c`, etc...
-    Variable { name: String, ty: Type, mutable: bool, shadow: bool },
+    Variable { name: String, ty: Type, mutable: bool },
 
     /// An operator node, `+`, `-`, `*`, `/`, `%`, etc...
-    Operator { op: Operator, ret: Type },
+    Operator { op: Operator, ty: Type },
 
     /// An index node, `a[2]`, `b[3]`, etc...
-    Index { value: usize },
+    Index { index: usize, ty: Type },
 
     /// A tuple index node, `a.0`, `b.1`, etc...
-    TupleIndex { value: usize },
+    TupleIndex { index: usize, ty: Type },
 
-    /// A field access node, `a.field`, `b.field`, etc...
-    FieldAccess { name: String },
+    /// A cast expression, `expr as Type`.
+    Cast { ty: Type },
 
-    /// A function call node, `foo(a, b)`, `bar(x)`, etc...
-    Call { name: String, ret: Type },
-
-    /// A cast expression, `expr as Type`
-    Cast { target: Type },
-
-    /// An assignment to a mutable variable or a component of it (e.g., `x = 5`, `arr[0] = 5`,
-    /// `s.field = 5`).
-    /// - Edge 0 points to the source variable being assigned to.
+    /// An assignment to a mutable variable/element (`x = 5`, `arr[0] = 5`, etc...).
+    /// - Edge 0 points to the variable being assigned to.
     /// - Edge 1 points to the value expression.
     ///
-    /// If `op` is Some, this is a compound assignment (e.g., `x += 5`, `x -= 5`).
-    /// After assignment, a new Variable node with the same name is created pointing to this node.
-    Assignment { op: Option<Operator> },
-
-    /// A for loop statement: `for var in start..end { body }`.
-    ForLoop { var: String, ty: Type, start: String, end: String, body: Box<Forest> },
-
-    /// An if/else if/else statement
-    If {
-        condition: NodeIndex,
-        then_body: Box<Forest>,
-        else_ifs: Vec<(NodeIndex, Box<Forest>)>,
-        else_body: Option<Box<Forest>>,
-    },
-
-    /// An assert statement: `assert(COND)` or `assert(COND, MSG)`
-    Assert { condition: NodeIndex, message: Option<String> },
+    /// If `op` is Some, this is a compound assignment (`x += 5`, `x -= 5`, etc...).
+    Assignment { op: Option<Operator>, ty: Type },
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Node implementations
+// Node implementation
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Node {
     #[inline(always)]
-    pub const fn kind(&self) -> NodeKind {
+    pub(crate) const fn color(&self) -> &'static str {
         match self {
-            Self::Input { .. } => NodeKind::Input,
-            Self::Variable { .. } => NodeKind::Variable,
-            Self::Literal { .. } => NodeKind::Literal,
-            Self::Operator { .. } => NodeKind::Operator,
-            Self::Index { .. } => NodeKind::Index,
-            Self::TupleIndex { .. } => NodeKind::TupleIndex,
-            Self::FieldAccess { .. } => NodeKind::FieldAccess,
-            Self::Call { .. } => NodeKind::Call,
-            Self::Cast { .. } => NodeKind::Cast,
-            Self::Assignment { .. } => NodeKind::Assignment,
-            Self::ForLoop { .. } => NodeKind::ForLoop,
-            Self::If { .. } => NodeKind::If,
-            Self::Assert { .. } => NodeKind::Assert,
+            Self::Input { .. } => "#dc4e23ff",
+            Self::Literal { .. } => "#24b3ecff",
+            Self::Variable { .. } => "#6bd85aff",
+            Self::Operator { .. } => "#ffa500",
+            Self::Index { .. } | Self::TupleIndex { .. } => "#e22be2ff",
+            Self::Cast { .. } => "#4f47a6ff",
+            Self::Assignment { .. } => "#8a006dff",
         }
     }
 
     #[inline(always)]
-    pub const fn color(&self) -> &'static str {
+    pub(crate) const fn is_single_use(&self) -> bool {
+        matches!(
+            self,
+            Node::Literal { .. } |
+                Node::Operator { .. } |
+                Node::Index { .. } |
+                Node::TupleIndex { .. } |
+                Node::Cast { .. }
+        )
+    }
+
+    #[inline(always)]
+    pub(crate) fn ty(&self) -> Type {
         match self {
-            Self::Input { .. } => "#dc4e23ff",
-            Self::Literal { .. } => "#24b3ecff",
-            Self::Variable { shadow, .. } => {
-                if *shadow {
-                    "#6bd85aff"
-                } else {
-                    "#4a9640ff"
-                }
-            }
-            Self::Operator { op, .. } => {
-                if op.is_unary() {
-                    "#ffa500"
-                } else {
-                    "#ffd700"
-                }
-            }
-            Self::Index { .. } | Self::TupleIndex { .. } | Self::FieldAccess { .. } => "#fe8fa2ff",
-            Self::Call { .. } => "#e22be2ff",
-            Self::Cast { .. } => "#4f47a6ff",
-            Self::Assignment { .. } => "#8a006dff",
-            Self::ForLoop { .. } => "#115976ff",
-            Self::If { .. } => "#005a00ff",
-            Self::Assert { .. } => "#a62c00ff",
+            Self::Input { ty, .. } |
+            Self::Literal { ty, .. } |
+            Self::Variable { ty, .. } |
+            Self::Operator { ty, .. } |
+            Self::Index { ty, .. } |
+            Self::TupleIndex { ty, .. } |
+            Self::Cast { ty } |
+            Self::Assignment { ty, .. } => ty.clone(),
         }
     }
 }
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Display
+// ────────────────────────────────────────────────────────────────────────────────
 
 impl std::fmt::Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -136,16 +91,11 @@ impl std::fmt::Display for Node {
             Self::Variable { name, .. } => write!(f, "{}", name),
             Self::Literal { ty, .. } => write!(f, "{}", ty),
             Self::Operator { op, .. } => write!(f, "{}", op),
-            Self::Index { value } => write!(f, "[{}]", value),
-            Self::TupleIndex { value } => write!(f, ".{}", value),
-            Self::FieldAccess { name } => write!(f, ".{}", name),
-            Self::Call { name, .. } => write!(f, "{}()", name),
-            Self::Cast { target } => write!(f, "as {}", target),
+            Self::Index { index: value, .. } => write!(f, "[{}]", value),
+            Self::TupleIndex { index: value, .. } => write!(f, ".{}", value),
+            Self::Cast { ty } => write!(f, "as {}", ty),
             Self::Assignment { op: Some(op), .. } => write!(f, "{}=", op),
             Self::Assignment { op: None, .. } => write!(f, "="),
-            Self::ForLoop { .. } => write!(f, "for"),
-            Self::If { .. } => write!(f, "if"),
-            Self::Assert { .. } => write!(f, "assert"),
         }
     }
 }

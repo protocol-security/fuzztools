@@ -1,18 +1,9 @@
 use crate::circuits::{
-    ast::types::{
-        Array, Integer, Lambda, Slice, StringType, Struct, StructField, Tuple, Type, TypeKind,
-        Visibility,
-    },
-    context::Context,
-    scope::Scope,
-    utils::biased_weight,
+    ast::{Array, Integer, Slice, Tuple},
+    Context, Type, TypeKind,
 };
 use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Type generation
-// ────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeLocation {
@@ -23,12 +14,11 @@ pub enum TypeLocation {
     Default,
 }
 
-enum WorkItem {
+pub(crate) enum WorkItem {
     Generate { slot: usize, depth: usize, location: TypeLocation },
     FinalizeArray { slot: usize, inner: usize, size: usize },
     FinalizeSlice { slot: usize, inner: usize, size: usize },
     FinalizeTuple { slot: usize, inners: Vec<usize> },
-    FinalizeLambda { slot: usize, inners: Vec<usize>, ret: usize },
 }
 
 impl Type {
@@ -59,12 +49,7 @@ impl Type {
     /// - Done! Return slots[0]
     ///
     /// If you do not understand something, just ask claude :D
-    pub fn random(
-        random: &mut impl Rng,
-        ctx: &Context,
-        scope: &Scope,
-        location: TypeLocation,
-    ) -> Self {
+    pub fn random(random: &mut impl Rng, ctx: &Context, location: TypeLocation) -> Self {
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
         work.push_back(WorkItem::Generate { slot: 0, depth: 0, location });
@@ -73,7 +58,7 @@ impl Type {
             match item {
                 WorkItem::Generate { slot, depth, location } => {
                     Self::process_generate(
-                        random, ctx, scope, &mut slots, &mut work, slot, depth, location,
+                        random, ctx, &mut slots, &mut work, slot, depth, location,
                     );
                 }
                 WorkItem::FinalizeArray { slot, inner, size } => {
@@ -88,27 +73,15 @@ impl Type {
                     let elements = inners.iter().map(|&i| slots[i].take().unwrap()).collect();
                     slots[slot] = Some(Type::Tuple(Tuple { elements }));
                 }
-                WorkItem::FinalizeLambda { slot, inners, ret } => {
-                    let ret = slots[ret].take().unwrap();
-                    let params = inners
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, slot)| (format!("p{}", i), slots[slot].take().unwrap()))
-                        .collect();
-
-                    slots[slot] = Some(Type::Lambda(Lambda { params, ret: Box::new(ret) }));
-                }
             }
         }
 
         slots[0].take().unwrap()
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn process_generate(
         random: &mut impl Rng,
         ctx: &Context,
-        scope: &Scope,
         slots: &mut Vec<Option<Type>>,
         work: &mut VecDeque<WorkItem>,
         slot: usize,
@@ -122,61 +95,33 @@ impl Type {
             return;
         }
 
-        let valid_structs: Vec<_> = scope
-            .structs
-            .iter()
-            .filter(|s| match location {
-                TypeLocation::Main => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
-                TypeLocation::Nested | TypeLocation::TupleNested => {
-                    !s.fields.iter().any(|f| f.ty.has_slice())
-                }
-                _ => true,
-            })
-            .collect();
-
-        let (bias, mult) = (
-            &scope.type_bias,
-            if scope.type_bias.is_empty() { 1 } else { ctx.type_bias_multiplier },
-        );
-        let w = |k, weight| (k, biased_weight(k, weight, bias, mult));
-
         let mut options = vec![
-            w(TypeKind::Field, ctx.field_weight),
-            w(TypeKind::Unsigned, ctx.unsigned_weight),
-            w(TypeKind::Signed, ctx.signed_weight),
-            w(TypeKind::Boolean, ctx.boolean_weight),
-            w(TypeKind::String, ctx.string_weight),
-            w(TypeKind::Array, ctx.array_weight),
-            w(TypeKind::Tuple, ctx.tuple_weight),
+            TypeKind::Field,
+            TypeKind::Unsigned,
+            TypeKind::Signed,
+            TypeKind::Bool,
+            TypeKind::Array,
+            TypeKind::Tuple,
         ];
 
-        if location != TypeLocation::Main {
-            options.push(w(TypeKind::Empty, ctx.empty_weight));
-        }
         if location.allows_slice() {
-            options.push(w(TypeKind::Slice, ctx.slice_weight));
-        }
-        if location.allows_lambda(scope, ctx) {
-            options.push(w(TypeKind::Lambda, ctx.lambda_weight));
-        }
-        if !valid_structs.is_empty() {
-            options.push(w(TypeKind::Struct, ctx.struct_weight));
+            options.push(TypeKind::Slice);
         }
 
-        match options.choose_weighted(random, |i| i.1).unwrap().0 {
+        match options.choose(random).unwrap() {
             TypeKind::Field => slots[slot] = Some(Type::Field),
-            TypeKind::Boolean => slots[slot] = Some(Type::Boolean),
-            TypeKind::Empty => slots[slot] = Some(Type::Empty),
-            TypeKind::String => {
-                slots[slot] = Some(Type::String(StringType::random(random, ctx, location)))
-            }
-            TypeKind::Struct => {
-                slots[slot] = Some(Type::Struct((*valid_structs.choose(random).unwrap()).clone()))
-            }
+            TypeKind::Bool => slots[slot] = Some(Type::Bool),
+            TypeKind::Signed => {
+                const SIGNED_BITS: [u32; 4] = [8, 16, 32, 64];
+                let bits = *SIGNED_BITS.choose(random).unwrap();
 
-            kind @ (TypeKind::Unsigned | TypeKind::Signed) => {
-                slots[slot] =
-                    Some(Type::Integer(Integer::random(random, kind == TypeKind::Signed)));
+                slots[slot] = Some(Type::Integer(Integer { bits, signed: true }));
+            }
+            TypeKind::Unsigned => {
+                const UNSIGNED_BITS: [u32; 6] = [1, 8, 16, 32, 64, 128];
+                let bits = *UNSIGNED_BITS.choose(random).unwrap();
+
+                slots[slot] = Some(Type::Integer(Integer { bits, signed: false }));
             }
 
             kind @ (TypeKind::Array | TypeKind::Slice) => {
@@ -186,7 +131,7 @@ impl Type {
                 slots.push(None);
 
                 let min = if location == TypeLocation::Main { 1 } else { ctx.min_element_count };
-                let size = random.random_range(min..=ctx.max_element_count);
+                let size = random.random_range(min..=ctx.max_element_count); // @todo may trigger cannot sample empty range
 
                 // So that we assemble the `Array`/`Slice` once we trigger this work item
                 work.push_front(match kind {
@@ -226,88 +171,7 @@ impl Type {
                     });
                 }
             }
-
-            TypeKind::Lambda => {
-                let count = random.random_range(0..=ctx.max_function_parameters_count);
-
-                let start = slots.len();
-
-                // Reserve slots for the parameter types and the return type
-                // @todo all lambdas are guaranteed to this? coverage?
-                slots.resize(start + count + 1, None);
-                let inners: Vec<_> = (start..start + count).collect();
-                let ret = start + count;
-
-                // So that we assemble the `Lambda` once we trigger this work item
-                work.push_front(WorkItem::FinalizeLambda { slot, inners: inners.clone(), ret });
-
-                // But first, we need to generate the parameter types
-                for i in inners {
-                    work.push_front(WorkItem::Generate {
-                        slot: i,
-                        depth: depth + 1,
-                        location: TypeLocation::Default,
-                    });
-                }
-
-                // And the return type
-                work.push_front(WorkItem::Generate {
-                    slot: ret,
-                    depth: depth + 1,
-                    location: TypeLocation::Default,
-                });
-            }
         }
-    }
-}
-
-impl Integer {
-    const SIGNED_BITS: [u32; 4] = [8, 16, 32, 64];
-    const UNSIGNED_BITS: [u32; 6] = [1, 8, 16, 32, 64, 128];
-
-    pub fn random(random: &mut impl Rng, signed: bool) -> Self {
-        let bits = if signed {
-            *Self::SIGNED_BITS.choose(random).unwrap()
-        } else {
-            *Self::UNSIGNED_BITS.choose(random).unwrap()
-        };
-
-        Self { bits, signed }
-    }
-}
-
-impl StringType {
-    pub fn random(random: &mut impl Rng, ctx: &Context, location: TypeLocation) -> Self {
-        let min_size = if location == TypeLocation::Main { 1 } else { ctx.min_string_size };
-        let size = random.random_range(min_size..=ctx.max_string_size);
-        let is_raw = random.random_bool(ctx.raw_string_probability);
-
-        Self { size, is_raw }
-    }
-}
-
-impl Struct {
-    /// `previous_structs` contains structs that can be used as field
-    /// types (to avoid circular dependencies, struct N can only contain structs 0..N-1).
-    pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, name: String) -> Self {
-        let size = random.random_range(ctx.min_struct_fields_count..=ctx.max_struct_fields_count);
-        let fields = (0..size)
-            .map(|i| StructField::random(random, ctx, scope, format!("field_{}", i)))
-            .collect();
-
-        Self { name, fields }
-    }
-}
-
-impl StructField {
-    const VISIBILITIES: [Visibility; 3] =
-        [Visibility::Public, Visibility::Private, Visibility::PublicCrate];
-
-    pub fn random(random: &mut impl Rng, ctx: &Context, scope: &Scope, name: String) -> Self {
-        let visibility = *Self::VISIBILITIES.choose(random).unwrap();
-        let ty = Box::new(Type::random(random, ctx, scope, TypeLocation::Default));
-
-        Self { name, ty, visibility }
     }
 }
 
@@ -335,88 +199,5 @@ impl TypeLocation {
     #[inline(always)]
     const fn allows_slice(self) -> bool {
         matches!(self, Self::Default | Self::TupleElement)
-    }
-
-    #[inline(always)]
-    fn allows_lambda(self, scope: &Scope, ctx: &Context) -> bool {
-        self != Self::Main && scope.lambda_depth < ctx.max_type_depth
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::builders::CircuitBuilder;
-    use std::fs;
-
-    #[test]
-    fn test_type_generation_default() {
-        let ctx =
-            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let mut random = rand::rng();
-        let builder = CircuitBuilder::default();
-        let scope = builder.create_scope(&mut random, &ctx);
-
-        for _ in 0..25 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
-            println!("{}", ty);
-        }
-    }
-
-    #[test]
-    fn test_type_generation_main() {
-        let ctx =
-            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let mut random = rand::rng();
-        let builder = CircuitBuilder::default();
-        let scope = builder.create_scope(&mut random, &ctx);
-
-        for _ in 0..25 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Main);
-            println!("{}", ty);
-        }
-    }
-
-    #[test]
-    fn test_type_generation_complex() {
-        let ctx =
-            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let mut random = rand::rng();
-        let builder = CircuitBuilder::default();
-        let scope = builder.create_scope(&mut random, &ctx);
-
-        for _ in 0..25 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Nested);
-            println!("{}", ty);
-        }
-
-        println!("\n");
-
-        for _ in 0..25 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::TupleElement);
-            println!("{}", ty);
-        }
-
-        println!("\n");
-
-        for _ in 0..25 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::TupleNested);
-            println!("{}", ty);
-        }
-    }
-
-    #[test]
-    fn test_random_value() {
-        let ctx =
-            serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let mut random = rand::rng();
-        let builder = CircuitBuilder::default();
-        let scope = builder.create_scope(&mut random, &ctx);
-
-        for _ in 0..50 {
-            let ty = Type::random(&mut random, &ctx, &scope, TypeLocation::Default);
-            let value = ty.random_value(&mut random, &ctx, &scope);
-            println!("    {}: {}", ty, value);
-        }
     }
 }

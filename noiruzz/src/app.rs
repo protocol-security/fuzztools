@@ -9,9 +9,13 @@ use crate::{
 use anyhow::Result;
 use fuzztools::{
     builders::CircuitBuilder,
-    circuits::{context::Context, rewriter::Rewriter, scope::Scope},
+    circuits::{Context, Rewriter},
 };
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{
+    rngs::SmallRng,
+    seq::{IndexedRandom, IteratorRandom},
+    Rng, SeedableRng,
+};
 use std::{
     fs,
     io::{self, Write},
@@ -30,12 +34,11 @@ use tokio::sync::{
 pub(crate) struct TestJob {
     original_code: String,
     rewritten_code: String,
-    scope: Scope,
     executions: usize,
     job_id: u64,
     seed: u64,
     run_later_stages: bool,
-    rules_applied: Vec<&'static str>,
+    rules_applied: Vec<String>,
 }
 
 /// Result of testing a circuit pair
@@ -55,7 +58,7 @@ enum TestResult {
         original_compiled: bool,
         error: String,
         t1: Duration,
-        rules_applied: Vec<&'static str>,
+        rules_applied: Vec<String>,
     },
     /// Both compiled but outputs diverged
     ExecutionMismatch {
@@ -66,7 +69,7 @@ enum TestResult {
         rewritten_output: String,
         job_id: u64,
         t1: Duration,
-        rules_applied: Vec<&'static str>,
+        rules_applied: Vec<String>,
     },
     /// Proof verification mismatch
     ProofMismatch {
@@ -78,7 +81,7 @@ enum TestResult {
         job_id: u64,
         t1: Duration,
         t2: Duration,
-        rules_applied: Vec<&'static str>,
+        rules_applied: Vec<String>,
     },
     /// Verification mismatch
     VerificationMismatch {
@@ -90,7 +93,7 @@ enum TestResult {
         job_id: u64,
         t1: Duration,
         t2: Duration,
-        rules_applied: Vec<&'static str>,
+        rules_applied: Vec<String>,
     },
 
     NotInteresting {
@@ -197,7 +200,6 @@ impl App {
         self.spawn_dispatcher();
 
         let builder = CircuitBuilder::default();
-        let rewriter = Rewriter::default();
         let mut job_id = 0u64;
         let mut error_receiver = self.error_receiver.take().unwrap();
 
@@ -213,21 +215,28 @@ impl App {
             self.drain_results();
 
             // Generate circuit (forest + scope)
-            let (mut forest, scope) = builder.generate(random, &self.ctx);
-            let original_code = builder.format_circuit(&scope, &forest);
+            let mut forest = builder.generate(random, &self.ctx);
+            let original_code = format!("fn main() {{\n{}\n}}", forest.format("    "));
 
-            let rewrite_count =
-                random.random_range(self.ctx.min_rewrites_count..=self.ctx.max_rewrites_count);
-            let mut rules_applied = Vec::with_capacity(rewrite_count);
-            for _ in 0..rewrite_count {
-                if let Some(rule_name) =
-                    rewriter.apply_random(random, &mut forest, &self.ctx, &scope)
-                {
-                    rules_applied.push(rule_name);
+            let mut rules_applied = vec![];
+            for _ in
+                0..random.random_range(self.ctx.min_rewrites_count..self.ctx.max_rewrites_count)
+            {
+                let applicables = Rewriter::collect_applicable(&forest);
+
+                let applied = applicables.iter().choose(random).and_then(|(&rule, nodes)| {
+                    let &node = nodes.choose(random)?;
+                    Rewriter::apply(&mut forest, node, rule, random)?;
+                    Some(format!("{:?}", rule))
+                });
+
+                match applied {
+                    Some(rule) => rules_applied.push(rule),
+                    None => break,
                 }
             }
 
-            let rewritten_code = builder.format_circuit(&scope, &forest);
+            let rewritten_code = format!("fn main() {{\n{}\n}}", forest.format("    "));
             // Check power schedule to decide if we should run later stages, or if we always run
             // them
             let run_later_stages = self.power_schedule.should_run_later_stages();
@@ -236,7 +245,6 @@ impl App {
             let job = TestJob {
                 original_code,
                 rewritten_code,
-                scope,
                 executions: self.executions,
                 job_id,
                 seed: random.random(),
@@ -291,13 +299,13 @@ impl App {
                 let worker_error_sender = error_sender.clone();
                 let worker_tx = tx.clone();
                 let worker_signal = signal.clone();
-                let worker_ctx = ctx;
+                let _worker_ctx = ctx;
 
                 let permit = semaphore.clone().acquire_owned().await.unwrap();
 
                 tokio::spawn(async move {
                     let _permit = permit;
-                    let builder = CircuitBuilder::default();
+                    let _builder = CircuitBuilder::default();
                     let mut t1 = Duration::ZERO;
                     let mut t2 = Duration::ZERO;
 
@@ -328,15 +336,18 @@ impl App {
                     match (orig_compile, rewr_compile) {
                         // Both compiled - test with random inputs
                         (Ok(()), Ok(())) => {
-                            let mut seeded_random = SmallRng::seed_from_u64(job.seed);
+                            let _seeded_random = SmallRng::seed_from_u64(job.seed);
                             let mut found_bug = false;
 
                             'executions: for _ in 0..job.executions {
+                                /* @todo
                                 let prover_toml = builder.generate_prover_toml(
                                     &mut seeded_random,
                                     &worker_ctx,
                                     &job.scope,
                                 );
+                                */
+                                let prover_toml = String::new();
 
                                 if let Err(e) =
                                     fs::write(orig_dir.join("Prover.toml"), &prover_toml)
@@ -632,7 +643,7 @@ impl App {
                         &rewritten_code,
                         original_compiled,
                         &error,
-                        &rules_applied,
+                        rules_applied,
                     );
                 }
                 TestResult::ExecutionMismatch {
@@ -654,7 +665,7 @@ impl App {
                         &prover_toml,
                         &original_output,
                         &rewritten_output,
-                        &rules_applied,
+                        rules_applied,
                     );
                 }
                 TestResult::ProofMismatch {
@@ -679,7 +690,7 @@ impl App {
                         &prover_toml,
                         &original_result,
                         &rewritten_result,
-                        &rules_applied,
+                        rules_applied,
                     );
                 }
                 TestResult::VerificationMismatch {
@@ -705,7 +716,7 @@ impl App {
                         &prover_toml,
                         &original_result,
                         &rewritten_result,
-                        &rules_applied,
+                        rules_applied,
                     );
                 }
                 TestResult::NotInteresting { t1, t2, is_proof, is_verification } => {
@@ -738,7 +749,7 @@ impl App {
         rewritten: &str,
         original_compiled: bool,
         error: &str,
-        rules_applied: &[&'static str],
+        rules_applied: Vec<String>,
     ) {
         let dir = format!("{}/compile_mismatch_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -776,7 +787,7 @@ impl App {
         prover_toml: &str,
         original_output: &str,
         rewritten_output: &str,
-        rules_applied: &[&'static str],
+        rules_applied: Vec<String>,
     ) {
         let dir = format!("{}/possible_soundness_bug_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -814,7 +825,7 @@ impl App {
         prover_toml: &str,
         original_result: &str,
         rewritten_result: &str,
-        rules_applied: &[&'static str],
+        rules_applied: Vec<String>,
     ) {
         let dir = format!("{}/proof_mismatch_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -852,7 +863,7 @@ impl App {
         prover_toml: &str,
         original_result: &str,
         rewritten_result: &str,
-        rules_applied: &[&'static str],
+        rules_applied: Vec<String>,
     ) {
         let dir = format!("{}/verification_mismatch_{}", self.crash_dir, job_id);
         if let Err(e) = fs::create_dir_all(&dir) {

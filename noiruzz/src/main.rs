@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use fuzztools::circuits::context::Context;
+use fuzztools::circuits::Context;
 use rand::{rngs::SmallRng, SeedableRng};
 use std::{fs, path::Path};
 

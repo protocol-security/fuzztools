@@ -65,7 +65,7 @@
     "lambda_weight": 5,
     "empty_weight": 1,
 
-    "operator_weight": 20,
+    "expression_weight": 20,
     "unary_weight": 15,
     "index_weight": 10,
     "tuple_index_weight": 10,

@@ -88,7 +88,7 @@ pub struct Context {
     // ─────────────────────────────────────────────────────────────────────────
     // Statement weights (relative probability of generating each statement)
     // ─────────────────────────────────────────────────────────────────────────
-    pub operator_weight: usize,
+    pub expression_weight: usize,
     pub unary_weight: usize,
     pub index_weight: usize,
     pub tuple_index_weight: usize,

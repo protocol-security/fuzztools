@@ -1,12 +1,14 @@
 //! Noir IR.
 
-pub mod ast;
-pub mod context;
-pub mod formatter;
-pub mod functions;
-pub mod generators;
-pub mod rewriter;
-pub mod scope;
-pub mod utils;
+mod ast;
+mod context;
+mod generators;
+mod rewritter;
+mod utils;
 
 pub type Circuit = String;
+
+// Re-exports
+pub use ast::{Forest, Type, TypeKind};
+pub use context::Context;
+pub use rewritter::Rewriter;
