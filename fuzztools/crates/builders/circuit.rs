@@ -27,7 +27,12 @@ impl CircuitBuilder {
 
         for i in 0..random.random_range(ctx.min_input_count..ctx.max_input_count) {
             let name = format!("input{i}");
-            let ty = Type::random(random, ctx, &structs, TypeLocation::Main);
+            let mut ty = Type::random(random, ctx, &structs, TypeLocation::Main);
+
+            while !ty.is_valid_public_input() {
+                // @todo fix
+                ty = Type::random(random, ctx, &structs, TypeLocation::Main);
+            }
 
             inputs.push((name.clone(), ty.clone()));
             forest.input(name, &ty);
