@@ -1,6 +1,6 @@
 //! Implements `CircuitBuilder`, whose task is to create and format **VALID** Noir circuits.
 
-use crate::circuits::{Context, Forest};
+use crate::circuits::{context::Context, ir::Forest};
 use rand::Rng;
 
 #[derive(Default)]

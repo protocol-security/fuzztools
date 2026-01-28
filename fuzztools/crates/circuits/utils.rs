@@ -51,8 +51,8 @@ pub(crate) fn random_field_element(
     value
 }
 
-// Indices 0..52 are single-byte plain characters (A-Z, a-z).
-// Indices 52..58 are escape sequences (2 bytes each).
+// Indices 0..52 are single-byte plain characters (A-Z, a-z)
+// Indices 52..58 are escape sequences (2 bytes each)
 const CHARACTERS: [&str; 58] = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
     "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l",
@@ -70,7 +70,7 @@ pub(crate) fn random_string(random: &mut impl Rng, size: usize, is_raw: bool) ->
         let remaining = size - current_len;
 
         let ch = if remaining == 1 {
-            // Must use a single-byte character.
+            // Must use a single-byte character
             CHARACTERS[random.random_range(0..PLAIN_CHAR_COUNT)]
         } else {
             *CHARACTERS.choose(random).unwrap()
@@ -78,7 +78,7 @@ pub(crate) fn random_string(random: &mut impl Rng, size: usize, is_raw: bool) ->
 
         out.push_str(ch);
 
-        // If using raw strings, we count the real length, otherwise we count the logical length.
+        // If using raw strings, we count the real length, otherwise we count the logical length
         current_len += if is_raw { ch.len() } else { 1 };
     }
 

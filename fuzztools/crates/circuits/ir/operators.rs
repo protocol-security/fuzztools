@@ -2,8 +2,10 @@
 // Operator definition
 // ────────────────────────────────────────────────────────────────────────────────
 
+use super::TypeKind;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Operator {
+pub enum Operator {
     Add,
     Sub,
     Mul,
@@ -38,42 +40,6 @@ impl Operator {
 
     pub(crate) const fn is_associative(&self) -> bool {
         matches!(self, Self::Add | Self::Mul | Self::And | Self::Or | Self::Xor)
-    }
-
-    pub(crate) const fn is_comparison(&self) -> bool {
-        matches!(
-            self,
-            Self::Equal |
-                Self::NotEqual |
-                Self::Less |
-                Self::LessOrEqual |
-                Self::Greater |
-                Self::GreaterOrEqual
-        )
-    }
-
-    pub(crate) const fn flip_comparison(&self) -> Option<Self> {
-        match self {
-            Self::Less => Some(Self::Greater),
-            Self::Greater => Some(Self::Less),
-            Self::LessOrEqual => Some(Self::GreaterOrEqual),
-            Self::GreaterOrEqual => Some(Self::LessOrEqual),
-            Self::Equal => Some(Self::Equal),
-            Self::NotEqual => Some(Self::NotEqual),
-            _ => None,
-        }
-    }
-
-    pub(crate) const fn negate_comparison(&self) -> Option<Self> {
-        match self {
-            Self::Less => Some(Self::GreaterOrEqual),
-            Self::GreaterOrEqual => Some(Self::Less),
-            Self::Greater => Some(Self::LessOrEqual),
-            Self::LessOrEqual => Some(Self::Greater),
-            Self::Equal => Some(Self::NotEqual),
-            Self::NotEqual => Some(Self::Equal),
-            _ => None,
-        }
     }
 
     pub(crate) const fn binary_field() -> &'static [Self] {
@@ -143,6 +109,33 @@ impl Operator {
             Self::Equal,
             Self::NotEqual,
         ]
+    }
+
+    pub(crate) const fn unary_ops_for_kind(source_kind: TypeKind) -> &'static [Operator] {
+        match source_kind {
+            TypeKind::Field => Operator::unary_field(),
+            TypeKind::Signed => Operator::unary_signed_integer(),
+            TypeKind::Unsigned => Operator::unary_unsigned_integer(),
+            TypeKind::Bool => Operator::unary_boolean(),
+            _ => unreachable!(),
+        }
+    }
+
+    pub(crate) const fn binary_ops_for_kind(source_kind: TypeKind) -> Option<&'static [Operator]> {
+        match source_kind {
+            TypeKind::Field => Some(Operator::binary_field()),
+            TypeKind::Signed => Some(Operator::binary_signed_integer()),
+            TypeKind::Unsigned => Some(Operator::binary_unsigned_integer()),
+            TypeKind::Bool => Some(Operator::binary_boolean()),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn comparison_ops_for_kind(source_kind: TypeKind) -> &'static [Operator] {
+        match source_kind {
+            TypeKind::Field => Operator::field_comparison(),
+            _ => Operator::comparison(),
+        }
     }
 }
 

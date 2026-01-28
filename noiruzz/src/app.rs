@@ -9,14 +9,11 @@ use crate::{
 use anyhow::Result;
 use fuzztools::{
     builders::CircuitBuilder,
-    circuits::{Context, Rewriter},
+    circuits::{context::Context, ir::AST, rewritter::apply_random_rule},
 };
-use rand::{
-    rngs::SmallRng,
-    seq::{IndexedRandom, IteratorRandom},
-    Rng, SeedableRng,
-};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::{
+    collections::HashMap,
     fs,
     io::{self, Write},
     process::Command,
@@ -27,93 +24,67 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    mpsc::{channel, Receiver, Sender},
+    mpsc::{channel, error::TrySendError, Receiver, Sender},
     Semaphore,
 };
 
-pub(crate) struct TestJob {
+// ────────────────────────────────────────────────────────────────────────────────
+// Types
+// ────────────────────────────────────────────────────────────────────────────────
+
+/// A job containing the source code of the riginal and rewritten circuits, as well as the list of rules applied.
+struct TestJob {
     original_code: String,
     rewritten_code: String,
     executions: usize,
     job_id: u64,
     seed: u64,
-    run_later_stages: bool,
+    run_later_stages: bool, // proof + verification
     rules_applied: Vec<String>,
 }
 
-/// Result of testing a circuit pair
-enum TestResult {
-    /// Both compiled and all executions matched
-    Success {
-        /// Time spent on initial stages (compilation + witness generation)
-        t1: Duration,
-        /// Time spent on later stages (proof generation + verification)
-        t2: Duration,
-    },
-    /// One compiled, the other didn't
-    CompilationMismatch {
-        job_id: u64,
-        original_code: String,
-        rewritten_code: String,
-        original_compiled: bool,
-        error: String,
-        t1: Duration,
-        rules_applied: Vec<String>,
-    },
-    /// Both compiled but outputs diverged
-    ExecutionMismatch {
-        original_code: String,
-        rewritten_code: String,
-        prover_toml: String,
-        original_output: String,
-        rewritten_output: String,
-        job_id: u64,
-        t1: Duration,
-        rules_applied: Vec<String>,
-    },
-    /// Proof verification mismatch
-    ProofMismatch {
-        original_code: String,
-        rewritten_code: String,
-        prover_toml: String,
-        original_result: String,
-        rewritten_result: String,
-        job_id: u64,
-        t1: Duration,
-        t2: Duration,
-        rules_applied: Vec<String>,
-    },
-    /// Verification mismatch
-    VerificationMismatch {
-        original_code: String,
-        rewritten_code: String,
-        prover_toml: String,
-        original_result: String,
-        rewritten_result: String,
-        job_id: u64,
-        t1: Duration,
-        t2: Duration,
-        rules_applied: Vec<String>,
-    },
-
-    NotInteresting {
-        t1: Duration,
-        t2: Option<Duration>,
-        is_proof: bool,
-        is_verification: bool,
-    },
-
-    /// Known error (overflow, underflow, etc.) - not a bug
-    KnownError {
-        t1: Duration,
-    },
+#[derive(Clone, Copy)]
+enum MismatchKind {
+    Compilation,       // one compiles, other fails
+    Execution,         // different outputs or witness solving
+    Proof,             // one proof succeeds, other fails
+    Verification,      // one verification succeeds, other fails
+    UnexpectedFailure, // both fail at proof or verification (unexpected)
 }
 
+enum TestResult {
+    Success { t1: Duration, t2: Duration },
+    Mismatch(Mismatch),
+    NotInteresting { t1: Duration, t2: Option<Duration>, is_proof: bool, is_verification: bool },
+    KnownError { t1: Duration },
+}
+
+/// Details about a detected mismatch for crash reporting.
+struct Mismatch {
+    kind: MismatchKind,
+    job_id: u64,
+    original_code: String,
+    rewritten_code: String,
+    prover_toml: String,
+    original_output: String,
+    rewritten_output: String,
+    rules_applied: Vec<String>,
+    t1: Duration, // compile + execute time
+    t2: Duration, // prove + verify time
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// App
+// ────────────────────────────────────────────────────────────────────────────────
+
 pub(crate) struct App {
+    // Config
     prelude: String,
     ctx: Context,
     crash_dir: String,
     executions: usize,
+
+    // Channels
     job_sender: Sender<TestJob>,
     job_receiver: Option<Receiver<TestJob>>,
     result_sender: Sender<TestResult>,
@@ -121,9 +92,9 @@ pub(crate) struct App {
     error_signal: Arc<AtomicBool>,
     error_sender: Sender<String>,
     error_receiver: Option<Receiver<String>>,
-    worker_semaphore: Arc<Semaphore>,
 
-    // Power schedule
+    // Concurrency
+    worker_semaphore: Arc<Semaphore>,
     power_schedule: Arc<PowerScheduler>,
 
     // Stats
@@ -132,9 +103,11 @@ pub(crate) struct App {
     soundness_bugs: AtomicU64,
     proof_mismatches: AtomicU64,
     verification_mismatches: AtomicU64,
+    unexpected_failures: AtomicU64,
     known_errors: AtomicU64,
     total_proofs: AtomicU64,
     total_verifications: AtomicU64,
+    rule_stats: HashMap<String, u64>,
     circuits_per_tick: u64,
     start_time: Instant,
     last_update: Instant,
@@ -149,22 +122,11 @@ impl App {
         target_ratio: f64,
         workers: usize,
     ) -> Result<Self> {
-        let power_schedule = Arc::new(PowerScheduler::new(target_ratio));
-        let worker_semaphore = Arc::new(Semaphore::new(workers));
-
         let (job_sender, job_receiver) = channel::<TestJob>(workers * 2);
         let (result_sender, result_receiver) = channel::<TestResult>(workers * 2);
         let (error_sender, error_receiver) = channel::<String>(workers * 2);
 
         fs::create_dir_all(&crash_dir)?;
-
-        // Create worker directories upfront
-        for i in 0..workers {
-            let worker_dir = format!("./tmp/worker_{}", i);
-            let _ = fs::remove_dir_all(&worker_dir);
-            fs::create_dir_all(format!("{}/original/src", worker_dir))?;
-            fs::create_dir_all(format!("{}/rewritten/src", worker_dir))?;
-        }
 
         Ok(Self {
             prelude,
@@ -178,25 +140,26 @@ impl App {
             error_signal: Arc::new(AtomicBool::new(false)),
             error_sender,
             error_receiver: Some(error_receiver),
-            worker_semaphore,
-            power_schedule,
+            worker_semaphore: Arc::new(Semaphore::new(workers)),
+            power_schedule: Arc::new(PowerScheduler::new(target_ratio)),
             total_circuits: AtomicU64::new(0),
             compile_mismatches: AtomicU64::new(0),
             soundness_bugs: AtomicU64::new(0),
             proof_mismatches: AtomicU64::new(0),
             verification_mismatches: AtomicU64::new(0),
+            unexpected_failures: AtomicU64::new(0),
             known_errors: AtomicU64::new(0),
             total_proofs: AtomicU64::new(0),
             total_verifications: AtomicU64::new(0),
+            rule_stats: HashMap::new(),
             circuits_per_tick: 0,
             start_time: Instant::now(),
             last_update: Instant::now(),
         })
     }
 
+    /// Main fuzzing loop: generate jobs, dispatch to workers, collect results.
     pub(crate) async fn run(&mut self, random: &mut impl Rng) -> Result<()> {
-        // This will spawn a thread that will be listening for incoming circuits and doing all the
-        // heavy work of compiling, executing, proving, and verifying them
         self.spawn_dispatcher();
 
         let builder = CircuitBuilder::default();
@@ -204,90 +167,62 @@ impl App {
         let mut error_receiver = self.error_receiver.take().unwrap();
 
         loop {
-            // If there was an error in one of the workers, we stop the main loop and print the
-            // error
+            // Check for fatal errors from workers
             if self.error_signal.load(Ordering::Relaxed) {
-                let error = error_receiver.recv().await.unwrap();
-                eprintln!("\n\n\x1b[1;31m[!] Error: {error}\x1b[0m");
+                eprintln!("\n\n\x1b[1;31m[!] Error: {}\x1b[0m", error_receiver.recv().await.unwrap());
                 break;
             }
 
-            self.drain_results();
-
-            // Generate circuit (forest + scope)
-            let mut forest = builder.generate(random, &self.ctx);
-            let original_code = format!("fn main() {{\n{}\n}}", forest.format("    "));
-
-            let mut rules_applied = vec![];
-            for _ in
-                0..random.random_range(self.ctx.min_rewrites_count..self.ctx.max_rewrites_count)
-            {
-                let applicables = Rewriter::collect_applicable(&forest);
-
-                let applied = applicables.iter().choose(random).and_then(|(&rule, nodes)| {
-                    let &node = nodes.choose(random)?;
-                    Rewriter::apply(&mut forest, node, rule, random)?;
-                    Some(format!("{:?}", rule))
-                });
-
-                match applied {
-                    Some(rule) => rules_applied.push(rule),
-                    None => break,
-                }
+            // Update screen every second
+            if self.last_update.elapsed().as_secs_f64() >= 1.0 {
+                self.drain_results();
+                self.screen()?;
+                self.circuits_per_tick = 0;
+                self.last_update = Instant::now();
             }
 
-            let rewritten_code = format!("fn main() {{\n{}\n}}", forest.format("    "));
-            // Check power schedule to decide if we should run later stages, or if we always run
-            // them
-            let run_later_stages = self.power_schedule.should_run_later_stages();
+            let job = self.generate_job(random, &builder, job_id);
 
-            // Send job
-            let job = TestJob {
-                original_code,
-                rewritten_code,
-                executions: self.executions,
-                job_id,
-                seed: random.random(),
-                run_later_stages,
-                rules_applied,
-            };
+            // Try non-blocking send first, block only when channel is full
+            match self.job_sender.try_send(job) {
+                Ok(()) => job_id += 1,
+                Err(TrySendError::Full(job)) => {
+                    let sender = self.job_sender.clone();
+                    let send_fut = sender.send(job);
+                    tokio::pin!(send_fut);
 
-            // Send job while draining results periodically
-            let sender = self.job_sender.clone();
-            let send_fut = sender.send(job);
-            tokio::pin!(send_fut);
-
-            loop {
-                tokio::select! {
-                    result = &mut send_fut => {
-                        if result.is_err() {
-                            return Ok(());
-                        }
-                        break;
-                    }
-                    _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                        self.drain_results();
-                        if self.last_update.elapsed().as_secs_f64() >= 1.0 {
-                            self.screen()?;
-                            self.circuits_per_tick = 0;
-                            self.last_update = Instant::now();
+                    // Wait for channel space while keeping UI responsive
+                    loop {
+                        tokio::select! {
+                            result = &mut send_fut => {
+                                if result.is_err() { return Ok(()); }
+                                job_id += 1;
+                                break;
+                            }
+                            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                                self.drain_results();
+                                if self.last_update.elapsed().as_secs_f64() >= 1.0 {
+                                    self.screen()?;
+                                    self.circuits_per_tick = 0;
+                                    self.last_update = Instant::now();
+                                }
+                            }
                         }
                     }
                 }
+                Err(_) => return Ok(()),
             }
-
-            job_id += 1;
         }
 
         Ok(())
     }
 
+    /// Spawn the dispatcher task that distributes jobs to worker pool.
     fn spawn_dispatcher(&mut self) {
         let mut rx = self.job_receiver.take().unwrap();
         let tx = self.result_sender.clone();
         let signal = self.error_signal.clone();
         let error_sender = self.error_sender.clone();
-        let ctx = self.ctx;
         let semaphore = self.worker_semaphore.clone();
 
         tokio::spawn(async move {
@@ -296,320 +231,50 @@ impl App {
                     break;
                 }
 
-                let worker_error_sender = error_sender.clone();
                 let worker_tx = tx.clone();
                 let worker_signal = signal.clone();
-                let _worker_ctx = ctx;
-
+                let worker_error_sender = error_sender.clone();
                 let permit = semaphore.clone().acquire_owned().await.unwrap();
 
                 tokio::spawn(async move {
-                    let _permit = permit;
-                    let _builder = CircuitBuilder::default();
-                    let mut t1 = Duration::ZERO;
-                    let mut t2 = Duration::ZERO;
-
-                    let temp_path = std::path::PathBuf::from(format!("./tmp/job_{}", job.job_id));
-                    let orig_dir = temp_path.join("original");
-                    let rewr_dir = temp_path.join("rewritten");
-
-                    if let Err(e) = setup_project(&orig_dir, &job.original_code).await {
-                        worker_signal.store(true, Ordering::Relaxed);
-                        let _ =
-                            worker_error_sender.send(format!("Setup original error: {}", e)).await;
-                        return;
-                    }
-
-                    if let Err(e) = setup_project(&rewr_dir, &job.rewritten_code).await {
-                        worker_signal.store(true, Ordering::Relaxed);
-                        let _ =
-                            worker_error_sender.send(format!("Setup rewritten error: {}", e)).await;
-                        return;
-                    }
-
-                    // Initial stages (T1): Compile both
-                    let compile_start = Instant::now();
-                    let orig_compile = compile_project(&orig_dir).await;
-                    let rewr_compile = compile_project(&rewr_dir).await;
-                    t1 += compile_start.elapsed();
-
-                    match (orig_compile, rewr_compile) {
-                        // Both compiled - test with random inputs
-                        (Ok(()), Ok(())) => {
-                            let _seeded_random = SmallRng::seed_from_u64(job.seed);
-                            let mut found_bug = false;
-
-                            'executions: for _ in 0..job.executions {
-                                /* @todo
-                                let prover_toml = builder.generate_prover_toml(
-                                    &mut seeded_random,
-                                    &worker_ctx,
-                                    &job.scope,
-                                );
-                                */
-                                let prover_toml = String::new();
-
-                                if let Err(e) =
-                                    fs::write(orig_dir.join("Prover.toml"), &prover_toml)
-                                {
-                                    worker_signal.store(true, Ordering::Relaxed);
-                                    let _ = worker_error_sender
-                                        .send(format!("Write Prover.toml error: {}", e))
-                                        .await;
-                                    break 'executions;
-                                }
-                                if let Err(e) =
-                                    fs::write(rewr_dir.join("Prover.toml"), &prover_toml)
-                                {
-                                    worker_signal.store(true, Ordering::Relaxed);
-                                    let _ = worker_error_sender
-                                        .send(format!("Write Prover.toml error: {}", e))
-                                        .await;
-                                    break 'executions;
-                                }
-
-                                // Initial stages (T1)): Execute (witness generation)
-                                let exec_start = Instant::now();
-                                let orig_exec = execute_project(&orig_dir).await;
-                                let rewr_exec = execute_project(&rewr_dir).await;
-                                t1 += exec_start.elapsed();
-
-                                match (&orig_exec, &rewr_exec) {
-                                    (Ok(orig_out), Ok(rewr_out)) => {
-                                        // Both succeeded - compare outputs
-                                        let (orig_success, orig_result) =
-                                            Self::parse_output(orig_out);
-                                        let (rewr_success, rewr_result) =
-                                            Self::parse_output(rewr_out);
-
-                                        if orig_success != rewr_success ||
-                                            orig_result != rewr_result
-                                        {
-                                            let _ = worker_tx
-                                                .send(TestResult::ExecutionMismatch {
-                                                    original_code: job.original_code.clone(),
-                                                    rewritten_code: job.rewritten_code.clone(),
-                                                    prover_toml: prover_toml.clone(),
-                                                    original_output: orig_out.clone(),
-                                                    rewritten_output: rewr_out.clone(),
-                                                    job_id: job.job_id,
-                                                    t1,
-                                                    rules_applied: job.rules_applied.clone(),
-                                                })
-                                                .await;
-                                            found_bug = true;
-                                            break 'executions;
-                                        }
-
-                                        // If we should run later stages, prove and verify this
-                                        // execution
-                                        if job.run_later_stages {
-                                            // Later stages (T2): Proof generation
-                                            let proof_start = Instant::now();
-                                            let orig_proof = bb_prove(&orig_dir).await;
-                                            let rewr_proof = bb_prove(&rewr_dir).await;
-                                            t2 += proof_start.elapsed();
-
-                                            match (orig_proof, rewr_proof) {
-                                                (Ok(()), Ok(())) => {
-                                                    // Both proofs succeeded - verify
-                                                    let verify_start = Instant::now();
-                                                    let orig_verify = bb_verify(&orig_dir).await;
-                                                    let rewr_verify = bb_verify(&rewr_dir).await;
-                                                    t2 += verify_start.elapsed();
-
-                                                    match (orig_verify, rewr_verify) {
-                                                        (Ok(()), Ok(())) => {
-                                                            // Both verified successfully - continue
-                                                        }
-                                                        (Ok(()), Err(e)) => {
-                                                            let _ = worker_tx.send(TestResult::VerificationMismatch {
-                                                                original_code: job.original_code.clone(),
-                                                                rewritten_code: job.rewritten_code.clone(),
-                                                                prover_toml: prover_toml.clone(),
-                                                                original_result: "Verification succeeded".to_string(),
-                                                                rewritten_result: format!("Verification failed: {}", e),
-                                                                job_id: job.job_id,
-                                                                t1,
-                                                                t2,
-                                                                rules_applied: job.rules_applied.clone(),
-                                                            }).await;
-                                                            found_bug = true;
-                                                            break 'executions;
-                                                        }
-                                                        (Err(e), Ok(())) => {
-                                                            let _ = worker_tx.send(TestResult::VerificationMismatch {
-                                                                original_code: job.original_code.clone(),
-                                                                rewritten_code: job.rewritten_code.clone(),
-                                                                prover_toml: prover_toml.clone(),
-                                                                original_result: format!("Verification failed: {}", e),
-                                                                rewritten_result: "Verification succeeded".to_string(),
-                                                                job_id: job.job_id,
-                                                                t1,
-                                                                t2,
-                                                                rules_applied: job.rules_applied.clone(),
-                                                            }).await;
-                                                            found_bug = true;
-                                                            break 'executions;
-                                                        }
-                                                        _ => {
-                                                            let _ = worker_tx
-                                                                .send(TestResult::NotInteresting {
-                                                                    t1,
-                                                                    t2: Some(t2),
-                                                                    is_proof: false,
-                                                                    is_verification: true,
-                                                                })
-                                                                .await; // @todo shuld be a bug?
-                                                        }
-                                                    }
-                                                }
-                                                (Ok(()), Err(e)) => {
-                                                    let _ = worker_tx
-                                                        .send(TestResult::ProofMismatch {
-                                                            original_code: job
-                                                                .original_code
-                                                                .clone(),
-                                                            rewritten_code: job
-                                                                .rewritten_code
-                                                                .clone(),
-                                                            prover_toml: prover_toml.clone(),
-                                                            original_result:
-                                                                "Proof generation succeeded"
-                                                                    .to_string(),
-                                                            rewritten_result: format!(
-                                                                "Proof generation failed: {}",
-                                                                e
-                                                            ),
-                                                            job_id: job.job_id,
-                                                            t1,
-                                                            t2,
-                                                            rules_applied: job
-                                                                .rules_applied
-                                                                .clone(),
-                                                        })
-                                                        .await;
-                                                    found_bug = true;
-                                                    break 'executions;
-                                                }
-                                                (Err(e), Ok(())) => {
-                                                    let _ = worker_tx
-                                                        .send(TestResult::ProofMismatch {
-                                                            original_code: job
-                                                                .original_code
-                                                                .clone(),
-                                                            rewritten_code: job
-                                                                .rewritten_code
-                                                                .clone(),
-                                                            prover_toml: prover_toml.clone(),
-                                                            original_result: format!(
-                                                                "Proof generation failed: {}",
-                                                                e
-                                                            ),
-                                                            rewritten_result:
-                                                                "Proof generation succeeded"
-                                                                    .to_string(),
-                                                            job_id: job.job_id,
-                                                            t1,
-                                                            t2,
-                                                            rules_applied: job
-                                                                .rules_applied
-                                                                .clone(),
-                                                        })
-                                                        .await;
-                                                    found_bug = true;
-                                                    break 'executions;
-                                                }
-                                                _ => {
-                                                    let _ = worker_tx
-                                                        .send(TestResult::NotInteresting {
-                                                            t1,
-                                                            t2: Some(t2),
-                                                            is_proof: true,
-                                                            is_verification: false,
-                                                        })
-                                                        .await;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    (Ok(orig_out), Err(rewr_err)) => {
-                                        if is_expected_execution_error(rewr_err) {
-                                            let _ =
-                                                worker_tx.send(TestResult::KnownError { t1 }).await;
-                                        } else {
-                                            let _ = worker_tx
-                                                .send(TestResult::ExecutionMismatch {
-                                                    original_code: job.original_code.clone(),
-                                                    rewritten_code: job.rewritten_code.clone(),
-                                                    prover_toml,
-                                                    original_output: orig_out.clone(),
-                                                    rewritten_output: format!(
-                                                        "UNKNOWN EXECUTION ERROR: {}",
-                                                        rewr_err
-                                                    ),
-                                                    job_id: job.job_id,
-                                                    t1,
-                                                    rules_applied: job.rules_applied.clone(),
-                                                })
-                                                .await;
-                                            found_bug = true;
-                                            break 'executions;
-                                        }
-                                    }
-                                    _ => {
-                                        let _ = worker_tx
-                                            .send(TestResult::NotInteresting {
-                                                t1,
-                                                t2: None,
-                                                is_proof: false,
-                                                is_verification: false,
-                                            })
-                                            .await;
-                                    }
-                                }
-                            }
-
-                            // Only send Success if no bug was found
-                            if !found_bug {
-                                let _ = worker_tx.send(TestResult::Success { t1, t2 }).await;
-                            }
-                        }
-                        // One compiled, one didn't
-                        (Ok(()), Err(e)) => {
-                            if is_expected_execution_error(&e) {
-                                let _ = worker_tx.send(TestResult::KnownError { t1 }).await;
-                            } else {
-                                let _ = worker_tx
-                                    .send(TestResult::CompilationMismatch {
-                                        original_code: job.original_code.clone(),
-                                        rewritten_code: job.rewritten_code.clone(),
-                                        original_compiled: true,
-                                        error: e,
-                                        job_id: job.job_id,
-                                        t1,
-                                        rules_applied: job.rules_applied.clone(),
-                                    })
-                                    .await;
-                            }
-                        }
-                        _ => {
-                            let _ = worker_tx
-                                .send(TestResult::NotInteresting {
-                                    t1,
-                                    t2: None,
-                                    is_proof: false,
-                                    is_verification: false,
-                                })
-                                .await;
-                        }
-                    }
-
-                    // Clean up
-                    let _ = fs::remove_dir_all(&temp_path);
+                    let _permit = permit; // hold permit until worker completes
+                    let result = process_job(&job, &worker_signal, &worker_error_sender).await;
+                    let _ = worker_tx.send(result).await;
+                    let _ = fs::remove_dir_all(format!("./tmp/job_{}", job.job_id));
                 });
             }
         });
+    }
+
+    // Forest -> AST -> rewrite -> TestJob
+    fn generate_job(&mut self, random: &mut impl Rng, builder: &CircuitBuilder, job_id: u64) -> TestJob {
+        let forest = builder.generate(random, &self.ctx);
+        let original_code = format!("fn main() {{\n{}\n}}", forest.format("    "));
+        let mut ast = AST::from(&forest);
+
+        // Apply random rewrites to the AST
+        let mut rules_applied = vec![];
+        let num_rewrites = random.random_range(self.ctx.min_rewrites_count..self.ctx.max_rewrites_count);
+
+        for _ in 0..num_rewrites {
+            if let Some(rule) = apply_random_rule(random, &mut ast) {
+                let rule_name = format!("{:?}", rule);
+                *self.rule_stats.entry(rule_name.clone()).or_insert(0) += 1;
+                rules_applied.push(rule_name);
+            } else {
+                break;
+            }
+        }
+
+        TestJob {
+            original_code,
+            rewritten_code: format!("fn main() {{\n{}\n}}", ast.to_string().trim()),
+            executions: self.executions,
+            job_id,
+            seed: random.random(),
+            run_later_stages: self.power_schedule.should_run_later_stages(),
+            rules_applied,
+        }
     }
 
     fn drain_results(&mut self) {
@@ -626,109 +291,40 @@ impl App {
                         self.total_verifications.fetch_add(1, Ordering::Relaxed);
                     }
                 }
-                TestResult::CompilationMismatch {
-                    job_id,
-                    original_code,
-                    rewritten_code,
-                    original_compiled,
-                    error,
-                    t1,
-                    rules_applied,
-                } => {
-                    self.power_schedule.add_t1(t1);
-                    self.compile_mismatches.fetch_add(1, Ordering::Relaxed);
-                    self.save_compile_mismatch(
-                        job_id,
-                        &original_code,
-                        &rewritten_code,
-                        original_compiled,
-                        &error,
-                        rules_applied,
-                    );
-                }
-                TestResult::ExecutionMismatch {
-                    original_code,
-                    rewritten_code,
-                    prover_toml,
-                    original_output,
-                    rewritten_output,
-                    job_id,
-                    t1,
-                    rules_applied,
-                } => {
-                    self.power_schedule.add_t1(t1);
-                    self.soundness_bugs.fetch_add(1, Ordering::Relaxed);
-                    self.save_soundness_bug(
-                        job_id,
-                        &original_code,
-                        &rewritten_code,
-                        &prover_toml,
-                        &original_output,
-                        &rewritten_output,
-                        rules_applied,
-                    );
-                }
-                TestResult::ProofMismatch {
-                    original_code,
-                    rewritten_code,
-                    prover_toml,
-                    original_result,
-                    rewritten_result,
-                    job_id,
-                    t1,
-                    t2,
-                    rules_applied,
-                } => {
-                    self.power_schedule.add_t1(t1);
-                    self.power_schedule.add_t2(t2);
-                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
-                    self.proof_mismatches.fetch_add(1, Ordering::Relaxed);
-                    self.save_proof_mismatch(
-                        job_id,
-                        &original_code,
-                        &rewritten_code,
-                        &prover_toml,
-                        &original_result,
-                        &rewritten_result,
-                        rules_applied,
-                    );
-                }
-                TestResult::VerificationMismatch {
-                    original_code,
-                    rewritten_code,
-                    prover_toml,
-                    original_result,
-                    rewritten_result,
-                    job_id,
-                    t1,
-                    t2,
-                    rules_applied,
-                } => {
-                    self.power_schedule.add_t1(t1);
-                    self.power_schedule.add_t2(t2);
-                    self.total_proofs.fetch_add(1, Ordering::Relaxed);
-                    self.total_verifications.fetch_add(1, Ordering::Relaxed);
-                    self.verification_mismatches.fetch_add(1, Ordering::Relaxed);
-                    self.save_verification_mismatch(
-                        job_id,
-                        &original_code,
-                        &rewritten_code,
-                        &prover_toml,
-                        &original_result,
-                        &rewritten_result,
-                        rules_applied,
-                    );
+                TestResult::Mismatch(m) => {
+                    self.power_schedule.add_t1(m.t1);
+                    if m.t2 > Duration::ZERO {
+                        self.power_schedule.add_t2(m.t2);
+                    }
+
+                    match m.kind {
+                        MismatchKind::Compilation => self.compile_mismatches.fetch_add(1, Ordering::Relaxed),
+                        MismatchKind::Execution => self.soundness_bugs.fetch_add(1, Ordering::Relaxed),
+                        MismatchKind::Proof => {
+                            self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                            self.proof_mismatches.fetch_add(1, Ordering::Relaxed)
+                        }
+                        MismatchKind::Verification => {
+                            self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                            self.total_verifications.fetch_add(1, Ordering::Relaxed);
+                            self.verification_mismatches.fetch_add(1, Ordering::Relaxed)
+                        }
+                        MismatchKind::UnexpectedFailure => {
+                            self.total_proofs.fetch_add(1, Ordering::Relaxed);
+                            self.unexpected_failures.fetch_add(1, Ordering::Relaxed)
+                        }
+                    };
+
+                    self.save_mismatch(&m);
                 }
                 TestResult::NotInteresting { t1, t2, is_proof, is_verification } => {
                     self.power_schedule.add_t1(t1);
                     if let Some(t2) = t2 {
                         self.power_schedule.add_t2(t2);
                     }
-
                     if is_proof {
                         self.total_proofs.fetch_add(1, Ordering::Relaxed);
                     }
-
                     if is_verification {
                         self.total_proofs.fetch_add(1, Ordering::Relaxed);
                         self.total_verifications.fetch_add(1, Ordering::Relaxed);
@@ -742,207 +338,239 @@ impl App {
         }
     }
 
-    fn save_compile_mismatch(
-        &self,
-        job_id: u64,
-        original: &str,
-        rewritten: &str,
-        original_compiled: bool,
-        error: &str,
-        rules_applied: Vec<String>,
-    ) {
-        let dir = format!("{}/compile_mismatch_{}", self.crash_dir, job_id);
-        if let Err(e) = fs::create_dir_all(&dir) {
-            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
+    fn save_mismatch(&self, m: &Mismatch) {
+        let (prefix, info_file) = match m.kind {
+            MismatchKind::Compilation => ("compile_mismatch", "info.txt"),
+            MismatchKind::Execution => ("possible_soundness_bug", "divergence.txt"),
+            MismatchKind::Proof => ("proof_mismatch", "proof_divergence.txt"),
+            MismatchKind::Verification => ("verification_mismatch", "verification_divergence.txt"),
+            MismatchKind::UnexpectedFailure => ("unexpected_failure", "failure.txt"),
+        };
+
+        let dir = format!("{}/{}_{}", self.crash_dir, prefix, m.job_id);
+        if fs::create_dir_all(&dir).is_err() {
             return;
         }
 
-        let (passed, failed) =
-            if original_compiled { ("original", "rewritten") } else { ("rewritten", "original") };
+        let _ = fs::write(format!("{dir}/original.nr"), &m.original_code);
+        let _ = fs::write(format!("{dir}/rewritten.nr"), &m.rewritten_code);
 
-        let rules_str = rules_applied.join(", ");
-
-        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
-            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
-            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(
-            format!("{}/info.txt", dir),
-            format!(
-                "Rules applied: {}\n\nPassed: {}\nFailed: {}\n\nError:\n{}",
-                rules_str, passed, failed, error
-            ),
-        ) {
-            eprintln!("{RED}[!] Failed to write info.txt: {}{RESET}", e);
-        }
-    }
-
-    fn save_soundness_bug(
-        &self,
-        job_id: u64,
-        original: &str,
-        rewritten: &str,
-        prover_toml: &str,
-        original_output: &str,
-        rewritten_output: &str,
-        rules_applied: Vec<String>,
-    ) {
-        let dir = format!("{}/possible_soundness_bug_{}", self.crash_dir, job_id);
-        if let Err(e) = fs::create_dir_all(&dir) {
-            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
-            return;
+        if !m.prover_toml.is_empty() {
+            let _ = fs::write(format!("{dir}/Prover.toml"), &m.prover_toml);
         }
 
-        let rules_str = rules_applied.join(", ");
-
-        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
-            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
-            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/Prover.toml", dir), prover_toml) {
-            eprintln!("{RED}[!] Failed to write Prover.toml: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(
-            format!("{}/divergence.txt", dir),
-            format!(
-                "Rules applied: {}\n\nOriginal output:\n{}\n\nRewritten output:\n{}",
-                rules_str, original_output, rewritten_output
-            ),
-        ) {
-            eprintln!("{RED}[!] Failed to write divergence.txt: {}{RESET}", e);
-        }
-    }
-
-    fn save_proof_mismatch(
-        &self,
-        job_id: u64,
-        original: &str,
-        rewritten: &str,
-        prover_toml: &str,
-        original_result: &str,
-        rewritten_result: &str,
-        rules_applied: Vec<String>,
-    ) {
-        let dir = format!("{}/proof_mismatch_{}", self.crash_dir, job_id);
-        if let Err(e) = fs::create_dir_all(&dir) {
-            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
-            return;
-        }
-
-        let rules_str = rules_applied.join(", ");
-
-        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
-            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
-            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/Prover.toml", dir), prover_toml) {
-            eprintln!("{RED}[!] Failed to write Prover.toml: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(
-            format!("{}/proof_divergence.txt", dir),
-            format!(
-                "Rules applied: {}\n\nOriginal proof result:\n{}\n\nRewritten proof result:\n{}",
-                rules_str, original_result, rewritten_result
-            ),
-        ) {
-            eprintln!("{RED}[!] Failed to write proof_divergence.txt: {}{RESET}", e);
-        }
-    }
-
-    fn save_verification_mismatch(
-        &self,
-        job_id: u64,
-        original: &str,
-        rewritten: &str,
-        prover_toml: &str,
-        original_result: &str,
-        rewritten_result: &str,
-        rules_applied: Vec<String>,
-    ) {
-        let dir = format!("{}/verification_mismatch_{}", self.crash_dir, job_id);
-        if let Err(e) = fs::create_dir_all(&dir) {
-            eprintln!("{RED}[!] Failed to create crash directory {}: {}{RESET}", dir, e);
-            return;
-        }
-
-        let rules_str = rules_applied.join(", ");
-
-        if let Err(e) = fs::write(format!("{}/original.nr", dir), original) {
-            eprintln!("{RED}[!] Failed to write original.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/rewritten.nr", dir), rewritten) {
-            eprintln!("{RED}[!] Failed to write rewritten.nr: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(format!("{}/Prover.toml", dir), prover_toml) {
-            eprintln!("{RED}[!] Failed to write Prover.toml: {}{RESET}", e);
-        }
-        if let Err(e) = fs::write(
-            format!("{}/verification_divergence.txt", dir),
-            format!(
-                "Rules applied: {}\n\nOriginal verification result:\n{}\n\nRewritten verification result:\n{}",
-                rules_str, original_result, rewritten_result
-            ),
-        ) {
-            eprintln!("{RED}[!] Failed to write verification_divergence.txt: {}{RESET}", e);
-        }
-    }
-
-    fn parse_output(output: &str) -> (bool, String) {
-        let mut success = false;
-        let mut result = String::new();
-        for line in output.lines() {
-            if line.contains("witness successfully solved") {
-                success = true;
-            } else if line.starts_with("Circuit output") {
-                if let Some(idx) = line.find(':') {
-                    let (_, val) = line.split_at(idx + 1);
-                    result.push_str(val.trim_start());
-                }
-            }
-        }
-        (success, result)
+        let info = format!(
+            "Rules applied: {}\n\nOriginal:\n{}\n\nRewritten:\n{}",
+            m.rules_applied.join(", "),
+            m.original_output,
+            m.rewritten_output
+        );
+        let _ = fs::write(format!("{dir}/{info_file}"), info);
     }
 
     fn screen(&self) -> Result<()> {
         Command::new("clear").status()?;
         print!("{}", self.prelude);
 
-        let total = self.total_circuits.load(Ordering::Relaxed);
-        let mismatches = self.compile_mismatches.load(Ordering::Relaxed);
-        let soundness = self.soundness_bugs.load(Ordering::Relaxed);
-        let proof = self.proof_mismatches.load(Ordering::Relaxed);
-        let known = self.known_errors.load(Ordering::Relaxed);
-        let proofs = self.total_proofs.load(Ordering::Relaxed);
-        let verifications = self.total_verifications.load(Ordering::Relaxed);
-        let current_ratio = self.power_schedule.current_ratio();
-        let elapsed = self.start_time.elapsed().as_secs();
-
+        let s = self.start_time.elapsed().as_secs();
         println!(
             "[{GREEN}+{RESET}] Circuits: {RED}{}{RESET} | Mismatches: {RED}{}{RESET} | \
-             Soundness: {RED}{}{RESET} | Proof: {RED}{}{RESET} | Known: {RED}{}{RESET} | \
+             Soundness: {RED}{}{RESET} | Proof: {RED}{}{RESET} | Unexpected: {RED}{}{RESET} | Known: {RED}{}{RESET} | \
              Rate: {RED}{}{RESET}/s | Time: {RED}{:02}h {:02}m {:02}s{RESET}",
-            total,
-            mismatches,
-            soundness,
-            proof,
-            known,
+            self.total_circuits.load(Ordering::Relaxed),
+            self.compile_mismatches.load(Ordering::Relaxed),
+            self.soundness_bugs.load(Ordering::Relaxed),
+            self.proof_mismatches.load(Ordering::Relaxed),
+            self.unexpected_failures.load(Ordering::Relaxed),
+            self.known_errors.load(Ordering::Relaxed),
             self.circuits_per_tick,
-            elapsed / 3600,
-            (elapsed % 3600) / 60,
-            elapsed % 60,
+            s / 3600, (s % 3600) / 60, s % 60,
         );
         println!(
             "[{GREEN}+{RESET}] Power Schedule: p={RED}{:.6}{RESET} | Proofs: {RED}{}{RESET} | Verifications: {RED}{}{RESET}",
-            current_ratio, proofs, verifications,
+            self.power_schedule.current_ratio(),
+            self.total_proofs.load(Ordering::Relaxed),
+            self.total_verifications.load(Ordering::Relaxed),
         );
+
+        if !self.rule_stats.is_empty() {
+            let total: u64 = self.rule_stats.values().sum();
+            let mut sorted: Vec<_> = self.rule_stats.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+
+            println!("[{GREEN}+{RESET}] Rules:");
+            for (rule, count) in sorted {
+                println!("    {:30} {RED}{:6}{RESET} ({RED}{:5.2}%{RESET})", rule, count, (*count as f64 / total as f64) * 100.0);
+            }
+        }
 
         io::stdout().flush()?;
         Ok(())
     }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Worker
+// ────────────────────────────────────────────────────────────────────────────────
+
+/// Process a test job through all stages: compile, execute, prove, verify.
+///
+/// Stages are split into T1 (compile + execute) and T2 (prove + verify) for power scheduling.
+async fn process_job(job: &TestJob, signal: &Arc<AtomicBool>, error_sender: &Sender<String>) -> TestResult {
+    let temp_path = std::path::PathBuf::from(format!("./tmp/job_{}", job.job_id));
+    let orig_dir = temp_path.join("original");
+    let rewr_dir = temp_path.join("rewritten");
+
+    macro_rules! fatal {
+        ($msg:expr) => {{
+            signal.store(true, Ordering::Relaxed);
+            let _ = error_sender.send($msg).await;
+            return TestResult::KnownError { t1: Duration::ZERO };
+        }};
+    }
+
+    macro_rules! mismatch {
+        ($kind:expr, $prover:expr, $orig:expr, $rewr:expr, $t1:expr, $t2:expr) => {
+            TestResult::Mismatch(Mismatch {
+                kind: $kind,
+                job_id: job.job_id,
+                original_code: job.original_code.clone(),
+                rewritten_code: job.rewritten_code.clone(),
+                prover_toml: $prover.to_string(),
+                original_output: $orig.to_string(),
+                rewritten_output: $rewr.to_string(),
+                rules_applied: job.rules_applied.clone(),
+                t1: $t1,
+                t2: $t2,
+            })
+        };
+    }
+
+    // Setup: Create project directories
+    if setup_project(&orig_dir, &job.original_code).await.is_err() {
+        fatal!("Setup original error".into());
+    }
+    if setup_project(&rewr_dir, &job.rewritten_code).await.is_err() {
+        fatal!("Setup rewritten error".into());
+    }
+
+    let mut t1 = Duration::ZERO;
+    let mut t2 = Duration::ZERO;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Initial stages (T1): Compile both
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    let compile_start = Instant::now();
+    let orig_compile = compile_project(&orig_dir).await;
+    let rewr_compile = compile_project(&rewr_dir).await;
+    t1 += compile_start.elapsed();
+
+    match (orig_compile, rewr_compile) {
+        (Ok(()), Ok(())) => {} // Both compiled - test with random inputs
+        (Ok(()), Err(e)) if !is_expected_execution_error(&e) => {
+            return mismatch!(MismatchKind::Compilation, "", "compiled", &e, t1, t2);
+        }
+        (Err(e), Ok(())) if !is_expected_execution_error(&e) => {
+            return mismatch!(MismatchKind::Compilation, "", &e, "compiled", t1, t2);
+        }
+        _ => return TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false },
+    }
+
+    let _seeded_random = SmallRng::seed_from_u64(job.seed);
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Initial stages (T1): Execute both with random inputs
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    for _ in 0..job.executions {
+        // @todo generate prover_toml
+        let prover_toml = String::new();
+
+        if fs::write(orig_dir.join("Prover.toml"), &prover_toml).is_err()
+            || fs::write(rewr_dir.join("Prover.toml"), &prover_toml).is_err()
+        {
+            fatal!("Write Prover.toml error".into());
+        }
+
+        let exec_start = Instant::now();
+        let orig_exec = execute_project(&orig_dir).await;
+        let rewr_exec = execute_project(&rewr_dir).await;
+        t1 += exec_start.elapsed();
+
+        match (&orig_exec, &rewr_exec) {
+            (Ok(orig_out), Ok(rewr_out)) => {
+                let (orig_ok, orig_res) = parse_output(orig_out);
+                let (rewr_ok, rewr_res) = parse_output(rewr_out);
+
+                // Check for execution divergence
+                if orig_ok != rewr_ok || orig_res != rewr_res {
+                    return mismatch!(MismatchKind::Execution, &prover_toml, orig_out, rewr_out, t1, t2);
+                }
+
+                if !job.run_later_stages {
+                    continue;
+                }
+
+                // ─────────────────────────────────────────────────────────────────
+                // Later stages (T2): Proof generation
+                // ─────────────────────────────────────────────────────────────────
+
+                let proof_start = Instant::now();
+                let orig_proof = bb_prove(&orig_dir).await;
+                let rewr_proof = bb_prove(&rewr_dir).await;
+                t2 += proof_start.elapsed();
+
+                match (&orig_proof, &rewr_proof) {
+                    (Ok(()), Ok(())) => {} // Both proved - verify
+                    (Ok(()), Err(e)) => return mismatch!(MismatchKind::Proof, &prover_toml, "succeeded", &format!("failed: {e}"), t1, t2),
+                    (Err(e), Ok(())) => return mismatch!(MismatchKind::Proof, &prover_toml, &format!("failed: {e}"), "succeeded", t1, t2),
+                    (Err(e1), Err(e2)) => return mismatch!(MismatchKind::UnexpectedFailure, &prover_toml, &format!("failed: {e1}"), &format!("failed: {e2}"), t1, t2),
+                }
+
+                // ─────────────────────────────────────────────────────────────────
+                // Later stages (T2): Verification
+                // ─────────────────────────────────────────────────────────────────
+
+                let verify_start = Instant::now();
+                let orig_verify = bb_verify(&orig_dir).await;
+                let rewr_verify = bb_verify(&rewr_dir).await;
+                t2 += verify_start.elapsed();
+
+                match (&orig_verify, &rewr_verify) {
+                    (Ok(()), Ok(())) => {} // Both verified - success
+                    (Ok(()), Err(e)) => return mismatch!(MismatchKind::Verification, &prover_toml, "succeeded", &format!("failed: {e}"), t1, t2),
+                    (Err(e), Ok(())) => return mismatch!(MismatchKind::Verification, &prover_toml, &format!("failed: {e}"), "succeeded", t1, t2),
+                    (Err(e1), Err(e2)) => return mismatch!(MismatchKind::UnexpectedFailure, &prover_toml, &format!("failed: {e1}"), &format!("failed: {e2}"), t1, t2),
+                }
+            }
+            (Ok(orig_out), Err(e)) => {
+                if is_expected_execution_error(e) {
+                    return TestResult::KnownError { t1 };
+                }
+                return mismatch!(MismatchKind::Execution, &prover_toml, orig_out, &format!("UNKNOWN ERROR: {e}"), t1, t2);
+            }
+            _ => return TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false },
+        }
+    }
+
+    TestResult::Success { t1, t2 }
+}
+
+// (success, circuit_output)
+fn parse_output(output: &str) -> (bool, String) {
+    let mut success = false;
+    let mut result = String::new();
+
+    for line in output.lines() {
+        if line.contains("witness successfully solved") {
+            success = true;
+        } else if let Some(rest) = line.strip_prefix("Circuit output") {
+            if let Some(idx) = rest.find(':') {
+                result.push_str(rest[idx + 1..].trim_start());
+            }
+        }
+    }
+
+    (success, result)
 }

@@ -1,2 +1,2 @@
-mod forest;
-mod types;
+pub mod forest;
+pub mod types;

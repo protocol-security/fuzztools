@@ -5,6 +5,10 @@ Metamorphic fuzzer for the Noir compiler. What it does is creates an AST represe
 ## Hall of fame 🏆
 
 - Error nodes triggering a compiler bug -> [PR link](https://github.com/noir-lang/noir/issues/10824)
+- Crash -> [PR link](https://github.com/noir-lang/noir/issues/11326)
+- Crash -> [PR link](https://github.com/noir-lang/noir/issues/11250)
+- OOB XOR output at compile time -> [PR link](https://github.com/noir-lang/noir/issues/11249)
+- Nested lambdas can't be accessed -> [PR link](https://github.com/noir-lang/noir/issues/11325)
 
 For more low/info bugs, check my [submissions](https://github.com/noir-lang/noir/issues?q=is%3Aissue%20author%3Anethoxa).
 

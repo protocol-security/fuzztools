@@ -31,25 +31,25 @@ pub enum Type {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Integer {
-    pub(crate) bits: u32,
-    pub(crate) signed: bool,
+    pub bits: u32,
+    pub signed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Array {
-    pub(crate) ty: Box<Type>,
-    pub(crate) size: usize,
+    pub ty: Box<Type>,
+    pub size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Slice {
-    pub(crate) ty: Box<Type>,
-    pub(crate) size: usize,
+    pub ty: Box<Type>,
+    pub size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tuple {
-    pub(crate) elements: Vec<Type>,
+    pub elements: Vec<Type>,
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -60,25 +60,39 @@ impl Type {
     #[inline(always)]
     pub const fn kind(&self) -> TypeKind {
         match self {
-            Type::Field => TypeKind::Field,
-            Type::Integer(i) if i.signed => TypeKind::Signed,
-            Type::Integer(_) => TypeKind::Unsigned,
-            Type::Bool => TypeKind::Bool,
-            Type::Array(_) => TypeKind::Array,
-            Type::Slice(_) => TypeKind::Slice,
-            Type::Tuple(_) => TypeKind::Tuple,
+            Self::Field => TypeKind::Field,
+            Self::Integer(i) if i.signed => TypeKind::Signed,
+            Self::Integer(_) => TypeKind::Unsigned,
+            Self::Bool => TypeKind::Bool,
+            Self::Array(_) => TypeKind::Array,
+            Self::Slice(_) => TypeKind::Slice,
+            Self::Tuple(_) => TypeKind::Tuple,
         }
     }
 
     #[inline(always)]
     pub fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         match self {
-            Type::Field => random_field_element(random, ctx, "bn254", true),
-            Type::Integer(i) => i.random_value(random, ctx),
-            Type::Bool => random.random_bool(0.5).to_string(),
-            Type::Array(a) => a.random_value(random, ctx),
-            Type::Slice(s) => s.random_value(random, ctx),
-            Type::Tuple(t) => t.random_value(random, ctx),
+            Self::Field => random_field_element(random, ctx, "bn254", true),
+            Self::Integer(i) => i.random_value(random, ctx),
+            Self::Bool => random.random_bool(0.5).to_string(),
+            Self::Array(a) => a.random_value(random, ctx),
+            Self::Slice(s) => s.random_value(random, ctx),
+            Self::Tuple(t) => t.random_value(random, ctx),
+        }
+    }
+
+    pub fn random_castable_source(random: &mut impl Rng, target: &Type) -> Self {
+        match (target, random.random_bool(0.5)) {
+            (Self::Field, true) => Self::Bool,
+            (Self::Field, false) => Self::Integer(Integer::random(random, false)),
+            (Self::Integer(_), true) => Self::Field,
+            (Self::Integer(_), false) => {
+                let signed = random.random_bool(0.5);
+
+                Self::Integer(Integer::random(random, signed))
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -88,49 +102,68 @@ impl Type {
     ///
     /// Slices are invalid.
     #[inline(always)]
-    pub(crate) fn is_valid_public_input(&self) -> bool {
+    pub fn is_valid_public_input(&self) -> bool {
         match self {
-            Type::Field | Type::Integer(_) | Type::Bool => true,
-            Type::Array(a) => a.size > 0 && a.ty.is_valid_public_input(),
-            Type::Tuple(t) => {
+            Self::Field | Self::Integer(_) | Self::Bool => true,
+            Self::Array(a) => a.size > 0 && a.ty.is_valid_public_input(),
+            Self::Tuple(t) => {
                 t.elements.len() > 1 && t.elements.iter().all(|e| e.is_valid_public_input())
             }
-            Type::Slice(_) => false,
+            Self::Slice(_) => false,
         }
     }
 
     #[inline(always)]
-    pub(crate) const fn is_primitive(&self) -> bool {
-        matches!(self, Type::Field | Type::Integer(_) | Type::Bool)
+    pub const fn is_primitive(&self) -> bool {
+        matches!(self, Self::Field | Self::Integer(_) | Self::Bool)
     }
 
     #[inline(always)]
-    pub(crate) const fn is_numeric(&self) -> bool {
-        matches!(self, Type::Field | Type::Integer(_))
+    pub const fn is_numeric(&self) -> bool {
+        matches!(self, Self::Field | Self::Integer(_))
     }
 
     #[inline(always)]
-    pub(crate) const fn is_integer(&self) -> bool {
-        matches!(self, Type::Integer(_))
+    pub const fn is_field(&self) -> bool {
+        matches!(self, Self::Field)
     }
 
     #[inline(always)]
-    pub(crate) const fn is_signed(&self) -> bool {
-        matches!(self, Type::Integer(i) if i.signed)
+    pub const fn is_integer(&self) -> bool {
+        matches!(self, Self::Integer(_))
     }
 
     #[inline(always)]
-    pub(crate) const fn is_unsigned(&self) -> bool {
-        matches!(self, Type::Integer(i) if !i.signed)
+    pub const fn is_signed(&self) -> bool {
+        matches!(self, Self::Integer(i) if i.signed)
     }
 
     #[inline(always)]
-    pub(crate) const fn is_bool(&self) -> bool {
-        matches!(self, Type::Bool)
+    pub const fn is_unsigned(&self) -> bool {
+        matches!(self, Self::Integer(i) if !i.signed)
+    }
+
+    #[inline(always)]
+    pub const fn is_bool(&self) -> bool {
+        matches!(self, Self::Bool)
     }
 }
 
 impl Integer {
+    const SIGNED_BITS: [u32; 4] = [8, 16, 32, 64];
+    const UNSIGNED_BITS: [u32; 6] = [1, 8, 16, 32, 64, 128];
+
+    /// Returns a random `Integer` with the given signedness.
+    pub fn random(random: &mut impl Rng, signed: bool) -> Self {
+        let bits = if signed {
+            *Self::SIGNED_BITS.choose(random).unwrap()
+        } else {
+            *Self::UNSIGNED_BITS.choose(random).unwrap()
+        };
+
+        Self { bits, signed }
+    }
+
     fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
         let ty = format!("{}{}", if self.signed { "i" } else { "u" }, self.bits);
 

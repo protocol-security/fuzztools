@@ -5,7 +5,7 @@ use super::{operators::Operator, types::Type};
 // ────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub(crate) enum Node {
+pub enum Node {
     /// Input node.
     Input { name: String, ty: Type },
 
@@ -41,7 +41,7 @@ pub(crate) enum Node {
 
 impl Node {
     #[inline(always)]
-    pub(crate) const fn color(&self) -> &'static str {
+    pub const fn color(&self) -> &'static str {
         match self {
             Self::Input { .. } => "#dc4e23ff",
             Self::Literal { .. } => "#24b3ecff",
@@ -54,7 +54,7 @@ impl Node {
     }
 
     #[inline(always)]
-    pub(crate) const fn is_single_use(&self) -> bool {
+    pub const fn is_single_use(&self) -> bool {
         matches!(
             self,
             Node::Literal { .. } |
@@ -66,7 +66,7 @@ impl Node {
     }
 
     #[inline(always)]
-    pub(crate) fn ty(&self) -> Type {
+    pub fn ty(&self) -> Type {
         match self {
             Self::Input { ty, .. } |
             Self::Literal { ty, .. } |

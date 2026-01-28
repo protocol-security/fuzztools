@@ -1,6 +1,6 @@
 use crate::circuits::{
-    ast::{Array, Integer, Slice, Tuple},
-    Context, Type, TypeKind,
+    context::Context,
+    ir::{Array, Integer, Slice, Tuple, Type, TypeKind},
 };
 use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
@@ -14,7 +14,7 @@ pub enum TypeLocation {
     Default,
 }
 
-pub(crate) enum WorkItem {
+pub enum WorkItem {
     Generate { slot: usize, depth: usize, location: TypeLocation },
     FinalizeArray { slot: usize, inner: usize, size: usize },
     FinalizeSlice { slot: usize, inner: usize, size: usize },
@@ -33,8 +33,8 @@ impl Type {
     ///
     /// - `GenerateType`: Decides what type to create. Primitives go directly into their slot.
     ///   Compound types reserve slots for children and push both `GenerateType` (for children) and
-    ///   `Finalize*` (to assemble)
-    /// - `Finalize*`: Takes completed children from their slots and assembles the parent type
+    ///   `Finalize*` (to assemble).
+    /// - `Finalize*`: Takes completed children from their slots and assembles the parent type.
     ///
     /// - Initial:  slots=[None], work=[Generate(0)]
     /// - Step 1: Generate(0) -> Array chosen -> slots=[None, None] work=[Generate(1),
@@ -46,9 +46,9 @@ impl Type {
     /// - Step 5: FinalizeTuple(1) -> slots=[None, Some(Tuple), ...]
     /// - Step 6: FinalizeArray(0) -> slots=[Some(Array<Tuple>), ...]
     ///
-    /// - Done! Return slots[0]
+    /// - Done! Return slots[0].
     ///
-    /// If you do not understand something, just ask claude :D
+    /// If you do not understand something, just ask claude :D.
     pub fn random(random: &mut impl Rng, ctx: &Context, location: TypeLocation) -> Self {
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
@@ -88,59 +88,43 @@ impl Type {
         depth: usize,
         location: TypeLocation,
     ) {
-        // To avoid infinite recursion, we limit the depth of generated types. If we reach the max
-        // depth, the generated type will be `Field`
         if depth >= ctx.max_type_depth {
             slots[slot] = Some(Type::Field);
             return;
         }
 
         let mut options = vec![
-            TypeKind::Field,
-            TypeKind::Unsigned,
-            TypeKind::Signed,
-            TypeKind::Bool,
-            TypeKind::Array,
-            TypeKind::Tuple,
+            (TypeKind::Field, ctx.field_weight),
+            (TypeKind::Unsigned, ctx.unsigned_weight),
+            (TypeKind::Signed, ctx.signed_weight),
+            (TypeKind::Bool, ctx.bool_weight),
+            (TypeKind::Array, ctx.array_weight),
+            (TypeKind::Tuple, ctx.tuple_weight),
         ];
 
         if location.allows_slice() {
-            options.push(TypeKind::Slice);
+            options.push((TypeKind::Slice, ctx.slice_weight));
         }
 
-        match options.choose(random).unwrap() {
+        match options.choose_weighted(random, |i| i.1).unwrap().0 {
             TypeKind::Field => slots[slot] = Some(Type::Field),
             TypeKind::Bool => slots[slot] = Some(Type::Bool),
-            TypeKind::Signed => {
-                const SIGNED_BITS: [u32; 4] = [8, 16, 32, 64];
-                let bits = *SIGNED_BITS.choose(random).unwrap();
-
-                slots[slot] = Some(Type::Integer(Integer { bits, signed: true }));
-            }
-            TypeKind::Unsigned => {
-                const UNSIGNED_BITS: [u32; 6] = [1, 8, 16, 32, 64, 128];
-                let bits = *UNSIGNED_BITS.choose(random).unwrap();
-
-                slots[slot] = Some(Type::Integer(Integer { bits, signed: false }));
-            }
+            TypeKind::Signed => slots[slot] = Some(Type::Integer(Integer::random(random, true))),
+            TypeKind::Unsigned => slots[slot] = Some(Type::Integer(Integer::random(random, false))),
 
             kind @ (TypeKind::Array | TypeKind::Slice) => {
                 let inner = slots.len();
-
-                // Reserve a slot for the inner type
                 slots.push(None);
 
                 let min = if location == TypeLocation::Main { 1 } else { ctx.min_element_count };
-                let size = random.random_range(min..=ctx.max_element_count); // @todo may trigger cannot sample empty range
+                let size = random.random_range(min..=ctx.max_element_count);
 
-                // So that we assemble the `Array`/`Slice` once we trigger this work item
                 work.push_front(match kind {
                     TypeKind::Array => WorkItem::FinalizeArray { slot, inner, size },
                     TypeKind::Slice => WorkItem::FinalizeSlice { slot, inner, size },
                     _ => unreachable!(),
                 });
 
-                // But first, we need to generate the inner type
                 work.push_front(WorkItem::Generate {
                     slot: inner,
                     depth: depth + 1,
@@ -149,20 +133,16 @@ impl Type {
             }
 
             TypeKind::Tuple => {
-                // Tuples need at least 2 elements, otherwise they "downcast" to the inner type
                 let min = ctx.min_element_count.max(2);
-                let count = random.random_range(min..=ctx.max_element_count.max(min + 1));
+                let max = ctx.max_element_count.max(min);
+                let count = random.random_range(min..=max);
 
                 let start = slots.len();
-
-                // Reserve slots for the inner types
                 slots.resize(start + count, None);
                 let inners: Vec<_> = (start..start + count).collect();
 
-                // So that we assemble the `Tuple` once we trigger this work item
                 work.push_front(WorkItem::FinalizeTuple { slot, inners: inners.clone() });
 
-                // But first, we need to generate the inner types
                 for i in inners {
                     work.push_front(WorkItem::Generate {
                         slot: i,
@@ -176,7 +156,6 @@ impl Type {
 }
 
 impl TypeLocation {
-    /// Transition when entering array/slice element type
     #[inline(always)]
     const fn into_nested(self) -> Self {
         match self {
@@ -185,14 +164,13 @@ impl TypeLocation {
         }
     }
 
-    /// Transition when entering tuple element type
     #[inline(always)]
     const fn into_tuple(self) -> Self {
         match self {
             Self::Main => Self::Main,
             Self::Default => Self::TupleElement,
             Self::Nested => Self::TupleNested,
-            other => other, // TupleElement/TupleNested stay the same
+            other => other,
         }
     }
 

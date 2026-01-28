@@ -1,4 +1,4 @@
-use crate::circuits::ast::types::TypeKind;
+use crate::circuits::ir::types::TypeKind;
 
 use super::{nodes::Node, operators::Operator, types::Type};
 use petgraph::{
@@ -6,7 +6,6 @@ use petgraph::{
     graph::NodeIndex,
     stable_graph::StableDiGraph,
     visit::{EdgeRef, IntoEdgeReferences},
-    Direction,
 };
 use std::{collections::HashMap, fmt::Write, io, path::Path};
 
@@ -16,20 +15,19 @@ use std::{collections::HashMap, fmt::Write, io, path::Path};
 
 #[derive(Debug, Clone, Default)]
 pub struct Forest {
-    pub(crate) inner: StableDiGraph<Node, usize>,
+    pub inner: StableDiGraph<Node, usize>,
 
-    pub(crate) types: HashMap<Type, Vec<NodeIndex>>,
-    pub(crate) kinds: HashMap<TypeKind, Vec<NodeIndex>>,
-    pub(crate) operators: HashMap<Operator, Vec<NodeIndex>>,
-    pub(crate) mutables: HashMap<NodeIndex, String>,
-    pub(crate) reusables: HashMap<Type, Vec<NodeIndex>>,
-    pub(crate) indexables: HashMap<Type, Vec<(NodeIndex, usize)>>,
-    pub(crate) tuple_indexables: HashMap<Type, Vec<(NodeIndex, usize)>>,
+    pub types: HashMap<Type, Vec<NodeIndex>>,
+    pub kinds: HashMap<TypeKind, Vec<NodeIndex>>,
+    pub mutables: HashMap<NodeIndex, String>,
+    pub reusables: HashMap<Type, Vec<NodeIndex>>,
+    pub indexables: HashMap<Type, Vec<(NodeIndex, usize)>>,
+    pub tuple_indexables: HashMap<Type, Vec<(NodeIndex, usize)>>,
 
-    pub(crate) return_expr: Option<String>,
+    pub return_expr: Option<String>,
 
     // Helpers
-    pub(crate) var_count: usize,
+    pub var_count: usize,
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -37,7 +35,7 @@ pub struct Forest {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Forest {
-    pub(crate) fn input(&mut self, name: String, ty: &Type) -> NodeIndex {
+    pub fn input(&mut self, name: String, ty: &Type) -> NodeIndex {
         let idx = self.inner.add_node(Node::Input { name, ty: ty.clone() });
         self.register_reusable(idx, ty);
         self.register(idx, ty);
@@ -45,14 +43,14 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn literal(&mut self, value: String, ty: &Type) -> NodeIndex {
+    pub fn literal(&mut self, value: String, ty: &Type) -> NodeIndex {
         let idx = self.inner.add_node(Node::Literal { value, ty: ty.clone() });
         self.register(idx, ty);
 
         idx
     }
 
-    pub(crate) fn variable(
+    pub fn variable(
         &mut self,
         name: String,
         ty: &Type,
@@ -74,7 +72,7 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn operator(
+    pub fn operator(
         &mut self,
         op: Operator,
         ty: &Type,
@@ -82,7 +80,6 @@ impl Forest {
         right: Option<NodeIndex>,
     ) -> NodeIndex {
         let idx = self.inner.add_node(Node::Operator { op, ty: ty.clone() });
-        self.operators.entry(op).or_default().push(idx);
         self.register(idx, ty);
 
         self.add_edge(left, idx, 0);
@@ -95,7 +92,7 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn index(&mut self, index: usize, ty: &Type, parent: NodeIndex) -> NodeIndex {
+    pub fn index(&mut self, index: usize, ty: &Type, parent: NodeIndex) -> NodeIndex {
         let idx = self.inner.add_node(Node::Index { index, ty: ty.clone() });
         self.register(idx, ty);
 
@@ -104,7 +101,7 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn tuple_index(&mut self, index: usize, ty: &Type, parent: NodeIndex) -> NodeIndex {
+    pub fn tuple_index(&mut self, index: usize, ty: &Type, parent: NodeIndex) -> NodeIndex {
         let idx = self.inner.add_node(Node::TupleIndex { index, ty: ty.clone() });
         self.register(idx, ty);
 
@@ -113,7 +110,7 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn cast(&mut self, ty: &Type, parent: NodeIndex) -> NodeIndex {
+    pub fn cast(&mut self, ty: &Type, parent: NodeIndex) -> NodeIndex {
         let idx = self.inner.add_node(Node::Cast { ty: ty.clone() });
         self.register(idx, ty);
 
@@ -122,7 +119,7 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn assignement(
+    pub fn assignement(
         &mut self,
         op: Option<Operator>,
         ty: &Type,
@@ -148,19 +145,20 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn indexed_assignment(
+    pub fn indexed_assignment(
         &mut self,
         op: Option<Operator>,
-        index: usize,
+        pos: usize,
         elem_ty: &Type,
         value: NodeIndex,
         parent: NodeIndex,
     ) -> NodeIndex {
-        let parent_ty = self.inner[parent].ty();
+        let parent_ty = self.ty(parent);
         let name = self.mutables.remove(&parent).unwrap();
 
-        let lhs = self.index(index, elem_ty, parent);
-        let idx = self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
+        let lhs = self.index(pos, elem_ty, parent);
+        let idx =
+            self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
 
         self.inner.add_edge(idx, lhs, 0);
         self.add_edge(value, idx, 1);
@@ -180,19 +178,20 @@ impl Forest {
         idx
     }
 
-    pub(crate) fn tuple_field_assignment(
+    pub fn tuple_field_assignment(
         &mut self,
         op: Option<Operator>,
-        field_pos: usize,
+        pos: usize,
         field_ty: &Type,
         value: NodeIndex,
         parent: NodeIndex,
     ) -> NodeIndex {
-        let parent_ty = self.inner[parent].ty();
+        let parent_ty = self.ty(parent);
         let name = self.mutables.remove(&parent).unwrap();
 
-        let lhs = self.tuple_index(field_pos, field_ty, parent);
-        let idx = self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
+        let lhs = self.tuple_index(pos, field_ty, parent);
+        let idx =
+            self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
 
         self.inner.add_edge(idx, lhs, 0);
         self.add_edge(value, idx, 1);
@@ -213,18 +212,42 @@ impl Forest {
     }
 
     #[inline(always)]
-    pub(crate) fn left(&self, idx: NodeIndex) -> Option<NodeIndex> {
+    pub fn left(&self, idx: NodeIndex) -> Option<NodeIndex> {
         self.inner.edges(idx).find(|e| *e.weight() == 0).map(|e| e.target())
     }
 
     #[inline(always)]
-    pub(crate) fn right(&self, idx: NodeIndex) -> Option<NodeIndex> {
+    pub fn right(&self, idx: NodeIndex) -> Option<NodeIndex> {
         self.inner.edges(idx).find(|e| *e.weight() == 1).map(|e| e.target())
     }
 
     #[inline(always)]
-    pub(crate) fn ty(&self, idx: NodeIndex) -> Type {
+    pub fn ty(&self, idx: NodeIndex) -> Type {
         self.inner[idx].ty()
+    }
+
+    #[inline(always)]
+    pub fn get_reusables(&self, ty: &Type) -> &[NodeIndex] {
+        match self.reusables.get(ty) {
+            Some(v) => v.as_slice(),
+            None => &[],
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_indexables(&self, ty: &Type) -> &[(NodeIndex, usize)] {
+        match self.indexables.get(ty) {
+            Some(v) => v.as_slice(),
+            None => &[],
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_tuple_indexables(&self, ty: &Type) -> &[(NodeIndex, usize)] {
+        match self.tuple_indexables.get(ty) {
+            Some(v) => v.as_slice(),
+            None => &[],
+        }
     }
 
     fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, weight: usize) {
@@ -237,10 +260,6 @@ impl Forest {
 
         let ty = node.ty();
         self.unregister(from, &ty);
-
-        if let Node::Operator { op, .. } = node {
-            self.operators.get_mut(&op).unwrap().retain(|&x| x != from);
-        }
     }
 
     #[inline(always)]
@@ -297,30 +316,6 @@ impl Forest {
             _ => {}
         }
     }
-
-    #[inline(always)]
-    pub(crate) fn get_reusables(&self, ty: &Type) -> &[NodeIndex] {
-        match self.reusables.get(ty) {
-            Some(v) => v.as_slice(),
-            None => &[],
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_indexables(&self, ty: &Type) -> &[(NodeIndex, usize)] {
-        match self.indexables.get(ty) {
-            Some(v) => v.as_slice(),
-            None => &[],
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_tuple_indexables(&self, ty: &Type) -> &[(NodeIndex, usize)] {
-        match self.tuple_indexables.get(ty) {
-            Some(v) => v.as_slice(),
-            None => &[],
-        }
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -356,7 +351,8 @@ impl Forest {
 
                 Node::Assignment { name, op, .. } => {
                     let op_str = op.map(|o| o.to_string()).unwrap_or_default();
-                    let _ = writeln!(out, "{indent}{} {op_str}= {};", left.unwrap(), right.unwrap());
+                    let _ =
+                        writeln!(out, "{indent}{} {op_str}= {};", left.unwrap(), right.unwrap());
                     name.clone()
                 }
             };
@@ -377,7 +373,7 @@ impl Forest {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Forest {
-    pub(crate) fn save_as_dot(&self, path: &Path) -> Result<(), io::Error> {
+    pub fn save_as_dot(&self, path: &Path) -> Result<(), io::Error> {
         let mut out = String::from(
             "digraph {\n  rankdir=BT;\n  node [fontname=monospace shape=box style=\"filled,rounded\" margin=\"0.4,0.2\"];\n"
         );

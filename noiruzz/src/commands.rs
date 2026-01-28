@@ -83,16 +83,13 @@ pub(crate) async fn execute_project(dir: &std::path::Path) -> Result<String, Str
 }
 
 pub(crate) async fn bb_prove(dir: &std::path::Path) -> Result<(), String> {
-    let noir_json = dir.join("target").join("circuit.json");
-    let witness_gz = dir.join("target").join("circuit.gz");
-
     let output = Command::new("bb")
         .args([
             "prove",
             "-b",
-            noir_json.to_str().unwrap(),
+            "target/circuit.json",
             "-w",
-            witness_gz.to_str().unwrap(),
+            "target/circuit.gz",
             "--write_vk",
             "-o",
             "target",
@@ -110,11 +107,8 @@ pub(crate) async fn bb_prove(dir: &std::path::Path) -> Result<(), String> {
 }
 
 pub(crate) async fn bb_verify(dir: &std::path::Path) -> Result<(), String> {
-    let vk = dir.join("target").join("vk");
-    let proof = dir.join("target").join("proof");
-
     let output = Command::new("bb")
-        .args(["verify", "-k", vk.to_str().unwrap(), "-p", proof.to_str().unwrap()])
+        .args(["verify", "-k", "target/vk", "-p", "target/proof"])
         .current_dir(dir)
         .output()
         .await
