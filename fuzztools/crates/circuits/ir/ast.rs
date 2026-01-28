@@ -1,6 +1,6 @@
 use super::{forest::Forest, nodes::Node, operators::Operator, types::Type};
 use petgraph::algo::toposort;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Write};
 
 // ────────────────────────────────────────────────────────────────────────────────
 // AST definition
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct AST {
     pub statements: Vec<Statement>,
-    pub return_expr: Option<Expr>,
+    pub return_expr: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,9 +139,12 @@ impl From<&Forest> for AST {
                         Expr::TupleIndex { field, .. } => {
                             Statement::TupleAssignment { name: name.clone(), field, op: *op, value }
                         }
-                        Expr::StructField { field, .. } => {
-                            Statement::StructAssignment { name: name.clone(), field, op: *op, value }
-                        }
+                        Expr::StructField { field, .. } => Statement::StructAssignment {
+                            name: name.clone(),
+                            field,
+                            op: *op,
+                            value,
+                        },
                         _ => unreachable!(),
                     });
                     exprs.insert(idx.index(), Expr::Ref(name.clone(), ty.clone()));
@@ -149,71 +152,69 @@ impl From<&Forest> for AST {
             }
         }
 
-        let return_expr = forest.return_expr.as_ref().and_then(|name| {
-            statements.iter().rev().find_map(|stmt| match stmt {
-                Statement::Let { name: var_name, ty, .. } if var_name == name => {
-                    Some(Expr::Ref(name.clone(), ty.clone()))
-                }
-                _ => None,
-            })
-        });
-
-        AST { statements, return_expr }
+        AST { statements, return_expr: forest.return_expr.clone() }
     }
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Display
+// Formatting
 // ────────────────────────────────────────────────────────────────────────────────
 
-impl std::fmt::Display for AST {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl AST {
+    pub fn format(&self, indent: &str) -> String {
+        let mut out = String::new();
+
         for stmt in &self.statements {
-            writeln!(f, "{}", stmt)?;
+            let _ = writeln!(out, "{indent}{}", stmt.format());
         }
+
         if let Some(ret) = &self.return_expr {
-            writeln!(f, "{}", ret)?;
+            let _ = writeln!(out, "{indent}{ret}");
         }
-        Ok(())
+
+        out
     }
 }
 
-impl std::fmt::Display for Statement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Statement {
+    pub fn format(&self) -> String {
         match self {
             Statement::Let { name, ty, mutable, value } => {
-                write!(f, "let {}{name}: {ty} = {value};", if *mutable { "mut " } else { "" })
+                let m = if *mutable { "mut " } else { "" };
+                format!("let {m}{name}: {ty} = {};", value.format())
             }
             Statement::DirectAssignment { name, op, value } => match op {
-                Some(o) => write!(f, "{name} {o}= {value};"),
-                None => write!(f, "{name} = {value};"),
+                Some(o) => format!("{name} {o}= {};", value.format()),
+                None => format!("{name} = {};", value.format()),
             },
             Statement::IndexAssignment { name, index, op, value } => match op {
-                Some(o) => write!(f, "{name}[{index}] {o}= {value};"),
-                None => write!(f, "{name}[{index}] = {value};"),
+                Some(o) => format!("{name}[{index}] {o}= {};", value.format()),
+                None => format!("{name}[{index}] = {};", value.format()),
             },
             Statement::TupleAssignment { name, field, op, value } => match op {
-                Some(o) => write!(f, "{name}.{field} {o}= {value};"),
-                None => write!(f, "{name}.{field} = {value};"),
+                Some(o) => format!("{name}.{field} {o}= {};", value.format()),
+                None => format!("{name}.{field} = {};", value.format()),
             },
             Statement::StructAssignment { name, field, op, value } => match op {
-                Some(o) => write!(f, "{name}.{field} {o}= {value};"),
-                None => write!(f, "{name}.{field} = {value};"),
+                Some(o) => format!("{name}.{field} {o}= {};", value.format()),
+                None => format!("{name}.{field} = {};", value.format()),
             },
         }
     }
 }
 
-impl std::fmt::Display for Expr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Expr {
+    pub fn format(&self) -> String {
         match self {
-            Expr::Ref(name, _) => write!(f, "{name}"),
-            Expr::Binary { op, left, right, .. } => write!(f, "({left} {op} {right})"),
-            Expr::Unary { op, operand, .. } => write!(f, "({op}{operand})"),
-            Expr::Index { expr, index, .. } => write!(f, "{expr}[{index}]"),
-            Expr::TupleIndex { expr, field, .. } => write!(f, "{expr}.{field}"),
-            Expr::StructField { expr, field, .. } => write!(f, "{expr}.{field}"),
-            Expr::Cast { expr, ty } => write!(f, "({expr} as {ty})"),
+            Expr::Ref(name, _) => name.clone(),
+            Expr::Binary { op, left, right, .. } => {
+                format!("({} {op} {})", left.format(), right.format())
+            }
+            Expr::Unary { op, operand, .. } => format!("({op}{})", operand.format()),
+            Expr::Index { expr, index, .. } => format!("{}[{index}]", expr.format()),
+            Expr::TupleIndex { expr, field, .. } => format!("{}.{field}", expr.format()),
+            Expr::StructField { expr, field, .. } => format!("{}.{field}", expr.format()),
+            Expr::Cast { expr, ty } => format!("({} as {ty})", expr.format()),
         }
     }
 }

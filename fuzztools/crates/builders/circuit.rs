@@ -44,6 +44,23 @@ impl CircuitBuilder {
 
         Circuit { forest, inputs, ret }
     }
+
+    pub fn format_main(
+        &self,
+        body: String,
+        inputs: Vec<(String, Type)>,
+        ret_ty: Option<Type>,
+    ) -> String {
+        let inputs_str = inputs
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let ret_str = ret_ty.map_or(String::new(), |ty| format!(" -> pub {}", ty));
+
+        format!("fn main({inputs_str}){ret_str} {{\n{body}}}")
+    }
 }
 
 #[cfg(test)]
@@ -59,17 +76,9 @@ mod tests {
         let mut random = rand::rng();
         let builder = CircuitBuilder::default();
         let circuit = builder.generate(&mut random, ctx);
+        let body = circuit.forest.format("    ");
 
-        let inputs = circuit
-            .inputs
-            .iter()
-            .map(|(name, ty)| format!("{}: {}", name, ty))
-            .collect::<Vec<String>>()
-            .join(", ");
-
-        let ret_ty = circuit.ret.as_ref().map(|ty| format!(" -> pub {ty}")).unwrap_or_default();
-
-        println!("fn main({inputs}){ret_ty} {{\n{}}}", circuit.forest.format("    "));
+        println!("{}", builder.format_main(body, circuit.inputs, circuit.ret));
 
         circuit
             .forest

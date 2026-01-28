@@ -9,7 +9,11 @@ use crate::{
 use anyhow::Result;
 use fuzztools::{
     builders::CircuitBuilder,
-    circuits::{context::Context, ir::AST, rewritter::apply_random_rule},
+    circuits::{
+        context::Context,
+        ir::{Type, AST},
+        rewritter::apply_random_rule,
+    },
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::{
@@ -32,10 +36,12 @@ use tokio::sync::{
 // Types
 // ────────────────────────────────────────────────────────────────────────────────
 
-/// A job containing the source code of the riginal and rewritten circuits, as well as the list of rules applied.
+/// A job containing the source code of the riginal and rewritten circuits, as well as the list of
+/// rules applied.
 struct TestJob {
     original_code: String,
     rewritten_code: String,
+    inputs: Vec<(String, Type)>,
     executions: usize,
     job_id: u64,
     seed: u64,
@@ -169,7 +175,10 @@ impl App {
         loop {
             // Check for fatal errors from workers
             if self.error_signal.load(Ordering::Relaxed) {
-                eprintln!("\n\n\x1b[1;31m[!] Error: {}\x1b[0m", error_receiver.recv().await.unwrap());
+                eprintln!(
+                    "\n\n\x1b[1;31m[!] Error: {}\x1b[0m",
+                    error_receiver.recv().await.unwrap()
+                );
                 break;
             }
 
@@ -219,11 +228,12 @@ impl App {
 
     /// Spawn the dispatcher task that distributes jobs to worker pool.
     fn spawn_dispatcher(&mut self) {
-        let mut rx = self.job_receiver.take().unwrap();
+        let ctx = self.ctx;
         let tx = self.result_sender.clone();
         let signal = self.error_signal.clone();
         let error_sender = self.error_sender.clone();
         let semaphore = self.worker_semaphore.clone();
+        let mut rx = self.job_receiver.take().unwrap();
 
         tokio::spawn(async move {
             while let Some(job) = rx.recv().await {
@@ -231,6 +241,7 @@ impl App {
                     break;
                 }
 
+                let worker_ctx = ctx.clone();
                 let worker_tx = tx.clone();
                 let worker_signal = signal.clone();
                 let worker_error_sender = error_sender.clone();
@@ -238,7 +249,7 @@ impl App {
 
                 tokio::spawn(async move {
                     let _permit = permit; // hold permit until worker completes
-                    let result = process_job(&job, &worker_signal, &worker_error_sender).await;
+                    let result = process_job(worker_ctx, &job, &worker_signal, &worker_error_sender).await;
                     let _ = worker_tx.send(result).await;
                     let _ = fs::remove_dir_all(format!("./tmp/job_{}", job.job_id));
                 });
@@ -247,14 +258,21 @@ impl App {
     }
 
     // Forest -> AST -> rewrite -> TestJob
-    fn generate_job(&mut self, random: &mut impl Rng, builder: &CircuitBuilder, job_id: u64) -> TestJob {
-        let forest = builder.generate(random, &self.ctx);
-        let original_code = format!("fn main() {{\n{}\n}}", forest.format("    "));
-        let mut ast = AST::from(&forest);
+    fn generate_job(
+        &mut self,
+        random: &mut impl Rng,
+        builder: &CircuitBuilder,
+        job_id: u64,
+    ) -> TestJob {
+        let circuit = builder.generate(random, &self.ctx);
+        let body = circuit.forest.format("    ");
+        let original_code = builder.format_main(body, circuit.inputs.clone(), circuit.ret.clone());
+        let mut ast = AST::from(&circuit.forest);
 
         // Apply random rewrites to the AST
         let mut rules_applied = vec![];
-        let num_rewrites = random.random_range(self.ctx.min_rewrites_count..self.ctx.max_rewrites_count);
+        let num_rewrites =
+            random.random_range(self.ctx.min_rewrites_count..self.ctx.max_rewrites_count);
 
         for _ in 0..num_rewrites {
             if let Some(rule) = apply_random_rule(random, &mut ast) {
@@ -266,9 +284,14 @@ impl App {
             }
         }
 
+        let rewritten_body = ast.format("    ");
+        let inputs = circuit.inputs.clone();
+        let rewritten_code = builder.format_main(rewritten_body, circuit.inputs, circuit.ret);
+
         TestJob {
             original_code,
-            rewritten_code: format!("fn main() {{\n{}\n}}", ast.to_string().trim()),
+            rewritten_code,
+            inputs,
             executions: self.executions,
             job_id,
             seed: random.random(),
@@ -298,8 +321,12 @@ impl App {
                     }
 
                     match m.kind {
-                        MismatchKind::Compilation => self.compile_mismatches.fetch_add(1, Ordering::Relaxed),
-                        MismatchKind::Execution => self.soundness_bugs.fetch_add(1, Ordering::Relaxed),
+                        MismatchKind::Compilation => {
+                            self.compile_mismatches.fetch_add(1, Ordering::Relaxed)
+                        }
+                        MismatchKind::Execution => {
+                            self.soundness_bugs.fetch_add(1, Ordering::Relaxed)
+                        }
                         MismatchKind::Proof => {
                             self.total_proofs.fetch_add(1, Ordering::Relaxed);
                             self.proof_mismatches.fetch_add(1, Ordering::Relaxed)
@@ -400,7 +427,12 @@ impl App {
 
             println!("[{GREEN}+{RESET}] Rules:");
             for (rule, count) in sorted {
-                println!("    {:30} {RED}{:6}{RESET} ({RED}{:5.2}%{RESET})", rule, count, (*count as f64 / total as f64) * 100.0);
+                println!(
+                    "    {:30} {RED}{:6}{RESET} ({RED}{:5.2}%{RESET})",
+                    rule,
+                    count,
+                    (*count as f64 / total as f64) * 100.0
+                );
             }
         }
 
@@ -416,7 +448,12 @@ impl App {
 /// Process a test job through all stages: compile, execute, prove, verify.
 ///
 /// Stages are split into T1 (compile + execute) and T2 (prove + verify) for power scheduling.
-async fn process_job(job: &TestJob, signal: &Arc<AtomicBool>, error_sender: &Sender<String>) -> TestResult {
+async fn process_job(
+    ctx: Context,
+    job: &TestJob,
+    signal: &Arc<AtomicBool>,
+    error_sender: &Sender<String>,
+) -> TestResult {
     let temp_path = std::path::PathBuf::from(format!("./tmp/job_{}", job.job_id));
     let orig_dir = temp_path.join("original");
     let rewr_dir = temp_path.join("rewritten");
@@ -474,21 +511,32 @@ async fn process_job(job: &TestJob, signal: &Arc<AtomicBool>, error_sender: &Sen
         (Err(e), Ok(())) if !is_expected_execution_error(&e) => {
             return mismatch!(MismatchKind::Compilation, "", &e, "compiled", t1, t2);
         }
-        _ => return TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false },
+        _ => {
+            return TestResult::NotInteresting {
+                t1,
+                t2: None,
+                is_proof: false,
+                is_verification: false,
+            }
+        }
     }
 
-    let _seeded_random = SmallRng::seed_from_u64(job.seed);
+    let mut random = SmallRng::seed_from_u64(job.seed);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Initial stages (T1): Execute both with random inputs
     // ─────────────────────────────────────────────────────────────────────────────
 
     for _ in 0..job.executions {
-        // @todo generate prover_toml
-        let prover_toml = String::new();
+        let prover_toml = job
+            .inputs
+            .iter()
+            .map(|(name, ty)| format!("{name} = {}", ty.random_value(&mut random, &ctx)))
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        if fs::write(orig_dir.join("Prover.toml"), &prover_toml).is_err()
-            || fs::write(rewr_dir.join("Prover.toml"), &prover_toml).is_err()
+        if fs::write(orig_dir.join("Prover.toml"), &prover_toml).is_err() ||
+            fs::write(rewr_dir.join("Prover.toml"), &prover_toml).is_err()
         {
             fatal!("Write Prover.toml error".into());
         }
@@ -505,7 +553,14 @@ async fn process_job(job: &TestJob, signal: &Arc<AtomicBool>, error_sender: &Sen
 
                 // Check for execution divergence
                 if orig_ok != rewr_ok || orig_res != rewr_res {
-                    return mismatch!(MismatchKind::Execution, &prover_toml, orig_out, rewr_out, t1, t2);
+                    return mismatch!(
+                        MismatchKind::Execution,
+                        &prover_toml,
+                        orig_out,
+                        rewr_out,
+                        t1,
+                        t2
+                    );
                 }
 
                 if !job.run_later_stages {
@@ -523,9 +578,36 @@ async fn process_job(job: &TestJob, signal: &Arc<AtomicBool>, error_sender: &Sen
 
                 match (&orig_proof, &rewr_proof) {
                     (Ok(()), Ok(())) => {} // Both proved - verify
-                    (Ok(()), Err(e)) => return mismatch!(MismatchKind::Proof, &prover_toml, "succeeded", &format!("failed: {e}"), t1, t2),
-                    (Err(e), Ok(())) => return mismatch!(MismatchKind::Proof, &prover_toml, &format!("failed: {e}"), "succeeded", t1, t2),
-                    (Err(e1), Err(e2)) => return mismatch!(MismatchKind::UnexpectedFailure, &prover_toml, &format!("failed: {e1}"), &format!("failed: {e2}"), t1, t2),
+                    (Ok(()), Err(e)) => {
+                        return mismatch!(
+                            MismatchKind::Proof,
+                            &prover_toml,
+                            "succeeded",
+                            &format!("failed: {e}"),
+                            t1,
+                            t2
+                        )
+                    }
+                    (Err(e), Ok(())) => {
+                        return mismatch!(
+                            MismatchKind::Proof,
+                            &prover_toml,
+                            &format!("failed: {e}"),
+                            "succeeded",
+                            t1,
+                            t2
+                        )
+                    }
+                    (Err(e1), Err(e2)) => {
+                        return mismatch!(
+                            MismatchKind::UnexpectedFailure,
+                            &prover_toml,
+                            &format!("failed: {e1}"),
+                            &format!("failed: {e2}"),
+                            t1,
+                            t2
+                        )
+                    }
                 }
 
                 // ─────────────────────────────────────────────────────────────────
@@ -539,18 +621,59 @@ async fn process_job(job: &TestJob, signal: &Arc<AtomicBool>, error_sender: &Sen
 
                 match (&orig_verify, &rewr_verify) {
                     (Ok(()), Ok(())) => {} // Both verified - success
-                    (Ok(()), Err(e)) => return mismatch!(MismatchKind::Verification, &prover_toml, "succeeded", &format!("failed: {e}"), t1, t2),
-                    (Err(e), Ok(())) => return mismatch!(MismatchKind::Verification, &prover_toml, &format!("failed: {e}"), "succeeded", t1, t2),
-                    (Err(e1), Err(e2)) => return mismatch!(MismatchKind::UnexpectedFailure, &prover_toml, &format!("failed: {e1}"), &format!("failed: {e2}"), t1, t2),
+                    (Ok(()), Err(e)) => {
+                        return mismatch!(
+                            MismatchKind::Verification,
+                            &prover_toml,
+                            "succeeded",
+                            &format!("failed: {e}"),
+                            t1,
+                            t2
+                        )
+                    }
+                    (Err(e), Ok(())) => {
+                        return mismatch!(
+                            MismatchKind::Verification,
+                            &prover_toml,
+                            &format!("failed: {e}"),
+                            "succeeded",
+                            t1,
+                            t2
+                        )
+                    }
+                    (Err(e1), Err(e2)) => {
+                        return mismatch!(
+                            MismatchKind::UnexpectedFailure,
+                            &prover_toml,
+                            &format!("failed: {e1}"),
+                            &format!("failed: {e2}"),
+                            t1,
+                            t2
+                        )
+                    }
                 }
             }
             (Ok(orig_out), Err(e)) => {
                 if is_expected_execution_error(e) {
                     return TestResult::KnownError { t1 };
                 }
-                return mismatch!(MismatchKind::Execution, &prover_toml, orig_out, &format!("UNKNOWN ERROR: {e}"), t1, t2);
+                return mismatch!(
+                    MismatchKind::Execution,
+                    &prover_toml,
+                    orig_out,
+                    &format!("UNKNOWN ERROR: {e}"),
+                    t1,
+                    t2
+                );
             }
-            _ => return TestResult::NotInteresting { t1, t2: None, is_proof: false, is_verification: false },
+            _ => {
+                return TestResult::NotInteresting {
+                    t1,
+                    t2: None,
+                    is_proof: false,
+                    is_verification: false,
+                }
+            }
         }
     }
 

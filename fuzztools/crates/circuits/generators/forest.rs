@@ -66,7 +66,8 @@ impl Forest {
         }
     }
 
-    /// Finds or creates an expression that 1) has the same type or 2) castable type or 3) new literal
+    /// Finds or creates an expression that 1) has the same type or 2) castable type or 3) new
+    /// literal
     fn find_return_expr(&mut self, random: &mut impl Rng, ctx: &Context, ret_ty: &Type) -> String {
         // 1) Look for a variable/assignment with the exact type
         if let Some(&idx) = self.get_reusables(ret_ty).choose(random) {
@@ -88,10 +89,8 @@ impl Forest {
             for kind in castable_kinds {
                 if let Some(indices) = self.kinds.get(&kind) {
                     // Filter to only reusable nodes (variables/inputs/assignments)
-                    let reusable: Vec<_> = indices
-                        .iter()
-                        .filter(|&&idx| self.get_node_name(idx).is_some())
-                        .collect();
+                    let reusable: Vec<_> =
+                        indices.iter().filter(|&&idx| self.get_node_name(idx).is_some()).collect();
 
                     if let Some(&&idx) = reusable.choose(random) {
                         if let Some(name) = self.get_node_name(idx) {
@@ -117,7 +116,12 @@ impl Forest {
     }
 
     // let mut? VAR: TYPE = EXPR
-    fn gen_expression(&mut self, random: &mut impl Rng, ctx: &Context, available_structs: &[Struct]) {
+    fn gen_expression(
+        &mut self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        available_structs: &[Struct],
+    ) {
         let ty = Type::random(random, ctx, available_structs, TypeLocation::Default);
         let idx = self.build_expr(random, ctx, &ty, 0);
         let mutable = random.random_bool(ctx.mutable_probability);

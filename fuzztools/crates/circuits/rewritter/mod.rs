@@ -1305,7 +1305,7 @@ mod tests {
         forest.random(&mut random, &ctx, &[], None);
 
         let mut ast = AST::from(&forest);
-        let before = ast.to_string();
+        let before = ast.format("    ");
 
         let num_rules = random.random_range(5..15);
         println!("\n{GREEN}Applying {} random rules...{RESET}", num_rules);
@@ -1318,7 +1318,7 @@ mod tests {
             }
         }
 
-        let after = ast.to_string();
+        let after = ast.format("    ");
         println!();
         print_diff(&before, &after);
     }
