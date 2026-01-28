@@ -64,7 +64,8 @@ const fn get_value(stmt: &Statement) -> &Expr {
         Statement::Let { value, .. } |
         Statement::DirectAssignment { value, .. } |
         Statement::IndexAssignment { value, .. } |
-        Statement::TupleAssignment { value, .. } => value,
+        Statement::TupleAssignment { value, .. } |
+        Statement::StructAssignment { value, .. } => value,
     }
 }
 
@@ -73,7 +74,8 @@ const fn get_value_mut(stmt: &mut Statement) -> &mut Expr {
         Statement::Let { value, .. } |
         Statement::DirectAssignment { value, .. } |
         Statement::IndexAssignment { value, .. } |
-        Statement::TupleAssignment { value, .. } => value,
+        Statement::TupleAssignment { value, .. } |
+        Statement::StructAssignment { value, .. } => value,
     }
 }
 
@@ -101,6 +103,7 @@ fn collect_matches(
         Expr::Unary { operand, .. } |
         Expr::Index { expr: operand, .. } |
         Expr::TupleIndex { expr: operand, .. } |
+        Expr::StructField { expr: operand, .. } |
         Expr::Cast { expr: operand, .. } => {
             path.push(0);
             collect_matches(operand, rule, stmt_idx, path, matches);
@@ -125,6 +128,7 @@ fn apply_at_path(expr: &mut Expr, path: &[usize], rule: &Rule) {
         Expr::Unary { operand, .. } |
         Expr::Index { expr: operand, .. } |
         Expr::TupleIndex { expr: operand, .. } |
+        Expr::StructField { expr: operand, .. } |
         Expr::Cast { expr: operand, .. } => {
             apply_at_path(operand, &path[1..], rule);
         }
@@ -1298,7 +1302,7 @@ mod tests {
         let mut random = rand::rng();
 
         let mut forest = Forest::default();
-        forest.random(&mut random, &ctx);
+        forest.random(&mut random, &ctx, &[]);
 
         let mut ast = AST::from(&forest);
         let before = ast.to_string();

@@ -23,6 +23,7 @@ pub struct Forest {
     pub reusables: HashMap<Type, Vec<NodeIndex>>,
     pub indexables: HashMap<Type, Vec<(NodeIndex, usize)>>,
     pub tuple_indexables: HashMap<Type, Vec<(NodeIndex, usize)>>,
+    pub struct_indexables: HashMap<Type, Vec<(NodeIndex, String)>>,
 
     pub return_expr: Option<String>,
 
@@ -103,6 +104,15 @@ impl Forest {
 
     pub fn tuple_index(&mut self, index: usize, ty: &Type, parent: NodeIndex) -> NodeIndex {
         let idx = self.inner.add_node(Node::TupleIndex { index, ty: ty.clone() });
+        self.register(idx, ty);
+
+        self.add_edge(parent, idx, 0);
+
+        idx
+    }
+
+    pub fn struct_field(&mut self, field: String, ty: &Type, parent: NodeIndex) -> NodeIndex {
+        let idx = self.inner.add_node(Node::StructField { field, ty: ty.clone() });
         self.register(idx, ty);
 
         self.add_edge(parent, idx, 0);
@@ -211,6 +221,38 @@ impl Forest {
         idx
     }
 
+    pub fn struct_field_assignment(
+        &mut self,
+        op: Option<Operator>,
+        field_name: String,
+        field_ty: &Type,
+        value: NodeIndex,
+        parent: NodeIndex,
+    ) -> NodeIndex {
+        let parent_ty = self.ty(parent);
+        let name = self.mutables.remove(&parent).unwrap();
+
+        let lhs = self.struct_field(field_name, field_ty, parent);
+        let idx =
+            self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
+
+        self.inner.add_edge(idx, lhs, 0);
+        self.add_edge(value, idx, 1);
+
+        // Shadow the parent - it's now stale
+        self.unregister(parent, &parent_ty);
+        self.unregister_reusable(parent, &parent_ty);
+
+        // Register the assignment as the new current state
+        self.register(idx, &parent_ty);
+        self.register_reusable(idx, &parent_ty);
+
+        // Update its entry in `self.mutables`
+        self.mutables.insert(idx, name);
+
+        idx
+    }
+
     #[inline(always)]
     pub fn left(&self, idx: NodeIndex) -> Option<NodeIndex> {
         self.inner.edges(idx).find(|e| *e.weight() == 0).map(|e| e.target())
@@ -245,6 +287,14 @@ impl Forest {
     #[inline(always)]
     pub fn get_tuple_indexables(&self, ty: &Type) -> &[(NodeIndex, usize)] {
         match self.tuple_indexables.get(ty) {
+            Some(v) => v.as_slice(),
+            None => &[],
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_struct_indexables(&self, ty: &Type) -> &[(NodeIndex, String)] {
+        match self.struct_indexables.get(ty) {
             Some(v) => v.as_slice(),
             None => &[],
         }
@@ -292,6 +342,14 @@ impl Forest {
                     self.tuple_indexables.entry(elem_ty.clone()).or_default().push((idx, pos));
                 }
             }
+            Type::Struct(s) => {
+                for field in &s.fields {
+                    self.struct_indexables
+                        .entry(field.ty.clone())
+                        .or_default()
+                        .push((idx, field.name.clone()));
+                }
+            }
             _ => {}
         }
     }
@@ -311,6 +369,11 @@ impl Forest {
             Type::Tuple(t) => {
                 for elem_ty in &t.elements {
                     self.tuple_indexables.get_mut(elem_ty).unwrap().retain(|(x, _)| *x != idx);
+                }
+            }
+            Type::Struct(s) => {
+                for field in &s.fields {
+                    self.struct_indexables.get_mut(&field.ty).unwrap().retain(|(x, _)| *x != idx);
                 }
             }
             _ => {}
@@ -347,6 +410,7 @@ impl Forest {
 
                 Node::Index { index, .. } => format!("{}[{index}]", left.unwrap()),
                 Node::TupleIndex { index, .. } => format!("{}.{index}", left.unwrap()),
+                Node::StructField { field, .. } => format!("{}.{field}", left.unwrap()),
                 Node::Cast { ty, .. } => format!("({} as {ty})", left.unwrap()),
 
                 Node::Assignment { name, op, .. } => {

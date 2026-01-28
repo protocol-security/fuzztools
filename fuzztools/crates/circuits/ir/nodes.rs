@@ -24,6 +24,9 @@ pub enum Node {
     /// A tuple index node, `a.0`, `b.1`, etc...
     TupleIndex { index: usize, ty: Type },
 
+    /// A struct field access node, `a.field_name`, `b.x`, etc...
+    StructField { field: String, ty: Type },
+
     /// A cast expression, `expr as Type`.
     Cast { ty: Type },
 
@@ -47,7 +50,7 @@ impl Node {
             Self::Literal { .. } => "#24b3ecff",
             Self::Variable { .. } => "#6bd85aff",
             Self::Operator { .. } => "#ffa500",
-            Self::Index { .. } | Self::TupleIndex { .. } => "#e22be2ff",
+            Self::Index { .. } | Self::TupleIndex { .. } | Self::StructField { .. } => "#e22be2ff",
             Self::Cast { .. } => "#4f47a6ff",
             Self::Assignment { .. } => "#8a006dff",
         }
@@ -61,6 +64,7 @@ impl Node {
                 Node::Operator { .. } |
                 Node::Index { .. } |
                 Node::TupleIndex { .. } |
+                Node::StructField { .. } |
                 Node::Cast { .. }
         )
     }
@@ -74,6 +78,7 @@ impl Node {
             Self::Operator { ty, .. } |
             Self::Index { ty, .. } |
             Self::TupleIndex { ty, .. } |
+            Self::StructField { ty, .. } |
             Self::Cast { ty } |
             Self::Assignment { ty, .. } => ty.clone(),
         }
@@ -93,6 +98,7 @@ impl std::fmt::Display for Node {
             Self::Operator { op, .. } => write!(f, "{}", op),
             Self::Index { index: value, .. } => write!(f, "[{}]", value),
             Self::TupleIndex { index: value, .. } => write!(f, ".{}", value),
+            Self::StructField { field, .. } => write!(f, ".{}", field),
             Self::Cast { ty } => write!(f, "as {}", ty),
             Self::Assignment { op: Some(op), .. } => write!(f, "{}=", op),
             Self::Assignment { op: None, .. } => write!(f, "="),

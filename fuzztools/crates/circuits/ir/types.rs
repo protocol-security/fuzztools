@@ -17,6 +17,7 @@ pub enum TypeKind {
     Array,
     Slice,
     Tuple,
+    Struct,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -27,6 +28,7 @@ pub enum Type {
     Array(Array),
     Slice(Slice),
     Tuple(Tuple),
+    Struct(Struct),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,6 +54,18 @@ pub struct Tuple {
     pub elements: Vec<Type>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Struct {
+    pub name: String,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
+}
+
 // ────────────────────────────────────────────────────────────────────────────────
 // Type implementations
 // ────────────────────────────────────────────────────────────────────────────────
@@ -67,6 +81,7 @@ impl Type {
             Self::Array(_) => TypeKind::Array,
             Self::Slice(_) => TypeKind::Slice,
             Self::Tuple(_) => TypeKind::Tuple,
+            Self::Struct(_) => TypeKind::Struct,
         }
     }
 
@@ -79,6 +94,7 @@ impl Type {
             Self::Array(a) => a.random_value(random, ctx),
             Self::Slice(s) => s.random_value(random, ctx),
             Self::Tuple(t) => t.random_value(random, ctx),
+            Self::Struct(s) => s.random_value(random, ctx),
         }
     }
 
@@ -99,6 +115,7 @@ impl Type {
     /// - Primitive types: `Field`, `Integer`, `Bool`.
     /// - Non-empty arrays.
     /// - Tuples with a size greater than 1.
+    /// - Structs where all fields are valid public inputs.
     ///
     /// Slices are invalid.
     #[inline(always)]
@@ -109,6 +126,7 @@ impl Type {
             Self::Tuple(t) => {
                 t.elements.len() > 1 && t.elements.iter().all(|e| e.is_valid_public_input())
             }
+            Self::Struct(s) => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
             Self::Slice(_) => false,
         }
     }
@@ -146,6 +164,18 @@ impl Type {
     #[inline(always)]
     pub const fn is_bool(&self) -> bool {
         matches!(self, Self::Bool)
+    }
+
+    /// Returns true if this type is or contains a slice.
+    #[inline(always)]
+    pub fn has_slice(&self) -> bool {
+        match self {
+            Self::Field | Self::Integer(_) | Self::Bool => false,
+            Self::Slice(_) => true,
+            Self::Array(a) => a.ty.has_slice(),
+            Self::Tuple(t) => t.elements.iter().any(|e| e.has_slice()),
+            Self::Struct(s) => s.fields.iter().any(|f| f.ty.has_slice()),
+        }
     }
 }
 
@@ -226,6 +256,18 @@ impl Tuple {
     }
 }
 
+impl Struct {
+    fn random_value(&self, random: &mut impl Rng, ctx: &Context) -> String {
+        let fields: Vec<_> = self
+            .fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, f.ty.random_value(random, ctx)))
+            .collect();
+
+        format!("{} {{ {} }}", self.name, fields.join(", "))
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────────
 // Display
 // ────────────────────────────────────────────────────────────────────────────────
@@ -242,6 +284,7 @@ impl std::fmt::Display for Type {
                 let elems = t.elements.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
                 write!(f, "({elems})")
             }
+            Self::Struct(s) => f.write_str(&s.name),
         }
     }
 }

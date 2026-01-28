@@ -1,6 +1,6 @@
 use crate::circuits::{
     context::Context,
-    ir::{Array, Integer, Slice, Tuple, Type, TypeKind},
+    ir::{Array, Integer, Slice, Struct, StructField, Tuple, Type, TypeKind},
 };
 use rand::{seq::IndexedRandom, Rng};
 use std::collections::VecDeque;
@@ -14,7 +14,7 @@ pub enum TypeLocation {
     Default,
 }
 
-pub enum WorkItem {
+enum WorkItem {
     Generate { slot: usize, depth: usize, location: TypeLocation },
     FinalizeArray { slot: usize, inner: usize, size: usize },
     FinalizeSlice { slot: usize, inner: usize, size: usize },
@@ -49,7 +49,12 @@ impl Type {
     /// - Done! Return slots[0].
     ///
     /// If you do not understand something, just ask claude :D.
-    pub fn random(random: &mut impl Rng, ctx: &Context, location: TypeLocation) -> Self {
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        available_structs: &[Struct],
+        location: TypeLocation,
+    ) -> Self {
         let mut slots: Vec<Option<Type>> = vec![None];
         let mut work: VecDeque<WorkItem> = VecDeque::new();
         work.push_back(WorkItem::Generate { slot: 0, depth: 0, location });
@@ -58,7 +63,14 @@ impl Type {
             match item {
                 WorkItem::Generate { slot, depth, location } => {
                     Self::process_generate(
-                        random, ctx, &mut slots, &mut work, slot, depth, location,
+                        random,
+                        ctx,
+                        available_structs,
+                        &mut slots,
+                        &mut work,
+                        slot,
+                        depth,
+                        location,
                     );
                 }
                 WorkItem::FinalizeArray { slot, inner, size } => {
@@ -79,9 +91,11 @@ impl Type {
         slots[0].take().unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_generate(
         random: &mut impl Rng,
         ctx: &Context,
+        available_structs: &[Struct],
         slots: &mut Vec<Option<Type>>,
         work: &mut VecDeque<WorkItem>,
         slot: usize,
@@ -92,6 +106,18 @@ impl Type {
             slots[slot] = Some(Type::Field);
             return;
         }
+
+        // Filter available structs based on location constraints
+        let valid_structs: Vec<_> = available_structs
+            .iter()
+            .filter(|s| match location {
+                TypeLocation::Main => s.fields.iter().all(|f| f.ty.is_valid_public_input()),
+                TypeLocation::Nested | TypeLocation::TupleNested => {
+                    !s.fields.iter().any(|f| f.ty.has_slice())
+                }
+                _ => true,
+            })
+            .collect();
 
         let mut options = vec![
             (TypeKind::Field, ctx.field_weight),
@@ -106,11 +132,20 @@ impl Type {
             options.push((TypeKind::Slice, ctx.slice_weight));
         }
 
+        if !valid_structs.is_empty() {
+            options.push((TypeKind::Struct, ctx.struct_weight));
+        }
+
         match options.choose_weighted(random, |i| i.1).unwrap().0 {
             TypeKind::Field => slots[slot] = Some(Type::Field),
             TypeKind::Bool => slots[slot] = Some(Type::Bool),
             TypeKind::Signed => slots[slot] = Some(Type::Integer(Integer::random(random, true))),
             TypeKind::Unsigned => slots[slot] = Some(Type::Integer(Integer::random(random, false))),
+
+            TypeKind::Struct => {
+                let chosen = (*valid_structs.choose(random).unwrap()).clone();
+                slots[slot] = Some(Type::Struct(chosen));
+            }
 
             kind @ (TypeKind::Array | TypeKind::Slice) => {
                 let inner = slots.len();
@@ -152,6 +187,34 @@ impl Type {
                 }
             }
         }
+    }
+}
+
+impl Struct {
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        previous_structs: &[Struct],
+        name: String,
+    ) -> Self {
+        let count = random.random_range(ctx.min_struct_fields_count..=ctx.max_struct_fields_count);
+        let fields = (0..count)
+            .map(|i| StructField::random(random, ctx, previous_structs, format!("field{i}")))
+            .collect();
+
+        Self { name, fields }
+    }
+}
+
+impl StructField {
+    pub fn random(
+        random: &mut impl Rng,
+        ctx: &Context,
+        available_structs: &[Struct],
+        name: String,
+    ) -> Self {
+        let ty = Type::random(random, ctx, available_structs, TypeLocation::Default);
+        Self { name, ty }
     }
 }
 

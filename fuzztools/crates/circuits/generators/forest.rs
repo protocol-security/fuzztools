@@ -1,7 +1,7 @@
 use super::types::TypeLocation;
 use crate::circuits::{
     context::Context,
-    ir::{Forest, Operator, Type, TypeKind},
+    ir::{Forest, Operator, Struct, Type, TypeKind},
 };
 use petgraph::graph::NodeIndex;
 use rand::{
@@ -15,13 +15,14 @@ pub enum StatementKind {
     Assignment,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ExprKind {
     Leaf,
     UnaryOp,
     BinaryOp,
     Index,
     TupleIndex,
+    StructField,
     Cast,
 }
 
@@ -29,10 +30,11 @@ pub enum AssignementKind {
     Direct,
     Index(usize, Type),
     TupleIndex(usize, Type),
+    StructField(String, Type),
 }
 
 impl Forest {
-    pub fn random(&mut self, random: &mut impl Rng, ctx: &Context) {
+    pub fn random(&mut self, random: &mut impl Rng, ctx: &Context, available_structs: &[Struct]) {
         let expr_count = random.random_range(ctx.min_expression_count..ctx.max_expression_count);
 
         for _ in 0..expr_count {
@@ -47,15 +49,15 @@ impl Forest {
             }
 
             match choices.choose_weighted(random, |i| i.1).unwrap().0 {
-                StatementKind::Expression => self.gen_expression(random, ctx),
+                StatementKind::Expression => self.gen_expression(random, ctx, available_structs),
                 StatementKind::Assignment => self.gen_assignement(random, ctx),
             }
         }
     }
 
     // let mut? VAR: TYPE = EXPR
-    fn gen_expression(&mut self, random: &mut impl Rng, ctx: &Context) {
-        let ty = Type::random(random, ctx, TypeLocation::Default);
+    fn gen_expression(&mut self, random: &mut impl Rng, ctx: &Context, available_structs: &[Struct]) {
+        let ty = Type::random(random, ctx, available_structs, TypeLocation::Default);
         let idx = self.build_expr(random, ctx, &ty, 0);
         let mutable = random.random_bool(ctx.mutable_probability);
 
@@ -72,8 +74,8 @@ impl Forest {
 
         let mut choices = vec![AssignementKind::Direct];
 
-        // This is done to support assignements to inner values within `Type::Array`, `Type::Slice`
-        // and `Type::Tuple`
+        // This is done to support assignements to inner values within `Type::Array`, `Type::Slice`,
+        // `Type::Tuple`, and `Type::Struct`
         match &ty {
             Type::Array(a) if a.size > 0 => {
                 let pos = random.random_range(0..a.size);
@@ -87,13 +89,20 @@ impl Forest {
                 let pos = random.random_range(0..t.elements.len());
                 choices.push(AssignementKind::TupleIndex(pos, t.elements[pos].clone()));
             }
+            Type::Struct(s) if !s.fields.is_empty() => {
+                let pos = random.random_range(0..s.fields.len());
+                let field = &s.fields[pos];
+                choices.push(AssignementKind::StructField(field.name.clone(), field.ty.clone()));
+            }
             _ => {}
         }
 
         let kind = choices.choose(random).unwrap();
         let target_ty = match kind {
             AssignementKind::Direct => &ty,
-            AssignementKind::Index(_, elem_ty) | AssignementKind::TupleIndex(_, elem_ty) => elem_ty,
+            AssignementKind::Index(_, elem_ty) |
+            AssignementKind::TupleIndex(_, elem_ty) |
+            AssignementKind::StructField(_, elem_ty) => elem_ty,
         };
 
         let idx = self.build_expr(random, ctx, target_ty, 0);
@@ -115,6 +124,9 @@ impl Forest {
             }
             AssignementKind::TupleIndex(pos, elem_ty) => {
                 self.tuple_field_assignment(op, *pos, elem_ty, idx, variable);
+            }
+            AssignementKind::StructField(field_name, elem_ty) => {
+                self.struct_field_assignment(op, field_name.clone(), elem_ty, idx, variable);
             }
         }
     }
@@ -152,17 +164,22 @@ impl Forest {
             choices.push((ExprKind::TupleIndex, ctx.tuple_index_weight));
         }
 
+        if !self.get_struct_indexables(ty).is_empty() {
+            choices.push((ExprKind::StructField, ctx.field_access_weight));
+        }
+
         // Only allow casts to numeric types, as others are not supported
         if ty.is_numeric() {
             choices.push((ExprKind::Cast, ctx.cast_weight));
         }
 
-        match choices.choose_weighted(random, |c| c.1).unwrap().0 {
+        match choices.choose_weighted(random, |c| c.1).unwrap().0.clone() {
             ExprKind::Leaf => self.build_leaf(random, ctx, ty),
             ExprKind::UnaryOp => self.build_unary(random, ctx, ty, depth),
             ExprKind::BinaryOp => self.build_binary(random, ctx, ty, depth),
             ExprKind::Index => self.build_index(random, ty),
             ExprKind::TupleIndex => self.build_tuple_index(random, ty),
+            ExprKind::StructField => self.build_struct_field(random, ty),
             ExprKind::Cast => self.build_cast_expr(random, ctx, ty, depth),
         }
     }
@@ -180,6 +197,10 @@ impl Forest {
 
             if !self.get_tuple_indexables(ty).is_empty() {
                 return self.build_tuple_index(random, ty);
+            }
+
+            if !self.get_struct_indexables(ty).is_empty() {
+                return self.build_struct_field(random, ty);
             }
         }
 
@@ -319,6 +340,14 @@ impl Forest {
         self.tuple_index(*positions, &inner_ty, *idx)
     }
 
+    // EXPR.FIELD_NAME
+    fn build_struct_field(&mut self, random: &mut impl Rng, ty: &Type) -> NodeIndex {
+        let candidates = self.get_struct_indexables(ty);
+        let (idx, field_name) = candidates.choose(random).unwrap();
+
+        self.struct_field(field_name.clone(), ty, *idx)
+    }
+
     // EXPR as TYPE
     fn build_cast_expr(
         &mut self,
@@ -342,11 +371,16 @@ mod tests {
 
     #[test]
     fn test_random_forest() {
-        let ctx =
+        let ctx: &Context =
             &serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
         let mut random = rand::rng();
         let mut forest = Forest::default();
-        forest.random(&mut random, ctx);
+        let mut structs = Vec::new();
+        for i in 0..random.random_range(ctx.min_struct_count..=ctx.max_struct_count) {
+            structs.push(Struct::random(&mut random, ctx, &structs, format!("struct{i}")));
+        }
+
+        forest.random(&mut random, ctx, &structs);
 
         println!("{}", forest.format(""));
 

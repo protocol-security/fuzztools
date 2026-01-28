@@ -18,6 +18,7 @@ pub enum Statement {
     DirectAssignment { name: String, op: Option<Operator>, value: Expr },
     IndexAssignment { name: String, index: usize, op: Option<Operator>, value: Expr },
     TupleAssignment { name: String, field: usize, op: Option<Operator>, value: Expr },
+    StructAssignment { name: String, field: String, op: Option<Operator>, value: Expr },
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub enum Expr {
     Unary { op: Operator, ty: Type, operand: Box<Expr> },
     Index { expr: Box<Expr>, ty: Type, index: usize },
     TupleIndex { expr: Box<Expr>, ty: Type, field: usize },
+    StructField { expr: Box<Expr>, ty: Type, field: String },
     Cast { expr: Box<Expr>, ty: Type },
 }
 
@@ -38,6 +40,7 @@ impl Expr {
             Expr::Unary { ty, .. } => ty,
             Expr::Index { ty, .. } => ty,
             Expr::TupleIndex { ty, .. } => ty,
+            Expr::StructField { ty, .. } => ty,
             Expr::Cast { ty, .. } => ty,
         }
     }
@@ -107,6 +110,16 @@ impl From<&Forest> for AST {
                         },
                     );
                 }
+                Node::StructField { field, ty } => {
+                    exprs.insert(
+                        idx.index(),
+                        Expr::StructField {
+                            expr: Box::new(left.unwrap()),
+                            ty: ty.clone(),
+                            field: field.clone(),
+                        },
+                    );
+                }
                 Node::Cast { ty } => {
                     exprs.insert(
                         idx.index(),
@@ -125,6 +138,9 @@ impl From<&Forest> for AST {
                         }
                         Expr::TupleIndex { field, .. } => {
                             Statement::TupleAssignment { name: name.clone(), field, op: *op, value }
+                        }
+                        Expr::StructField { field, .. } => {
+                            Statement::StructAssignment { name: name.clone(), field, op: *op, value }
                         }
                         _ => unreachable!(),
                     });
@@ -180,6 +196,10 @@ impl std::fmt::Display for Statement {
                 Some(o) => write!(f, "{name}.{field} {o}= {value};"),
                 None => write!(f, "{name}.{field} = {value};"),
             },
+            Statement::StructAssignment { name, field, op, value } => match op {
+                Some(o) => write!(f, "{name}.{field} {o}= {value};"),
+                None => write!(f, "{name}.{field} = {value};"),
+            },
         }
     }
 }
@@ -192,6 +212,7 @@ impl std::fmt::Display for Expr {
             Expr::Unary { op, operand, .. } => write!(f, "({op}{operand})"),
             Expr::Index { expr, index, .. } => write!(f, "{expr}[{index}]"),
             Expr::TupleIndex { expr, field, .. } => write!(f, "{expr}.{field}"),
+            Expr::StructField { expr, field, .. } => write!(f, "{expr}.{field}"),
             Expr::Cast { expr, ty } => write!(f, "({expr} as {ty})"),
         }
     }
