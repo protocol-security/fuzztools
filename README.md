@@ -44,7 +44,14 @@ fn main() {
 
 Metamorphic fuzzer for the Noir compiler. What it does is creates an AST representing a circuit, apply equivalence operations on top (which by definition mean the program output does not change) and checks whether it returns something different or if it returns a non-expected error. It was inspired in [circuzz](https://github.com/Rigorous-Software-Engineering/circuzz/tree/main), so kudos to the team :)
 
-For anyone interested in the bugs it has found, you can check [my submissions](https://github.com/noir-lang/noir/issues?q=is%3Aissue%20author%3Anethoxa) to the Noir repo.
+### Hall of fame 🏆
+- Error nodes triggering a compiler bug -> [PR link](https://github.com/noir-lang/noir/issues/10824)
+- Crash -> [PR link](https://github.com/noir-lang/noir/issues/11326)
+- Crash -> [PR link](https://github.com/noir-lang/noir/issues/11250)
+- OOB XOR output at compile time -> [PR link](https://github.com/noir-lang/noir/issues/11249)
+- Nested lambdas can't be accessed -> [PR link](https://github.com/noir-lang/noir/issues/11325)
+
+For more low/info bugs, check my [submissions](https://github.com/noir-lang/noir/issues?q=is%3Aissue%20author%3Anethoxa).
 
 ## Rakoon
 
