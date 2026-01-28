@@ -1302,7 +1302,7 @@ mod tests {
         let mut random = rand::rng();
 
         let mut forest = Forest::default();
-        forest.random(&mut random, &ctx, &[]);
+        forest.random(&mut random, &ctx, &[], None);
 
         let mut ast = AST::from(&forest);
         let before = ast.to_string();

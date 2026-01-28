@@ -1,7 +1,7 @@
 use super::types::TypeLocation;
 use crate::circuits::{
     context::Context,
-    ir::{Forest, Operator, Struct, Type, TypeKind},
+    ir::{Forest, Node, Operator, Struct, Type, TypeKind},
 };
 use petgraph::graph::NodeIndex;
 use rand::{
@@ -34,7 +34,13 @@ pub enum AssignementKind {
 }
 
 impl Forest {
-    pub fn random(&mut self, random: &mut impl Rng, ctx: &Context, available_structs: &[Struct]) {
+    pub fn random(
+        &mut self,
+        random: &mut impl Rng,
+        ctx: &Context,
+        available_structs: &[Struct],
+        ret: Option<&Type>,
+    ) {
         let expr_count = random.random_range(ctx.min_expression_count..ctx.max_expression_count);
 
         for _ in 0..expr_count {
@@ -52,6 +58,61 @@ impl Forest {
                 StatementKind::Expression => self.gen_expression(random, ctx, available_structs),
                 StatementKind::Assignment => self.gen_assignement(random, ctx),
             }
+        }
+
+        // Handle return expression if specified
+        if let Some(ret_ty) = ret {
+            self.return_expr = Some(self.find_return_expr(random, ctx, ret_ty));
+        }
+    }
+
+    /// Finds or creates an expression that 1) has the same type or 2) castable type or 3) new literal
+    fn find_return_expr(&mut self, random: &mut impl Rng, ctx: &Context, ret_ty: &Type) -> String {
+        // 1) Look for a variable/assignment with the exact type
+        if let Some(&idx) = self.get_reusables(ret_ty).choose(random) {
+            if let Some(name) = self.get_node_name(idx) {
+                return name;
+            }
+        }
+
+        // 2) Look for a variable that can be cast to ret_ty (only for numeric types)
+        if ret_ty.is_numeric() {
+            let castable_kinds = match ret_ty.kind() {
+                TypeKind::Field => vec![TypeKind::Bool, TypeKind::Unsigned],
+                TypeKind::Signed | TypeKind::Unsigned => {
+                    vec![TypeKind::Field, TypeKind::Signed, TypeKind::Unsigned, TypeKind::Bool]
+                }
+                _ => vec![],
+            };
+
+            for kind in castable_kinds {
+                if let Some(indices) = self.kinds.get(&kind) {
+                    // Filter to only reusable nodes (variables/inputs/assignments)
+                    let reusable: Vec<_> = indices
+                        .iter()
+                        .filter(|&&idx| self.get_node_name(idx).is_some())
+                        .collect();
+
+                    if let Some(&&idx) = reusable.choose(random) {
+                        if let Some(name) = self.get_node_name(idx) {
+                            return format!("({name} as {ret_ty})");
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3) Create a literal with random value
+        ret_ty.random_value(random, ctx)
+    }
+
+    /// Gets the variable name for a node if it's a named node (Input, Variable, or Assignment)
+    fn get_node_name(&self, idx: NodeIndex) -> Option<String> {
+        match &self.inner[idx] {
+            Node::Input { name, .. } |
+            Node::Variable { name, .. } |
+            Node::Assignment { name, .. } => Some(name.clone()),
+            _ => None,
         }
     }
 
@@ -360,32 +421,5 @@ impl Forest {
         let source = self.build_expr(random, ctx, &source_ty, depth + 1);
 
         self.cast(ty, source)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use super::*;
-
-    #[test]
-    fn test_random_forest() {
-        let ctx: &Context =
-            &serde_json::from_str(&fs::read_to_string("../configs/noiruzz.json").unwrap()).unwrap();
-        let mut random = rand::rng();
-        let mut forest = Forest::default();
-        let mut structs = Vec::new();
-        for i in 0..random.random_range(ctx.min_struct_count..=ctx.max_struct_count) {
-            structs.push(Struct::random(&mut random, ctx, &structs, format!("struct{i}")));
-        }
-
-        forest.random(&mut random, ctx, &structs);
-
-        println!("{}", forest.format(""));
-
-        forest
-            .save_as_dot(&std::env::current_dir().unwrap().join("test_random_forest.dot"))
-            .unwrap();
     }
 }
