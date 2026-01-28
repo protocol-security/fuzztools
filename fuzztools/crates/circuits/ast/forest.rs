@@ -37,7 +37,7 @@ pub struct Forest {
 // ────────────────────────────────────────────────────────────────────────────────
 
 impl Forest {
-    pub(crate) fn _input(&mut self, name: String, ty: &Type) -> NodeIndex {
+    pub(crate) fn input(&mut self, name: String, ty: &Type) -> NodeIndex {
         let idx = self.inner.add_node(Node::Input { name, ty: ty.clone() });
         self.register_reusable(idx, ty);
         self.register(idx, ty);
@@ -129,7 +129,8 @@ impl Forest {
         value: NodeIndex,
         variable: NodeIndex,
     ) -> NodeIndex {
-        let idx = self.inner.add_node(Node::Assignment { op, ty: ty.clone() });
+        let name = self.mutables.remove(&variable).unwrap();
+        let idx = self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: ty.clone() });
         self.register_reusable(idx, ty);
         self.register(idx, ty);
 
@@ -142,7 +143,70 @@ impl Forest {
         self.unregister_reusable(variable, ty);
 
         // As well as update its entry in `self.mutables`
-        let name = self.mutables.remove(&variable).unwrap();
+        self.mutables.insert(idx, name);
+
+        idx
+    }
+
+    pub(crate) fn indexed_assignment(
+        &mut self,
+        op: Option<Operator>,
+        index: usize,
+        elem_ty: &Type,
+        value: NodeIndex,
+        parent: NodeIndex,
+    ) -> NodeIndex {
+        let parent_ty = self.inner[parent].ty();
+        let name = self.mutables.remove(&parent).unwrap();
+
+        let lhs = self.index(index, elem_ty, parent);
+        let idx = self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
+
+        self.inner.add_edge(idx, lhs, 0);
+        self.add_edge(value, idx, 1);
+
+        // Now, we must shadow the old variable to avoid losing track of the latest state of the
+        // mutable variable
+        self.unregister(parent, &parent_ty);
+        self.unregister_reusable(parent, &parent_ty);
+
+        // The assignment becomes the new "current state" of the parent
+        self.register(idx, &parent_ty);
+        self.register_reusable(idx, &parent_ty);
+
+        // As well as update its entry in `self.mutables`
+        self.mutables.insert(idx, name);
+
+        idx
+    }
+
+    pub(crate) fn tuple_field_assignment(
+        &mut self,
+        op: Option<Operator>,
+        field_pos: usize,
+        field_ty: &Type,
+        value: NodeIndex,
+        parent: NodeIndex,
+    ) -> NodeIndex {
+        let parent_ty = self.inner[parent].ty();
+        let name = self.mutables.remove(&parent).unwrap();
+
+        let lhs = self.tuple_index(field_pos, field_ty, parent);
+        let idx = self.inner.add_node(Node::Assignment { name: name.clone(), op, ty: parent_ty.clone() });
+
+        self.inner.add_edge(idx, lhs, 0);
+        self.add_edge(value, idx, 1);
+
+        // Shadow the parent - it's now stale
+        self.unregister(parent, &parent_ty);
+        self.unregister_reusable(parent, &parent_ty);
+
+        // Now, we must shadow the old variable to avoid losing track of the latest state of the
+        // mutable variable
+        self.register(idx, &parent_ty);
+        self.register_reusable(idx, &parent_ty);
+
+        // As well as update its entry in `self.mutables`
         self.mutables.insert(idx, name);
 
         idx
@@ -158,108 +222,9 @@ impl Forest {
         self.inner.edges(idx).find(|e| *e.weight() == 1).map(|e| e.target())
     }
 
-    pub(crate) fn swap_edges(&mut self, idx: NodeIndex) {
-        let left = self.left(idx);
-        let right = self.right(idx);
-
-        if let (Some(l), Some(r)) = (left, right) {
-            // Remove existing edges
-            let edges: Vec<_> = self.inner.edges(idx).map(|e| e.id()).collect();
-            for edge_id in edges {
-                self.inner.remove_edge(edge_id);
-            }
-
-            // Add swapped edges
-            self.inner.add_edge(idx, r, 0);
-            self.inner.add_edge(idx, l, 1);
-        }
-    }
-
-    pub(crate) fn replace_binary(
-        &mut self,
-        idx: NodeIndex,
-        new_left: NodeIndex,
-        new_right: NodeIndex,
-    ) {
-        let old_left = self.left(idx);
-        let old_right = self.right(idx);
-
-        // Remove existing edges
-        let edges: Vec<_> = self.inner.edges(idx).map(|e| e.id()).collect();
-        for edge_id in edges {
-            self.inner.remove_edge(edge_id);
-        }
-
-        // Add new edges
-        self.inner.add_edge(idx, new_left, 0);
-        self.inner.add_edge(idx, new_right, 1);
-
-        // Remove old children if they became orphans and aren't reused
-        if let Some(old) = old_left {
-            if old != new_left && old != new_right {
-                self.remove_if_orphan(old);
-            }
-        }
-        if let Some(old) = old_right {
-            if old != new_left && old != new_right {
-                self.remove_if_orphan(old);
-            }
-        }
-    }
-
-    pub(crate) fn replace_unary(&mut self, idx: NodeIndex, new_child: NodeIndex) {
-        let old_left = self.left(idx);
-        let old_right = self.right(idx);
-
-        // Remove existing edges
-        let edges: Vec<_> = self.inner.edges(idx).map(|e| e.id()).collect();
-        for edge_id in edges {
-            self.inner.remove_edge(edge_id);
-        }
-
-        // Add new edge
-        self.inner.add_edge(idx, new_child, 0);
-
-        // Remove old children if they became orphans
-        if let Some(old) = old_left {
-            if old != new_child {
-                self.remove_if_orphan(old);
-            }
-        }
-        if let Some(old) = old_right {
-            if old != new_child {
-                self.remove_if_orphan(old);
-            }
-        }
-    }
-
-    pub(crate) fn set_op(&mut self, idx: NodeIndex, op: Operator) {
-        if let Node::Operator { op: ref mut o, .. } = self.inner[idx] {
-            *o = op;
-        }
-    }
-
-    pub(crate) fn remove_if_orphan(&mut self, idx: NodeIndex) {
-        // Don't remove if node doesn't exist
-        if self.inner.node_weight(idx).is_none() {
-            return;
-        }
-
-        // Check if this node has any incoming edges (is used by someone)
-        if self.inner.edges_directed(idx, Direction::Incoming).next().is_some() {
-            return; // Not an orphan, still in use
-        }
-
-        // Collect children before removing
-        let children: Vec<NodeIndex> = self.inner.edges(idx).map(|e| e.target()).collect();
-
-        // Remove the node (also removes its edges)
-        self.inner.remove_node(idx);
-
-        // Recursively check if children became orphans
-        for child in children {
-            self.remove_if_orphan(child);
-        }
+    #[inline(always)]
+    pub(crate) fn ty(&self, idx: NodeIndex) -> Type {
+        self.inner[idx].ty()
     }
 
     fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, weight: usize) {
@@ -389,11 +354,10 @@ impl Forest {
                 Node::TupleIndex { index, .. } => format!("{}.{index}", left.unwrap()),
                 Node::Cast { ty, .. } => format!("({} as {ty})", left.unwrap()),
 
-                Node::Assignment { op, .. } => {
-                    let op = op.map(|o| o.to_string()).unwrap_or_default();
-                    let l = left.unwrap();
-                    let _ = writeln!(out, "{indent}{l} {op}= {};", right.unwrap());
-                    l.clone()
+                Node::Assignment { name, op, .. } => {
+                    let op_str = op.map(|o| o.to_string()).unwrap_or_default();
+                    let _ = writeln!(out, "{indent}{} {op_str}= {};", left.unwrap(), right.unwrap());
+                    name.clone()
                 }
             };
 

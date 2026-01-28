@@ -25,6 +25,12 @@ enum ExprKind {
     Cast,
 }
 
+enum AssignementKind {
+    Direct,
+    Index(usize, Type),
+    TupleIndex(usize, Type)
+}
+
 impl Forest {
     pub fn random(&mut self, random: &mut impl Rng, ctx: &Context) {
         let expr_count = random.random_range(ctx.min_expression_count..ctx.max_expression_count);
@@ -57,24 +63,63 @@ impl Forest {
         self.variable(name, &ty, mutable, idx);
     }
 
-    // VAR = EXPR
+    // EXPR OP?= EXPR
     fn gen_assignement(&mut self, random: &mut impl Rng, ctx: &Context) {
         let (&variable, _) = self.mutables.iter().choose(random).unwrap();
         let ty = self.inner[variable].ty();
-        let value = self.build_expr(random, ctx, &ty, 0);
 
-        let op = if random.random_bool(ctx.compound_assignment_probability) {
-            self.binary_ops_for_kind(ty.kind()).and_then(|ops| ops.choose(random).copied())
-        } else {
-            None
-        };
-
-        // Prevent self-assignment without operator (a = a), but allow compound (a op= a)
-        if op.is_none() && variable == value {
-            return;
+        let mut choices = vec![AssignementKind::Direct];
+        match &ty {
+            Type::Array(a) if a.size > 0 => {
+                let idx = random.random_range(0..a.size);
+                choices.push(AssignementKind::Index(idx, a.ty.as_ref().clone()));
+            }
+            Type::Slice(s) if s.size > 0 => {
+                let idx = random.random_range(0..s.size);
+                choices.push(AssignementKind::Index(idx, s.ty.as_ref().clone()));
+            }
+            Type::Tuple(t) if !t.elements.is_empty() => {
+                let pos = random.random_range(0..t.elements.len());
+                choices.push(AssignementKind::TupleIndex(pos, t.elements[pos].clone()));
+            }
+            _ => {}
         }
 
-        self.assignement(op, &ty, value, variable);
+        match choices.choose(random).unwrap() {
+            AssignementKind::Direct => {
+                let value = self.build_expr(random, ctx, &ty, 0);
+
+                let op = if random.random_bool(ctx.compound_assignment_probability) {
+                    self.binary_ops_for_kind(ty.kind()).and_then(|ops| ops.choose(random).copied())
+                } else {
+                    None
+                };
+
+                self.assignement(op, &ty, value, variable);
+            }
+            AssignementKind::Index(idx, elem_ty) => {
+                let value = self.build_expr(random, ctx, &elem_ty, 0);
+
+                let op = if elem_ty.is_primitive() && random.random_bool(ctx.compound_assignment_probability) {
+                    self.binary_ops_for_kind(elem_ty.kind()).and_then(|ops| ops.choose(random).copied())
+                } else {
+                    None
+                };
+
+                self.indexed_assignment(op, *idx, &elem_ty, value, variable);
+            }
+            AssignementKind::TupleIndex(pos, elem_ty) => {
+                let value = self.build_expr(random, ctx, &elem_ty, 0);
+
+                let op = if elem_ty.is_primitive() && random.random_bool(ctx.compound_assignment_probability) {
+                    self.binary_ops_for_kind(elem_ty.kind()).and_then(|ops| ops.choose(random).copied())
+                } else {
+                    None
+                };
+
+                self.tuple_field_assignment(op, *pos, &elem_ty, value, variable);
+            }
+        }
     }
 
     fn build_expr(

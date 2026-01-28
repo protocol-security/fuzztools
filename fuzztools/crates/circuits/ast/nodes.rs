@@ -32,7 +32,7 @@ pub(crate) enum Node {
     /// - Edge 1 points to the value expression.
     ///
     /// If `op` is Some, this is a compound assignment (`x += 5`, `x -= 5`, etc...).
-    Assignment { op: Option<Operator>, ty: Type },
+    Assignment { name: String, op: Option<Operator>, ty: Type },
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
