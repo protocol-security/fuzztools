@@ -56,7 +56,7 @@
     "field_weight": 15,
     "unsigned_weight": 10,
     "signed_weight": 15,
-    "boolean_weight": 8,
+    "bool_weight": 8,
     "string_weight": 3,
     "array_weight": 8,
     "slice_weight": 8,
@@ -65,7 +65,7 @@
     "lambda_weight": 5,
     "empty_weight": 1,
 
-    "operator_weight": 20,
+    "expression_weight": 20,
     "unary_weight": 15,
     "index_weight": 10,
     "tuple_index_weight": 10,
@@ -98,7 +98,7 @@
     "leaf_expr_weight": 5,
     "use_existing_expr_weight": 15,
 
-    "max_type_depth": 5,
+    "max_type_depth": 2,
     "max_expr_depth": 5,
     "leaf_probability": 0.4,
     "reuse_variable_probability": 0.75,
