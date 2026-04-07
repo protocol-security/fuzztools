@@ -1,5 +1,7 @@
 ## Fuzztools
 
+![fuzztools](https://github.com/user-attachments/assets/9c86b1ff-4456-4909-850b-64c8af704c8f)
+
 This crate implements a structure-aware fuzzing framework that we will be reusing in our fuzzers.
 
 ### Modules
