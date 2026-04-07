@@ -1,5 +1,7 @@
 # Noiruzz
 
+![noiruzz](https://github.com/user-attachments/assets/31235d95-9855-402a-8679-f96b800f1de6)
+
 Metamorphic fuzzer for the Noir compiler. What it does is creates an AST representing a circuit, apply equivalence operations on top (which by definition mean the program output does not change) and checks whether it returns something different or if it returns a non-expected error.
 
 ## Hall of fame 🏆
