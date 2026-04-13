@@ -10,7 +10,7 @@ This folder holds `rakoon`, a transaction fuzzer for the Ethereum Protocol. Huge
 - Crash in anvil -> [PR link](https://github.com/foundry-rs/foundry/issues/10444)
 - Crash in anvil -> [PR link](https://github.com/foundry-rs/foundry/issues/11435)
 - Crash in go-ethereum -> [PR link](https://github.com/ethereum/go-ethereum/pull/32544)
-- Crash in reth -> `pending...`
+- Crash in reth -> `[PR link](https://github.com/paradigmxyz/reth/pull/17581)`
 
 ## Fast commands
 
